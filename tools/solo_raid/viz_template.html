@@ -117,7 +117,27 @@ li { margin: 3px 0; }
 .calc .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 10px; font-size: 14px; }
 .calc select, .calc input[type=number], .calc input[type=date] { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; }
 .calc input[type=number] { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
-.calc input[type=range] { flex: 1 1 220px; min-width: 160px; accent-color: var(--pred); }
+.calc { --tl-acc: var(--pred); }
+/* 시점 타임라인: 슬라이더 하나가 챌린지 전체를 덮고, 아래 일차 칸이 같은 축에 붙는다 (손잡이 반지름 9px만큼 안쪽에 맞춤) */
+.tl { margin: 4px 0 12px; }
+.tl-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 14px; margin-bottom: 4px; }
+.tl-row { display: flex; align-items: flex-start; gap: 8px; }
+.tl-step { flex: none; font: inherit; font-size: 12px; line-height: 1; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; margin-top: 1px; cursor: pointer; }
+.tl-track { position: relative; flex: 1 1 auto; min-width: 0; }
+.tl input[type=range] { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 26px; margin: 0; background: transparent; cursor: pointer; }
+.tl input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px;
+  background: linear-gradient(to right, var(--tl-acc) calc(9px + (100% - 18px) * var(--f, 0)), var(--border) 0); }
+.tl input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--border); }
+.tl input[type=range]::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--tl-acc); }
+.tl input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; box-sizing: border-box; width: 18px; height: 18px; margin-top: -6px; border-radius: 50%; background: var(--surface-1); border: 3px solid var(--tl-acc); }
+.tl input[type=range]::-moz-range-thumb { box-sizing: border-box; width: 18px; height: 18px; border-radius: 50%; background: var(--surface-1); border: 3px solid var(--tl-acc); }
+.tl input[type=range]:focus-visible { outline: 2px solid var(--tl-acc); outline-offset: 2px; border-radius: 4px; }
+.tl-days { display: grid; margin: 0 9px; border-left: 1px solid var(--axis); }
+.tl-days button { min-width: 0; font: inherit; font-size: 12.5px; line-height: 1.3; color: var(--text-secondary); background: transparent; border: 0; border-right: 1px solid var(--axis); padding: 3px 2px 4px; cursor: pointer; text-align: center; white-space: nowrap; overflow: hidden; }
+.tl-days button small { display: block; font-size: 11px; color: var(--text-muted); }
+.tl-days button[aria-pressed="true"] { color: var(--text-primary); font-weight: 650; background: var(--band-strong); border-radius: 0 0 6px 6px; }
+.tl-ends { display: flex; justify-content: space-between; margin: 1px 9px 0; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) { .tl-days .wd { display: none; } }
 .calc .when { font-weight: 650; font-variant-numeric: tabular-nums; min-width: 150px; }
 .calcgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
 .calcbox { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
@@ -146,10 +166,17 @@ li { margin: 3px 0; }
     <p class="muted">같은 점수라도 뒤에 들어오는 사람에게 밀려 %가 내려갑니다. 모델(여러 시즌 % 변환)의 「최종 % ÷ 지금 %」 배율로 바꿉니다.
       시점은 챌린지 시작 기준 — 1일차는 05:00 KST에 시작해 다음 날 04:59까지입니다. 배율은 지금 %와 상관없이 시점에만 달려 있습니다(모델 가정).</p>
     <div class="calc">
-      <div class="row">
-        <label>시점 <select id="cDay"></select></label>
-        <input type="range" id="cHour" min="0" max="47" step="1" value="19" aria-label="시각">
-        <span class="when" id="cWhen"></span>
+      <div class="tl">
+        <div class="tl-head"><span>시점</span> <span class="when" id="cWhen"></span></div>
+        <div class="tl-row">
+          <button class="tl-step" id="cPrev" aria-label="30분 전">◀</button>
+          <div class="tl-track" id="cTrack">
+            <input type="range" id="cT" min="0" max="239" step="1" value="67" aria-label="시점 (챌린지 시작부터 30분 단위)">
+            <div class="tl-days" id="cDays"></div>
+            <div class="tl-ends"><span>05:00 시작</span><span>04:59 종료</span></div>
+          </div>
+          <button class="tl-step" id="cNext" aria-label="30분 뒤">▶</button>
+        </div>
       </div>
       <div class="row">
         <label>시즌 시작일 <input type="date" id="cStart"></label>
@@ -429,24 +456,45 @@ function dayMedianP(h) {
   const d = Math.min(CV.day_median.length - 1, Math.floor(h / 24));
   return CV.day_median[d] * (CV.day_median_m[SV] || 1);
 }
-const cDay = document.getElementById("cDay"), cHour = document.getElementById("cHour");
-cDay.innerHTML = Array.from({length: Math.ceil(DATA.conv.H / 24)}, (_, i) => i + 1).map(d => `<option value="${d}">${d}일차</option>`).join("");
-cDay.value = "2";
+// 시점 타임라인: 슬라이더 하나(30분 칸)가 챌린지 전체를 덮고, 아래 일차 칸이 같은 가로축에 붙는다
+const cT = document.getElementById("cT"), cDays = document.getElementById("cDays");
+cT.max = String(Math.round(CV.H * 2) - 1);
+function setH(h) { cT.value = String(Math.round(Math.max(0, Math.min(CV.H - 0.5, h)) * 2)); }
+cDays.style.gridTemplateColumns = Array.from({length: NDAY()}, (_, d) => `${Math.min(24, CV.H - d * 24)}fr`).join(" ");
+let daysKey = null;
+function paintTL(h) {
+  const key = START || "-";   // 시작일이 바뀔 때만 칸 글자를 다시 쓴다
+  if (key !== daysKey) {
+    daysKey = key;
+    cDays.innerHTML = Array.from({length: NDAY()}, (_, d) =>
+      `<button data-d="${d}">${d + 1}일차${START ? `<small>${whenLab(d * 24).replace(" 05:00", "").replace(/\((.)\)$/, '<span class="wd">($1)</span>')}</small>` : ""}</button>`).join("");
+  }
+  cT.style.setProperty("--f", +cT.value / +cT.max);
+  const d = Math.floor(h / 24);
+  cDays.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", +b.dataset.d === d));
+}
+cDays.addEventListener("click", e => {   // 다른 날로 가도 하루 안의 시각은 그대로
+  const b = e.target.closest("button"); if (!b) return;
+  setH(+b.dataset.d * 24 + curH() % 24); renderCalc();
+});
+document.getElementById("cPrev").onclick = () => { setH(curH() - 0.5); renderCalc(); };
+document.getElementById("cNext").onclick = () => { setH(curH() + 0.5); renderCalc(); };
 const cLev = document.getElementById("cLev");
 const LEVS = Object.keys(CV.levels).sort((a, b) => DATA.seasons[a].n - DATA.seasons[b].n);
 cLev.innerHTML = [["avg", "여러 시즌 평균"]].concat(LEVS.map(s => [s, s])).map(([k, v]) => `<button data-v="${k}">${v}</button>`).join("");
 cLev.addEventListener("click", e => { const b = e.target.closest("button"); if (b) { LEV = b.dataset.v; renderCalc(); } });
-for (const id of ["cDay", "cHour", "cNow", "cTgt"]) document.getElementById(id).addEventListener("input", renderCalc);
+for (const id of ["cT", "cNow", "cTgt"]) document.getElementById(id).addEventListener("input", renderCalc);
 const cStart = document.getElementById("cStart");
 cStart.value = START;
 cStart.addEventListener("change", () => { START = cStart.value; try { localStorage.setItem("solo-raid-start", START); } catch (e) {} renderConv(); });
 cStart.addEventListener("input", () => { START = cStart.value; renderConv(); });
-const curH = () => (+cDay.value - 1) * 24 + (+cHour.value) * 0.5;
+const curH = () => +cT.value * 0.5;
 function renderCalc() {
   cLev.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === LEV));
   document.getElementById("cLevNote").textContent = LEV === "avg" ? "새 시즌은 수준을 모르니 평균 + 넓은 구간" :
     `${LEV} 수준 배수 ${CV.levels[LEV]} (그 시즌처럼 밀리면) — 시즌 간 차이를 뺀 좁은 구간`;
   const h = curH();
+  paintTL(h);
   document.getElementById("cWhen").textContent = `${whenLab(h)} · 시작 후 ${h.toFixed(1)}시간`;
   const {P, sd} = convAt(h, LEV);
   const now = +document.getElementById("cNow").value, tgt = +document.getElementById("cTgt").value;
