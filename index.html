@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>니케 솔로레이드 컷</title>
+<meta name="description" content="승리의 여신: 니케 솔로레이드 지난 시즌 커트라인과 진행 중 시즌 예측">
+<style>
+:root {
+  color-scheme: light;
+  --surface-0: #f4f3f0; --surface-1: #fcfcfb; --border: #e2e0da; --grid: #ebe9e4; --axis: #b9b7b0;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #77756f;
+  --band: rgba(82, 81, 78, 0.10);
+  --t1: #104281; --t3: #2a78d6; --t10: #86b6ef;
+  --truth: #c43c3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19; --border: #2f2e2b; --grid: #2a2927; --axis: #55534e;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a988f;
+    --band: rgba(195, 194, 183, 0.10);
+    --t1: #b7d3f6; --t3: #3987e5; --t10: #1c5cab;
+    --truth: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #121211; --surface-1: #1a1a19; --border: #2f2e2b; --grid: #2a2927; --axis: #55534e;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a988f;
+  --band: rgba(195, 194, 183, 0.10);
+  --t1: #b7d3f6; --t3: #3987e5; --t10: #1c5cab;
+  --truth: #e66767;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--surface-0); color: var(--text-primary);
+  font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+}
+a { color: var(--t3); }
+main { max-width: 1080px; margin: 0 auto; padding: 28px 16px 64px; }
+h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+h2 { font-size: 19px; margin: 0 0 4px; }
+p { margin: 6px 0; }
+.sub { color: var(--text-secondary); margin: 0 0 16px; }
+.muted { color: var(--text-muted); font-size: 13px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin: 18px 0; }
+.srvbar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  background: var(--surface-0); padding: 10px 0; border-bottom: 1px solid var(--border); }
+.srvlab { font-weight: 600; font-size: 14px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { background: transparent; color: var(--text-secondary); border: 0; padding: 7px 14px; font: inherit; font-size: 14px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface-1); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 10px 0; font-size: 13.5px; }
+select { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 12px 0; }
+.tile { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface-0); }
+.tile .k { font-size: 13.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+.tile .v { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .v small { font-size: 15px; font-weight: 600; color: var(--text-secondary); margin-left: 2px; }
+.tile .r { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.grade { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 4px; font-size: 13px; color: var(--text-secondary); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.sw.band { height: 10px; opacity: .35; }
+.sw.dash { background: repeating-linear-gradient(90deg, var(--truth) 0 4px, transparent 4px 7px) !important; }
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { fill: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(0,0,0,.12); white-space: nowrap; z-index: 5; display: none; line-height: 1.45; }
+.tip .r { display: flex; align-items: center; gap: 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+th:first-child, td:first-child, th.l, td.l { text-align: left; }
+th { color: var(--text-secondary); font-weight: 600; }
+td.lock { color: var(--text-muted); }
+.tbl-wrap { overflow-x: auto; margin-top: 12px; }
+.empty { padding: 32px 12px; text-align: center; color: var(--text-muted); font-size: 13.5px; border: 1px dashed var(--border); border-radius: 10px; margin-top: 8px; }
+.note { border-left: 3px solid var(--border); padding: 2px 0 2px 12px; margin: 12px 0; color: var(--text-secondary); font-size: 13.5px; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+footer { color: var(--text-muted); font-size: 13px; margin-top: 28px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>니케 솔로레이드 컷</h1>
+  <p class="sub" id="sub"></p>
+
+  <div class="srvbar">
+    <span class="srvlab">서버</span>
+    <span class="seg" id="selSrv"></span>
+  </div>
+
+  <section class="card" id="liveCard">
+    <h2>진행 중 시즌 예측</h2>
+    <p class="muted">챌린지가 진행되는 동안 커뮤니티에 올라온 순위·점수를 모아, 시즌이 끝났을 때의 1·3·10% 컷을 예측한다. 단위는 억 점, 구간은 80% 예측 구간이다.</p>
+    <div class="controls" id="liveCtl"></div>
+    <div id="liveBody"></div>
+  </section>
+
+  <section class="card">
+    <h2>지난 시즌 커트라인</h2>
+    <p class="muted">시즌이 끝났을 때의 1·3·10% 컷 (억 점). 「잠김」은 예측 방법을 정직하게 검증하려고 따로 떼어 둔 시험 시즌이라, 최종 채점 전까지 공개하지 않는다.</p>
+    <div class="legend" id="pastLegend"></div>
+    <div class="chart" id="pastChart"></div>
+    <div class="tbl-wrap"><table id="pastTable"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>읽는 법</h2>
+    <ul>
+      <li>근거는 「커뮤니티 N건」 — 디시인사이드 니케 마이너 갤러리 · 네이버 게임 라운지 · 블라블라링크에 공개로 올라온 순위 화면과 글에서 읽은 관측 수다. 원글·사진·닉네임은 싣지 않는다.</li>
+      <li>등급은 예측을 얼마나 믿을지다: A 보통 · B 주의 · C 강한 주의 · D 숫자만 참고.</li>
+      <li>예측 방법과 지난 시즌으로 잰 정확도는 <a href="analysis.html">분석 페이지</a>에 있다.</li>
+      <li>모든 시각은 한국 시간(KST)이다.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p id="foot"></p>
+    <p>코드와 수집 방법: <a href="https://github.com/jgaram/nikke-soloraid-cutoff">github.com/jgaram/nikke-soloraid-cutoff</a> (CC0). 게임과 무관한 비공식 프로젝트다.</p>
+  </footer>
+</main>
+<script>
+const DATA = {"asof": "2026-10-16 13:42", "past": [{"season": "S19", "n": 19, "boss": "베히모스", "start": "2024-11-08", "locked": true, "cuts": {}, "n_obs": null, "src": null}, {"season": "S20", "n": 20, "boss": "백빙룡", "start": "2024-12-12", "locked": false, "cuts": {"KR": {"3": 70.5, "10": 36.0}}, "n_obs": null, "src": "table"}, {"season": "S21", "n": 21, "boss": "모더니아", "start": "2025-01-09", "locked": false, "cuts": {"KR": {"3": 91.7, "10": 55.7}}, "n_obs": null, "src": "table"}, {"season": "S22", "n": 22, "boss": "마테리얼 H", "start": "2025-02-06", "locked": false, "cuts": {"KR": {"3": 88.0, "10": 46.0}}, "n_obs": null, "src": "table"}, {"season": "S23", "n": 23, "boss": "거대 질량체 Q", "start": "2025-03-06", "locked": false, "cuts": {"KR": {"3": 75.0, "10": 47.0}}, "n_obs": null, "src": "table"}, {"season": "S24", "n": 24, "boss": "검은 뱀", "start": "2025-04-03", "locked": true, "cuts": {}, "n_obs": null, "src": null}, {"season": "S25", "n": 25, "boss": "글러트니", "start": "2025-05-08", "locked": false, "cuts": {"KR": {"3": 122.7, "10": 84.0}}, "n_obs": null, "src": "table"}, {"season": "S26", "n": 26, "boss": "프로비던스", "start": "2025-07-03", "locked": false, "cuts": {"KR": {"3": 165.0, "10": 110.0}}, "n_obs": null, "src": "table"}, {"season": "S27", "n": 27, "boss": "환영 크라켄", "start": "2025-07-24", "locked": false, "cuts": {"KR": {"3": 145.3, "10": 93.9}}, "n_obs": null, "src": "table"}, {"season": "S28", "n": 28, "boss": "지즈", "start": "2025-08-21", "locked": false, "cuts": {"KR": {"3": 146.0, "10": 97.0}}, "n_obs": null, "src": "table"}, {"season": "S29", "n": 29, "boss": "마더 웨일", "start": "2025-09-16", "locked": true, "cuts": {}, "n_obs": null, "src": null}, {"season": "S30", "n": 30, "boss": "차가운 심판자", "start": "2025-10-09", "locked": true, "cuts": {}, "n_obs": null, "src": null}, {"season": "S31", "n": 31, "boss": "퀸 001", "start": "2025-11-13", "locked": false, "cuts": {"KR": {"3": 192.1, "10": 133.5}}, "n_obs": null, "src": "table"}, {"season": "S32", "n": 32, "boss": "알트아이젠", "start": "2025-12-11", "locked": false, "cuts": {"KR": {"3": 198.8}}, "n_obs": null, "src": "table"}, {"season": "S33", "n": 33, "boss": "온리 원", "start": "2026-01-08", "locked": false, "cuts": {"KR": {"3": 196.5, "10": 134.6}}, "n_obs": null, "src": "table"}, {"season": "S34", "n": 34, "boss": "앨트루이아", "start": "2026-02-19", "locked": true, "cuts": {}, "n_obs": null, "src": null}, {"season": "S35", "n": 35, "boss": "크리스탈 체임버", "start": "2026-03-20", "locked": false, "cuts": {"KR": {"1": 243.62, "3": 229.6, "10": 154.9}, "JP": {"3": 199.21, "10": 103.0}, "GL": {}}, "n_obs": 1047, "src": "analysis"}, {"season": "S36", "n": 36, "boss": "에고비스타", "start": "2026-04-30", "locked": false, "cuts": {"KR": {"1": 253.3, "3": 229.65, "10": 152.6}, "JP": {"3": 199.07, "10": 114.0}, "GL": {}}, "n_obs": 1061, "src": "analysis"}, {"season": "S37", "n": 37, "boss": "울트라", "start": "2026-05-28", "locked": true, "cuts": {}, "n_obs": null, "src": null}, {"season": "S38", "n": 38, "boss": "애니힐리오", "start": "2026-07-03", "locked": false, "cuts": {"KR": {"1": 324.84, "3": 302.4, "10": 222.0}, "JP": {"3": 277.08, "10": 159.29}, "GL": {}}, "n_obs": 768, "src": "analysis"}, {"season": "S39", "n": 39, "boss": "아일랜드 이터", "start": "2026-07-16", "locked": false, "cuts": {"KR": {"3": 314.03, "10": 221.5}, "JP": {"3": 283.02, "10": 140.0}, "GL": {}}, "n_obs": 699, "src": "analysis"}, {"season": "S40", "n": 40, "boss": "사치스러운 거미", "start": "2026-08-20", "locked": false, "cuts": {"KR": {"1": 291.36, "3": 272.14, "10": 186.6}, "JP": {"3": 233.53, "10": 121.0}, "GL": {}}, "n_obs": 768, "src": "analysis"}, {"season": "S41", "n": 41, "boss": "리버렐리오 바디", "start": "2026-09-24", "locked": false, "cuts": {"KR": {"1": 265.54, "3": 250.35, "10": 179.0}, "JP": {"3": 223.17, "10": 137.0}, "GL": {"3": 195.0, "10": 110.0}}, "n_obs": 679, "src": "analysis"}], "live": [], "analysis": {"seasons": ["S35", "S36", "S38", "S39", "S40", "S41"], "stamp": {"xval_head": "7f8361e", "answer_key_final": false, "prior": "S35+S36+S38+S39+S40+S41"}}};
+const SRV = {KR: "한섭", JP: "일섭", GL: "글섭"};
+const PCTS = ["1", "3", "10"];
+const COL = p => `var(--t${p})`;
+const NS = "http://www.w3.org/2000/svg";
+const fmt = (v, d = 1) => v == null ? "–" : v.toLocaleString("ko-KR", {minimumFractionDigits: d, maximumFractionDigits: d});
+let srv = "KR";
+try { const s = localStorage.getItem("nsp-srv"); if (SRV[s]) srv = s; } catch (e) {}
+
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function mkTip(host) {
+  const t = document.createElement("div"); t.className = "tip"; host.appendChild(t);
+  return {
+    show(html, px, py) {
+      t.innerHTML = html; t.style.display = "block";
+      const W = host.clientWidth, tw = t.offsetWidth, th = t.offsetHeight;
+      let x = px + 14; if (x + tw > W) x = px - tw - 14; if (x < 0) x = 0;
+      let y = py - th - 10; if (y < 0) y = py + 14;
+      t.style.left = x + "px"; t.style.top = y + "px";
+    },
+    hide() { t.style.display = "none"; }
+  };
+}
+function empty(host, msg) {
+  const p = document.createElement("div"); p.className = "empty"; p.textContent = msg; host.appendChild(p);
+}
+function niceTicks(lo, hi, n = 5) {
+  const span = hi - lo || 1, step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= n) || 10 * mag;
+  const L = Math.floor(lo / step) * step, Hh = Math.ceil(hi / step) * step;
+  const out = []; for (let v = L; v <= Hh + 1e-9; v += step) out.push(+v.toFixed(6));
+  return {ticks: out, lo: L, hi: Hh};
+}
+// 공통 축: o = {W, H, m:{l,r,t,b}, xlo, xhi, ylo, yhi}
+function frame(host, o) {
+  const svg = el("svg", {viewBox: `0 0 ${o.W} ${o.H}`, role: "img"}); host.appendChild(svg);
+  const x0 = o.m.l, x1 = o.W - o.m.r, y0 = o.H - o.m.b, y1 = o.m.t;
+  const X = v => x0 + (v - o.xlo) / (o.xhi - o.xlo || 1) * (x1 - x0);
+  const Y = v => y0 - (v - o.ylo) / (o.yhi - o.ylo || 1) * (y0 - y1);
+  for (const v of o.yt) {
+    el("line", {x1: x0, x2: x1, y1: Y(v), y2: Y(v), stroke: "var(--grid)"}, svg);
+    el("text", {x: x0 - 6, y: Y(v) + 4, "text-anchor": "end"}, svg).textContent = v;
+  }
+  el("line", {x1: x0, x2: x1, y1: y0, y2: y0, stroke: "var(--axis)"}, svg);
+  return {svg, X, Y, x0, x1, y0, y1};
+}
+
+// ---------- 서버 선택 ----------
+function drawSrv() {
+  const host = document.getElementById("selSrv"); host.innerHTML = "";
+  for (const s of Object.keys(SRV)) {
+    const b = document.createElement("button");
+    b.textContent = SRV[s]; b.setAttribute("aria-pressed", s === srv);
+    b.onclick = () => { srv = s; try { localStorage.setItem("nsp-srv", s); } catch (e) {} drawAll(); };
+    host.appendChild(b);
+  }
+}
+
+// ---------- 진행 중 시즌 ----------
+let liveSel = null;
+function drawLive() {
+  const ctl = document.getElementById("liveCtl"), body = document.getElementById("liveBody");
+  ctl.innerHTML = ""; body.innerHTML = "";
+  const L = DATA.live.filter(x => x.preds.length);
+  if (!L.length) { empty(body, "지금 예측을 내고 있는 시즌이 없다. 다음 시즌 챌린지가 열리면 시점마다 갱신된다."); return; }
+  if (!liveSel || !L.find(x => x.season === liveSel)) liveSel = (L.find(x => !x.done) || L[L.length - 1]).season;
+  if (L.length > 1) {
+    const lab = document.createElement("label"); lab.textContent = "시즌 ";
+    const sel = document.createElement("select");
+    for (const x of L.slice().reverse()) {
+      const o = document.createElement("option"); o.value = x.season; o.textContent = `${x.season} ${x.boss || ""}${x.done ? " (끝남)" : ""}`;
+      if (x.season === liveSel) o.selected = true; sel.appendChild(o);
+    }
+    sel.onchange = () => { liveSel = sel.value; drawLive(); };
+    lab.appendChild(sel); ctl.appendChild(lab);
+  }
+  const S = L.find(x => x.season === liveSel);
+  const info = document.createElement("span"); info.className = "muted";
+  info.textContent = `${S.season} ${S.boss || ""} · 챌린지 ${S.c_start} ~ ${S.end} · ${S.done ? "끝남" : "진행 중"}`;
+  ctl.appendChild(info);
+  const P = S.preds.filter(p => p.srv[srv]);
+  if (!P.length) { empty(body, `${SRV[srv]} 예측이 아직 없다.`); return; }
+  const last = P[P.length - 1], ls = last.srv[srv], truth = S.truth[srv] || {};
+  const head = document.createElement("p");
+  head.innerHTML = `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤 (${last.T_kst || ""} KST) · 등급 <span class="grade">${ls.label || ls.grade || "–"}</span>`;
+  body.appendChild(head);
+  const tiles = document.createElement("div"); tiles.className = "tiles"; body.appendChild(tiles);
+  for (const p of PCTS) {
+    const q = ls.pts[p], t = truth[p];
+    const d = document.createElement("div"); d.className = "tile";
+    d.innerHTML = `<div class="k"><i class="sw" style="background:${COL(p)}"></i>최종 ${p}% 컷</div>`
+      + (q ? `<div class="v">${fmt(q.m)}<small>억</small></div><div class="r">80% 구간 ${fmt(q.lo)} ~ ${fmt(q.hi)}</div>`
+           : `<div class="v">–</div><div class="r">이 서버는 예측하지 않음</div>`)
+      + (t != null ? `<div class="r">실제 ${fmt(t)}억 (${q ? (q.m / t - 1 >= 0 ? "+" : "−") + Math.abs((q.m / t - 1) * 100).toFixed(1) + "%" : ""})</div>` : "");
+    tiles.appendChild(d);
+  }
+  if (p10note(ls)) { const n = document.createElement("p"); n.className = "muted"; n.textContent = p10note(ls); body.appendChild(n); }
+
+  // 시점별 예측 그래프
+  const lg = document.createElement("div"); lg.className = "legend"; body.appendChild(lg);
+  lg.innerHTML = PCTS.map(p => `<span><i class="sw" style="background:${COL(p)}"></i>${p}% 중앙</span>`).join("")
+    + `<span><i class="sw band" style="background:var(--t3)"></i>80% 구간</span>`
+    + (Object.keys(truth).length ? `<span><i class="sw dash"></i>실제 컷</span>` : "");
+  const host = document.createElement("div"); host.className = "chart"; body.appendChild(host);
+  const vals = [];
+  for (const r of P) for (const p of PCTS) { const q = r.srv[srv].pts[p]; if (q) vals.push(q.lo, q.hi); }
+  for (const p of PCTS) if (truth[p] != null) vals.push(truth[p]);
+  const nt = niceTicks(Math.min(...vals), Math.max(...vals));
+  const xt = []; for (let h = 0; h <= S.H; h += 24) xt.push(h);
+  const W = Math.max(300, host.clientWidth), narrow = W < 600;
+  const f = frame(host, {W, H: narrow ? 260 : 340, m: {l: 40, r: 12, t: 12, b: 34}, xlo: 0, xhi: S.H, ylo: nt.lo, yhi: nt.hi, yt: nt.ticks});
+  for (const h of xt) el("text", {x: f.X(h), y: f.y0 + 18, "text-anchor": "middle"}, f.svg).textContent = h ? (narrow ? `${h / 24}일` : `${h / 24}일 뒤`) : "시작";
+  for (const p of PCTS) {
+    const pts = P.map(r => [r.T, r.srv[srv].pts[p]]).filter(([, q]) => q);
+    if (!pts.length) continue;
+    const band = pts.map(([T, q]) => `${f.X(T)},${f.Y(q.hi)}`).concat(pts.slice().reverse().map(([T, q]) => `${f.X(T)},${f.Y(q.lo)}`));
+    el("polygon", {points: band.join(" "), fill: COL(p), opacity: .18}, f.svg);
+    el("polyline", {points: pts.map(([T, q]) => `${f.X(T)},${f.Y(q.m)}`).join(" "), fill: "none", stroke: COL(p), "stroke-width": 2}, f.svg);
+    for (const [T, q] of pts) el("circle", {cx: f.X(T), cy: f.Y(q.m), r: 3, fill: COL(p), stroke: "var(--surface-1)", "stroke-width": 1}, f.svg);
+    if (truth[p] != null) el("line", {x1: f.x0, x2: f.x1, y1: f.Y(truth[p]), y2: f.Y(truth[p]), stroke: "var(--truth)", "stroke-dasharray": "4 3", "stroke-width": 1.5}, f.svg);
+  }
+  const tip = mkTip(host), cur = el("line", {y1: f.y1, y2: f.y0, stroke: "var(--axis)", visibility: "hidden"}, f.svg);
+  const hit = el("rect", {x: f.x0, y: f.y1, width: f.x1 - f.x0, height: f.y0 - f.y1, fill: "transparent"}, f.svg);
+  hit.addEventListener("mousemove", ev => {
+    const bb = f.svg.getBoundingClientRect(), sx = (ev.clientX - bb.left) / bb.width * W;
+    const r = P.reduce((a, b) => Math.abs(f.X(b.T) - sx) < Math.abs(f.X(a.T) - sx) ? b : a);
+    cur.setAttribute("x1", f.X(r.T)); cur.setAttribute("x2", f.X(r.T)); cur.setAttribute("visibility", "visible");
+    const s = r.srv[srv];
+    tip.show(`<b>${r.T}시간 뒤</b> · ${r.T_kst || ""}<br>` + PCTS.filter(p => s.pts[p]).map(p =>
+      `<div class="r"><i class="sw" style="background:${COL(p)}"></i>${p}% ${fmt(s.pts[p].m)}억 <span class="muted">(${fmt(s.pts[p].lo)}~${fmt(s.pts[p].hi)})</span></div>`).join("")
+      + `<span class="muted">등급 ${s.label || s.grade || "–"}</span>`, ev.clientX - host.getBoundingClientRect().left, ev.clientY - host.getBoundingClientRect().top);
+  });
+  hit.addEventListener("mouseleave", () => { tip.hide(); cur.setAttribute("visibility", "hidden"); });
+
+  // 표
+  const wrap = document.createElement("div"); wrap.className = "tbl-wrap"; body.appendChild(wrap);
+  const rows = P.slice().reverse().map(r => {
+    const s = r.srv[srv];
+    return `<tr><td>${r.T}시간</td><td class="l">${r.T_kst || ""}</td>` + PCTS.map(p => s.pts[p]
+      ? `<td><b>${fmt(s.pts[p].m)}</b> <span class="muted">${fmt(s.pts[p].lo)}~${fmt(s.pts[p].hi)}</span></td>` : "<td>–</td>").join("")
+      + `<td class="l">${s.label || s.grade || "–"}</td></tr>`;
+  });
+  wrap.innerHTML = `<table><thead><tr><th>시점</th><th class="l">KST</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}<th class="l">등급</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+}
+function p10note(s) {
+  return s.pts["10"] ? "10% 컷은 지난 시즌의 곡선 모양을 빌려 오는 참고값이라 1·3%보다 덜 정확하다." : "";
+}
+
+// ---------- 지난 시즌 ----------
+function drawPast() {
+  const R = DATA.past, host = document.getElementById("pastChart"); host.innerHTML = "";
+  document.getElementById("pastLegend").innerHTML = PCTS.map(p => `<span><i class="sw" style="background:${COL(p)}"></i>${p}% 컷</span>`).join("")
+    + `<span><i class="sw band" style="background:var(--text-muted)"></i>잠김 (시험 시즌)</span>`;
+  const vals = R.flatMap(r => PCTS.map(p => (r.cuts[srv] || {})[p]).filter(v => v != null));
+  if (!vals.length) empty(host, `${SRV[srv]} 지난 시즌 컷이 아직 없다.`);
+  else {
+    const nt = niceTicks(0, Math.max(...vals));
+    const W = Math.max(300, host.clientWidth);
+    const f = frame(host, {W, H: W < 600 ? 240 : 320, m: {l: 40, r: 12, t: 12, b: 40}, xlo: -0.5, xhi: R.length - 0.5, ylo: 0, yhi: nt.hi, yt: nt.ticks});
+    const bw = (f.X(1) - f.X(0)), every = bw < 24 ? 2 : 1;
+    R.forEach((r, i) => {
+      if (r.locked) el("rect", {x: f.X(i) - bw / 2, y: f.y1, width: bw, height: f.y0 - f.y1, fill: "var(--band)"}, f.svg);
+      if ((R.length - 1 - i) % every === 0) el("text", {x: f.X(i), y: f.y0 + 16, "text-anchor": "middle", style: r.locked ? "opacity:.6" : null}, f.svg).textContent = r.season.slice(1);
+    });
+    el("text", {x: f.x0 - 6, y: f.y0 + 16, "text-anchor": "end"}, f.svg).textContent = "S";
+    for (const p of PCTS) {
+      let seg = [];
+      const flush = () => { if (seg.length > 1) el("polyline", {points: seg.join(" "), fill: "none", stroke: COL(p), "stroke-width": 2}, f.svg); seg = []; };
+      R.forEach((r, i) => {
+        const v = (r.cuts[srv] || {})[p];
+        if (v == null) { flush(); return; }
+        seg.push(`${f.X(i)},${f.Y(v)}`);
+      });
+      flush();
+      R.forEach((r, i) => { const v = (r.cuts[srv] || {})[p]; if (v != null) el("circle", {cx: f.X(i), cy: f.Y(v), r: 3.5, fill: COL(p), stroke: "var(--surface-1)", "stroke-width": 1.5}, f.svg); });
+    }
+    const tip = mkTip(host);
+    const hit = el("rect", {x: f.x0, y: f.y1, width: f.x1 - f.x0, height: f.y0 - f.y1, fill: "transparent"}, f.svg);
+    hit.addEventListener("mousemove", ev => {
+      const bb = f.svg.getBoundingClientRect(), sx = (ev.clientX - bb.left) / bb.width * W;
+      const i = Math.max(0, Math.min(R.length - 1, Math.round((sx - f.X(0)) / bw))), r = R[i], c = r.cuts[srv] || {};
+      const lines = r.locked ? `<span class="muted">잠김 — 최종 채점 뒤 공개</span>`
+        : PCTS.filter(p => c[p] != null).map(p => `<div class="r"><i class="sw" style="background:${COL(p)}"></i>${p}% ${fmt(c[p], 2)}억</div>`).join("") || `<span class="muted">${SRV[srv]} 컷 없음</span>`;
+      tip.show(`<b>${r.season} ${r.boss}</b> · ${r.start}<br>${lines}`, ev.clientX - host.getBoundingClientRect().left, ev.clientY - host.getBoundingClientRect().top);
+    });
+    hit.addEventListener("mouseleave", () => tip.hide());
+  }
+  const rows = R.slice().reverse().map(r => {
+    const c = r.cuts[srv] || {};
+    const cells = r.locked ? `<td class="lock" colspan="3">잠김</td>` : PCTS.map(p => `<td>${c[p] != null ? fmt(c[p], 2) : "–"}</td>`).join("");
+    const src = r.locked ? "" : r.n_obs ? `커뮤니티 ${r.n_obs.toLocaleString("ko-KR")}건` : r.src === "table" ? "집계표 (한섭 3·10%)" : "";
+    return `<tr><td>${r.season}</td><td class="l">${r.boss}</td><td class="l">${r.start}</td>${cells}<td class="l muted">${src}</td></tr>`;
+  });
+  document.getElementById("pastTable").innerHTML =
+    `<thead><tr><th>시즌</th><th class="l">보스</th><th class="l">시작</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}<th class="l">근거</th></tr></thead><tbody>${rows.join("")}</tbody>`;
+}
+
+function drawAll() { drawSrv(); drawLive(); drawPast(); }
+document.getElementById("sub").textContent = `${DATA.asof} KST 기준 · 한섭·일섭·글섭`;
+document.getElementById("foot").textContent = `분석에 든 개발 시즌: ${DATA.analysis.seasons.join(" · ") || "없음"} · 분석 도구 ${DATA.analysis.stamp.xval_head || ""}`;
+drawAll();
+let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(drawAll, 150); });
+</script>
+</body>
+</html>
