@@ -8,7 +8,7 @@ python3 -I tools/solo_raid/review.py data/solo-raid/S{n}/state [--write]
 
 고르는 것 (kind)
 - truth_flag: 서버가 붙은 정답 점(truth_points, 등급 A·A2·C)에 강한 플래그(mono_viol·verify_unresolved·curve_outlier)가 있음. 점마다 하나.
-- truth_flag_group: 약한 플래그(ctx_overridden·season_conflict·verify_differ 등, best_record 빼고)는 플래그마다 한 항목으로 묶는다 (사진 목록).
+- truth_flag_group: 약한 플래그(ctx_overridden·season_conflict·verify_differ 등, best_record·rank_over_200 빼고)는 플래그마다 한 항목으로 묶는다 (사진 목록).
   묶음은 표본 몇 장을 보고 판단해도 된다 (S38 season_conflict처럼 수가 많을 때).
 - rank_server: 순위표 1~3위 정확 점수가 같은데 그 사진들 글의 텍스트 서버(text·fix)가 다름 → 소수 쪽 글 (3.2b S39 5881317 같은 경우).
 - cluster_mixed: 지문 묶음의 앵커 글이 두 서버 이상 (server_summary clusters). 소수 쪽 앵커 글을 적는다.
@@ -17,6 +17,8 @@ python3 -I tools/solo_raid/review.py data/solo-raid/S{n}/state [--write]
   점수의 「주인」은 그 점수가 가장 많이 나온 시즌이다. 주인이 다른 시즌이고 그 시즌 횟수가 이 시즌의 2배 이상일 때만 고른다
   (순위표 상위권 점수는 그 시즌에 수십~수백 번 나온다).
 - outlier: post_outlier가 곡면에서 크게 벗어났다고 본 줄 (surface_high·surface_low).
+- rank_over_200: 시즌 안(season in)·빼지 않은 줄인데 게임 화면 등수가 200을 넘음 (post_exclude flag rank_over_200). 사진마다 하나.
+  게임은 200위까지만 등수다 (2026-10-16) — 원본에서 그 숫자가 무엇인지(배지 등), 같은 줄의 %·점수도 잘못 읽혔는지 본다.
 - shaky (개발 시즌만): 정답 표에서 집계표와 정답 곡선이 2% 넘게 어긋남 (truth_grade 규칙).
 
 시험 시즌(split.json test): 집계표(seasons.json 컷·server_cutoffs.csv)와 견주지 않는다 (shaky를 고르지 않음). review.json에 % ·점수 값을 쓰지 않는다
@@ -90,7 +92,7 @@ def collect(state):
                     site=d["site"], img=d["img"], row=d["row"], pct=val(t["pct"]), score=val(t["score"]))
             else:
                 for f in t["flags"]:
-                    if f != "best_record":
+                    if f not in ("best_record", "rank_over_200"):   # rank_over_200은 아래 사진별 항목으로
                         group[f].append(f"{d['img']}#{d['row']}")
     for f, lst in sorted(group.items()):
         add("truth_flag_group", f, f"정답 점 {len(lst)}개에 {f}", imgs=sorted(set(lst)))
@@ -181,6 +183,18 @@ def collect(state):
             r = obs[o["oi"]]
             add("outlier", f"{r['img']}#{r['row']}", f"{','.join(fl)} z={o.get('z')}", site=r["site"], img=r["img"], row=r["row"],
                 pct=val(r.get("pct")), score=val(r.get("score")))
+
+    # rank_over_200 (사진마다)
+    px = jl(os.path.join(state, "post_exclude.jsonl"))
+    over = collections.defaultdict(list)
+    if len(px) == len(obs):
+        for o, x in zip(obs, px):
+            if "rank_over_200" in x["flag"] and not x["exclude"] and o.get("season") == "in":
+                over[o["img"]].append(o)
+    for img, rows in sorted(over.items()):
+        r0 = rows[0]
+        add("rank_over_200", img, f"등수 {sorted({r['rank'] for r in rows})} ({len(rows)}줄, 화면 {sorted({str(r.get('screen')) for r in rows})})",
+            site=r0["site"], no=str(r0["no"]), img=img, rows=[r["row"] for r in rows])
 
     # shaky (개발 시즌만)
     if not test:

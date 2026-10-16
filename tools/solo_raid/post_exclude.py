@@ -9,8 +9,9 @@ ocr.jsonl·ocr2.jsonl, 그리고 수동 판정 STATE/post_manual_season.json(있
 - --parsed: 코드 판독 줄 ({id, rows:[{rank,pct,score}]}). STATE/parsed.jsonl이 있으면 기본으로 읽는다.
 - --alt: 같은 사진의 다른 판독 ({img,row,pct,score}, 예: 재수집 obs_images.jsonl).
 출력: STATE/post_exclude.jsonl — obs.jsonl 한 줄마다, 같은 순서로
-  {oi, site, img, row, exclude:[…], flag:[…], pct_use, score_use, why}
+  {oi, site, img, row, exclude:[…], flag:[…], pct_use, score_use, rank_use, why}
   oi = obs.jsonl 줄 번호(0부터). score_use는 억 단위, 0.1억 반올림. pct_use는 %.
+  rank_use는 게임 화면 등수 1~200만 (200을 넘으면 null, flag rank_over_200). 트래커 화면은 null.
 표준 출력에 사유별 줄 수 (전체, 시즌 안 % 관측 = season in·pct 있음·tracker 아님).
 
 exclude (기본으로 뺀다)
@@ -37,6 +38,9 @@ flag (빼지 않고 표시만)
 - season_conflict: 사진 근거끼리 이번·지난 시즌이 엇갈린다.
 - curve_outlier: 수집 단계 unsure(곡선 밖)였지만 사진 근거로 이번 시즌이 됐다. 점수 판독을 의심한다.
 - score_short: 게임 화면 점수가 9자리 이하 (자릿수가 빠졌을 수 있다).
+- rank_over_200: 게임 화면(트래커 아님)의 등수가 200을 넘는다. 게임은 200위까지만 등수로 보여 주고 그 아래는 %다 (사용자 확인,
+  2026-10-16). 배지 숫자 같은 다른 숫자를 등수로 읽은 줄로 보인다 — %·점수도 함께 잘못 읽었는지 review.py 후보 rank_over_200으로 다시 본다.
+  rank_use는 null. S31~S41 obs 311줄(대부분 % 있는 순위표 줄).
 - best_record: 판독 메모에 「나의 최고 기록」·BEST DAMAGE가 나오는 줄 (트래커 제외). 「나의 최고 기록」 줄의 %는 지금 %가 아니라
   그 기록을 세운 때의 %일 수 있다 (S41 oi 2039: 종료 후 올린 my_rank 1.40%·250.4억, 한섭 종료 3% 컷 250.35억). 2026-10-16.
 - other_raid_maybe: 메모에 협동작전·유니온 레이드가 나오지만 확실하지 않다.
@@ -77,6 +81,7 @@ KST_MONTH = re.compile(r"(?<!\d)(?:(\d{2})\s?년\s?)?(\d{1,2})(?:\s?~\s?(\d{1,2}
 YYMM = re.compile(r"(?<![\d.])(\d{2})\.(\d{2})(?![\d.]|\s*(?:%|퍼))")
 S_NUM = re.compile(r"(?<![A-Za-z0-9])[Ss]\s?(\d{2})(?!\d)")
 PCT = re.compile(r"(?<![\d.])(\d{1,2}(?:\.\d{1,2})?)\s*(?:%|퍼)")
+RANK_MAX = 200   # 게임 화면은 200위까지 등수, 그 아래는 % (사용자 확인, 2026-10-16)
 EOK = re.compile(r"(\d{1,3}(?:\.\d{1,2})?)\s*억")
 EOK_AFTER = re.compile(r"\s*\)?\s*(\d{1,3}(?:\.\d{1,2})?)\s*억")
 LONG = re.compile(r"(?<!\d)(\d{1,3}(?:,\d{3}){2,3})(?!\d)")
@@ -361,6 +366,11 @@ def main():
             fl.append("score_short")
         if scr != "tracker" and BEST_RECORD.search(note):
             fl.append("best_record")
+        rank = o.get("rank")
+        rank_use = rank if scr != "tracker" and isinstance(rank, int) and 1 <= rank <= RANK_MAX else None
+        if scr != "tracker" and isinstance(rank, (int, float)) and rank > RANK_MAX:
+            fl.append("rank_over_200")
+            why.append(f"등수 {rank}: 게임 화면 등수는 {RANK_MAX}위까지")
 
         if sea != "out":
             s, swhy = img_season(o["img"])
@@ -399,7 +409,7 @@ def main():
                 why.append("판독 차이: 받침 없음" + (f", % 어긋남 {bad}" if bad else "") + " → 원값 그대로")
         rec = {"oi": oi, "site": o.get("site"), "img": o["img"], "row": o["row"],
                "exclude": list(dict.fromkeys(ex)), "flag": list(dict.fromkeys(fl)),
-               "pct_use": pct_use, "score_use": score_use, "why": " / ".join(why)[:300]}
+               "pct_use": pct_use, "score_use": score_use, "rank_use": rank_use, "why": " / ".join(why)[:300]}
         out.append(rec)
         core = sea == "in" and o.get("pct") is not None and scr != "tracker"
         for k in rec["exclude"] or ["(none)"]:

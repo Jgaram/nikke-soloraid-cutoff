@@ -27,6 +27,8 @@ surf 열을 붙인다 (다르면 멈춘다 — post_all.sh로 다시 돌린다).
   (h = 챌린지 시작 후 시간. C는 t = 상한. 확실한 종료 후는 day_lo == "post")
 - h_lo_top7 · h_hi_top7: post_time.jsonl의 top7 시각 구간 (B·C 사진만, 없으면 null. 주장은 null). h_lo·h_hi·t_grade와 따로 둔다
 - pct: 사진은 post_exclude의 pct_use, 주장은 글에 적은 %. score: 0.1억 (사진은 score_use). score_raw: 억, 반올림 안 함
+- rank: 등수 1~200 (사진은 post_exclude의 rank_use, 주장은 claims.jsonl의 rank). 게임은 200위까지 등수, 그 아래는 %로 보여 준다.
+  200을 넘거나 트래커 화면이면 null (사진은 flag rank_over_200). 예측·use에는 아직 쓰지 않는다 (2026-10-16, 실어 두기만)
 - screen · self: 사진은 obs 값. 주장은 screen null, self는 kind == "self"
 - person · moment: 사진은 post_link 값. 사진과 이어진 주장(link)은 그 사진의 값. 이어지지 않은 주장은
   person = "W{site}:{no}"(같은 글의 주장은 글쓴이 한 사람으로 본다, 사진의 사람 열쇠와는 잇지 않음), moment = person + "#c{i}"
@@ -47,7 +49,7 @@ surf 열을 붙인다 (다르면 멈춘다 — post_all.sh로 다시 돌린다).
   서버 미상으로 판정만 한 줄은 surf_z null·flag 목록(no_server_fit 등), 재지 않은 줄(not_use·no_score·no_surface)은 둘 다 null.
   use·flag에는 섞지 않는다 (표시만, 2.2·1.7)
 
-출력: STATE/core.jsonl, STATE/core_summary.json (기본 집합 줄 수, 서버·등급·일차별, 독립 관측·사람 수). 표준 출력에 요약.
+출력: STATE/core.jsonl, STATE/core_summary.json (기본 집합 줄 수, 서버·등급·일차별, 독립 관측·사람 수, 등수 줄 수). 표준 출력에 요약.
 """
 import collections
 import hashlib
@@ -122,7 +124,7 @@ def assemble(st):
         r = {"key": f"p{oi}", "src": "photo", "oi": oi, "i": None, "site": o["site"], "no": o["no"],
              "server": s["server"], "server_basis": s["basis"]}
         r.update(tcols(t))
-        r.update({"pct": x["pct_use"], "score": x["score_use"],
+        r.update({"pct": x["pct_use"], "score": x["score_use"], "rank": x["rank_use"],
                   "score_raw": None if o.get("score") is None else o["score"] / 1e8,
                   "screen": o.get("screen"), "self": o.get("self"),
                   "person": l["person"], "moment": l["moment"], "indep": l["indep"], "use_indep": False,
@@ -144,7 +146,9 @@ def assemble(st):
         r = {"key": f"c{i}", "src": "claim", "oi": None, "i": i, "site": c["site"], "no": c["no"],
              "server": s["server"], "server_basis": s["basis"]}
         r.update(tcols(t))
+        rk = claims[i].get("rank")
         r.update({"pct": c["pct"], "score": None if sc is None else int(sc * 10 + 0.5) / 10, "score_raw": sc,
+                  "rank": rk if isinstance(rk, int) and 1 <= rk <= 200 else None,
                   "screen": None, "self": c["kind"] == "self",
                   "person": person, "moment": moment, "indep": not linked, "use_indep": False,
                   "link": c["link_oi"], "link_time": None,
@@ -201,6 +205,8 @@ def main():
             ",".join(r["exclude"]) or ("season_unsure_mixed" if "season_unsure_mixed" in r["flag"] else "other")
             for r in photo_core if not r["use"]).items())),
         "use": len(U), "use_indep": len(I),
+        "photo_rank_rows": sum(1 for r, o in zip(out, obs) if o.get("season") == "in" and r["rank"] is not None),
+        "photo_rank_over_200": sum(1 for r in out if "rank_over_200" in r["flag"]),
         "use_persons": len({r["person"] for r in U}),
         "use_persons_fp": len({r["person"] for r in U if r["person"].startswith("P")}),
         "use_persons_multi_moment": sum(1 for v in collections.Counter(

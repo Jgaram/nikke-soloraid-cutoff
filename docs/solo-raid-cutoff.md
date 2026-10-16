@@ -185,7 +185,9 @@ python3 -I tools/solo_raid/post_exclude.py data/solo-raid/S{n}/state
   빠진 기본 집합 줄: S33 12 · S35 4 · S38 2 (그 밖 시즌은 `season_unsure_mixed` 표시 줄이 지난 시즌으로 바뀜 2~3줄).
   같은 지문 덩어리(server.jsonl `link`)와 같은 사진(sha1)은 한 시즌으로 본다. 손 판정은 `state/post_manual_season.json`(사진마다 근거 필수)에 두고 다른 근거보다 앞세운다.
 - **표시(빼지 않음).** `season_unsure_mixed`(이번·지난 기록을 함께 올린 글인데 사진을 가를 근거 없음), `ctx_overridden`, `curve_outlier`, `score_short`(9자리 이하), `verify_differ`·`verify_unresolved`,
-  `best_record`(메모에 「나의 최고 기록」 — 그 줄의 %는 기록을 세운 때 값일 수 있다).
+  `best_record`(메모에 「나의 최고 기록」 — 그 줄의 %는 기록을 세운 때 값일 수 있다),
+  `rank_over_200`(게임 화면 등수가 200 초과 — 게임은 200위까지만 등수로, 그 아래는 %로 보여 준다(사용자 확인, 2026-10-16). 배지 같은 다른 숫자를 등수로 읽은 줄로 보이고,
+  점검 후보 `rank_over_200`으로 원본을 다시 본다. 쓸 등수 `rank_use`는 1~200만 남기고 나머지는 비운다. S31~S41 311줄, 대부분 %가 함께 있는 순위표 줄).
 - **S41 숫자.** 시즌 안 % 관측 738줄 중 25줄을 뺀다 (지난 시즌 12, 보상 구간 표 11, `pct_no_sign` 2, 그중 1줄은 `pct_over_100`도) → 713줄.
   표시는 `ctx_overridden` 18, `season_unsure_mixed` 16(모두 디시 6243823, 역대 기록 글), `best_record` 20, `verify_differ` 10(모두 원값 유지, 1줄 `verify_unresolved`)이다.
   유니온 화면 4줄은 시즌 안이 아니라 unsure 쪽에 있었다. 모의전 줄은 0줄이다.
@@ -268,12 +270,15 @@ tools/solo_raid/post_all.sh data/solo-raid/S41/state \
 ```
 
 - **줄.** 사진 관측은 obs 줄 전부(시즌 밖·트래커도 `exclude`로 표시해 넣는다), 글 주장은 post_claims `keep` 줄만.
-- **열.** `src`(photo·claim)·`oi`/`i`·`site`·`no`·`server`·`server_basis`·`h`·`h_lo`·`h_hi`·`t_kind`·`t_grade`·`day`·`day_lo`·`pct`·`score`(0.1억)·`score_raw`(억)·`screen`·`self`·`person`·`moment`·`indep`·`use_indep`·`link`·`link_time`·`exclude`·`flag`·`use`,
+- **열.** `src`(photo·claim)·`oi`/`i`·`site`·`no`·`server`·`server_basis`·`h`·`h_lo`·`h_hi`·`t_kind`·`t_grade`·`day`·`day_lo`·`pct`·`score`(0.1억)·`score_raw`(억)·`rank`(등수 1~200, post_exclude `rank_use`)·`screen`·`self`·`person`·`moment`·`indep`·`use_indep`·`link`·`link_time`·`exclude`·`flag`·`use`,
   그리고 `h_lo_top7`·`h_hi_top7`(post_time의 top7 시각 구간)·`surf_z`·`surf_flag`(곡면 이탈 표시, 아래).
 - **곡면 이탈 표시 `surf_z`·`surf_flag` (1.7, 2026-10-16).** [`post_outlier.py`](../tools/solo_raid/post_outlier.py)가 서버별 곡면 `log % = F(점수) + c·(√(h/120) − 1)`(A·독립 줄로 강건 적합)에서
   사람 하나씩 뺀 잔차로 z(점수·log % 두 축 중 작은 쪽, 척도 1.4826·MAD)를 잰다. |z| > 3.5면 `surface_low`·`surface_high`, 그 밖에 `stale_fit`(늦게 올린 화면일 수 있음)·`out_of_support`·`no_server_fit`(서버 미상 줄이 곡면 있는 어느 서버에도 안 맞음 — 서버는 채우지 않는다).
   순환 없음: post_outlier는 core.jsonl을 읽지 않고 `build_core.assemble()`로 같은 줄을 만들어 재고, 그 digest를 `post_outlier_summary.json`에 남긴다. build_core는 digest가 같을 때만 열을 붙인다 (다르면 멈춤).
   **`use`·`flag`에는 섞지 않는다** — 표시만. S41: 이탈 표시 0줄(지지 범위 안 최대 z +2.84), `stale_fit` 1(oi 2039, 「나의 최고 기록」 줄), `no_server_fit` 1(oi 2574, 커뮤니티 글 캡처 속 순위 줄), `out_of_support` 30.
+- **등수 `rank` (2026-10-16).** 게임은 1~200위를 % 대신 등수로 보여 준다. 판독은 처음부터 등수를 읽어 obs `rank`에 두었지만 core에는 없었다 — 이제 싣는다.
+  **예측·`use`에는 아직 쓰지 않는다** (%로 바꾸려면 참가자 수가 필요하다). 시즌 안 등수 줄은 시즌마다 약 1,700~3,200줄이고 대부분 순위표 1~7위, 8~200위는 130~310줄이다
+  (`core_summary.json` `photo_rank_rows`·`photo_rank_over_200`).
 - **기본 집합 `use`** (관리자 결정, `exclude`·`flag`를 남겨 되돌릴 수 있다).
   - 사진: `exclude`가 비고, % 있고, 시즌 `in`이고, `season_unsure_mixed`가 아니다 (그 16줄은 지난 시즌일 가능성이 크다).
   - 글 주장: 언제나 `false`(`claim_unverified`). 사진과 이어진 주장은 사진 쪽 `link`·`link_time`에 시각 근거만 보태고 따로 세지 않는다.
