@@ -188,8 +188,20 @@ def latest_season(reg):
 def conv(vdata):
     """계산기용 % 변환 (viz의 여러 시즌 평균 곡선, 0.5시간 간격). 행 = [시작 후 시간, log10(최종 % ÷ 지금 %), 80% 구간용 sd]."""
     cv = vdata["conv"]
-    return {"H": cv["H"], "seasons": vdata["season_list"],
+    seas = vdata["season_list"]   # viz가 개발 시즌만 쓴다 (시험 시즌이면 viz.build가 멈춤)
+    # 지난 시즌 겹쳐 보기 (2026-10-16 사용자 요청): 시즌 수준 배수와, 최종 1·3·10% 근처(÷1.3~×1.3)로 끝난 관측 칸
+    # 관측 = [시즌, 시작 후 시간, 그때 %, 최종 %] — 숫자만 (사람·글 정보 없음)
+    obs = {sv: [] for sv in SERVERS}
+    for s in seas:
+        for u in cv["units"][s]:
+            f = u["x"] * 10 ** u["P"]
+            if u["sv"] in obs and any(t / 1.3 <= f <= t * 1.3 for t in (1, 3, 10)):
+                obs[u["sv"]].append([s, round(u["h"], 1), round(u["x"], 3), round(f, 3)])
+    return {"H": cv["H"], "seasons": seas,
             "borrow": {sv: (cv["m_src"].get(sv) or "").startswith("borrow") for sv in SERVERS},
+            "levels": {s: cv["levels"][s] for s in seas if s in cv["levels"]},
+            "start": {s: iso(vdata["seasons"][s]["c_start"]) for s in seas},
+            "obs": obs,
             "srv": {sv: [[r[0], r[1], r[2]] for i, r in enumerate(cv["srv"][sv]) if i % 2 == 0] for sv in SERVERS}}
 
 
