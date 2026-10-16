@@ -74,6 +74,7 @@ button.btn { font: inherit; font-size: 13px; color: var(--text-primary); backgro
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex: none; }
 .sw.band { height: 10px; opacity: .35; }
+.sw.weak { background: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px) !important; opacity: .6; }
 .sw.sea { background: repeating-linear-gradient(90deg, var(--text-secondary) 0 4px, transparent 4px 7px); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); display: inline-block; flex: none; }
 .sw.dash { background: repeating-linear-gradient(90deg, var(--truth) 0 4px, transparent 4px 7px) !important; }
@@ -185,22 +186,23 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
       </div>
       <p class="muted" id="cNote" style="margin-top:10px"></p>
     </div>
-    <h3>최종 1·3·10%가 되는 「지금 %」</h3>
+    <h3 id="cvH">최종 컷이 되는 「지금 %」</h3>
     <div class="controls"><span class="srvlab">지난 시즌 실제 자료</span><span class="seg sm" id="cvSea"></span></div>
     <div class="legend" id="lgA"></div>
     <div class="chart" id="cvA"></div>
     <p class="muted">선 = 중앙값, 띠 = 80% 구간(시즌마다 밀리는 정도가 달라 넓습니다). 시작 3시간 안은 관측이 없어 그리지 않았습니다. 세로축은 로그 눈금이고 위로 갈수록 상위입니다.</p>
+    <p class="muted" id="cvChk"></p>
     <p class="muted" id="cvSeaNote" hidden></p>
     <details>
       <summary>시점별 표 보기</summary>
       <div class="tbl-wrap"><table id="tvT"></table></div>
-      <p class="muted">값 = 그 시각에 이 % 안이면 최종 1·3·10% 안에 든다는 중앙값, 작은 글씨 = 80% 구간.</p>
+      <p class="muted">값 = 그 시각에 이 % 안이면 최종 그 % 안에 든다는 중앙값, 작은 글씨 = 80% 구간.</p>
     </details>
   </section>
 
   <section class="card">
     <h2>지난 시즌 커트라인</h2>
-    <p class="muted">시즌이 끝났을 때의 1·3·10% 컷 (억 점). 한섭은 30% 컷도 참고로 함께 보여 줍니다. 「잠김」은 예측 방법을 정직하게 검증하려고 따로 떼어 둔 시험 시즌이라, 최종 채점 전까지 공개하지 않습니다.</p>
+    <p class="muted">시즌이 끝났을 때의 컷 (억 점). 1·3·10·30% 중 값이 있는 시즌이 둘 이상인 지점만 보여 줍니다. 「잠김」은 예측 방법을 정직하게 검증하려고 따로 떼어 둔 시험 시즌이라, 최종 채점 전까지 공개하지 않습니다.</p>
     <div class="legend" id="pastLegend"></div>
     <div class="chart" id="pastChart"></div>
     <div class="tbl-wrap"><table id="pastTable"></table></div>
@@ -409,7 +411,7 @@ function drawLive() {
 }
 
 // ---------- ② 지금 몇 %면 최종 몇 % ----------
-const CV = DATA.conv, Z80 = 1.2816, TGT = [1, 3, 10], NDAY = Math.ceil(CV.H / 24);
+const CV = DATA.conv, Z80 = 1.2816, NDAY = Math.ceil(CV.H / 24);
 const CS = LAT_ON ? ts(LAT.c_start) : null;   // 진행 중 시즌이 있으면 실제 날짜로 보인다
 const pf = v => v == null ? "–" : v >= 100 ? "100%+" : (v < 0.1 ? v.toFixed(3) : v < 10 ? v.toFixed(2) : v.toFixed(1)) + "%";
 const clock = h => { const m = Math.round(5 * 60 + h * 60) % (24 * 60); return p2(Math.floor(m / 60)) + ":" + p2(m % 60); };
@@ -497,13 +499,22 @@ function renderCalc() {
   document.getElementById("cNote").textContent = s;
   markA(h);
 }
+// 서버마다 그리는 지점: 관측이 있는 지점만, 점검 기준(CV.rule)을 넘으면 실선, 못 넘으면 흐린 점선 (2026-10-16 사용자 결정)
+const convT = () => ["1", "3", "10", "30"].filter(p => (CV.check[srv] || {})[p]).map(Number);
+const convOk = t => CV.check[srv][String(t)].ok;
+const wk = t => convOk(t) ? "" : ` <span class="muted">(근거 부족)</span>`;
 function drawConv() {
-  const seas = CV.seasons;
+  const seas = CV.seasons, TGT = convT();
+  const ru = CV.rule, weak = TGT.filter(t => !convOk(t));
+  document.getElementById("cvH").textContent = `최종 ${TGT.join("·")}%가 되는 「지금 %」`;
+  document.getElementById("cvChk").textContent = `선을 그리는 기준: 최종이 그 %의 ÷${ru.near}~×${ru.near} 안으로 끝난 지난 시즌 관측이 ${ru.n}개·시즌 ${ru.seasons}개 이상이고, `
+    + `곡선과 견준 치우침이 ÷${ru.bias}~×${ru.bias} 안, 80% 구간이 덮은 몫이 ${ru.cov[0]}~${ru.cov[1]}이면 실선입니다. 관측은 있는데 못 미치면 흐린 점선, 관측이 없으면 그리지 않습니다 (곡선을 맞춘 자료로 대 본 표본 안 점검).`
+    + (weak.length ? ` ${SRV[srv]} ${weak.map(t => `${t}%(관측 ${CV.check[srv][String(t)].n}개)`).join("·")}는 근거 부족이라 숫자만 참고하세요.` : "");
   document.getElementById("calcIntro").textContent = `같은 점수라도 뒤에 들어오는 사람에게 밀려 %가 내려갑니다. 지난 개발 시즌 ${seas.length}개(${seas[0]}~${seas[seas.length - 1]})에서 잰 「최종 % ÷ 지금 %」 배율(여러 시즌 평균)로 바꿉니다. `
     + `시점은 챌린지 시작 기준 — 1일차는 05:00 KST에 시작해 다음 날 04:59까지입니다.`
     + (CS != null ? ` 지금 ${LAT.season} 챌린지가 진행 중이라 그 시즌 날짜로 보여 줍니다.` : "");
   const host = document.getElementById("cvA"); host.innerHTML = "";
-  document.getElementById("lgA").innerHTML = TGT.map(t => `<span><i class="sw" style="background:${COL(t)}"></i>최종 ${t}%</span>`).join("") +
+  document.getElementById("lgA").innerHTML = TGT.map(t => `<span><i class="sw${convOk(t) ? "" : " weak"}" style="background:${COL(t)};color:${COL(t)}"></i>최종 ${t}%${convOk(t) ? "" : " (근거 부족)"}</span>`).join("") +
     `<span><i class="sw band" style="background:var(--text-muted)"></i>80% 구간</span>` + (CS != null ? `<span><i class="sw" style="background:var(--truth)"></i>지금</span>` : "")
     + (cvSea !== "off" ? `<span><i class="sw sea"></i>${cvSea === "all" ? "시즌별" : cvSea}처럼 밀렸을 때</span><span><i class="dot"></i>실제 관측</span>` : "");
   seaHost.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === cvSea));
@@ -512,14 +523,14 @@ function drawConv() {
   seaNote.hidden = cvSea === "off";
   if (cvSea !== "off") {
     const nS = new Set(OBS.map(o => o[0])).size;
-    seaNote.textContent = `점 = 지난 시즌 진행 중에 올라온 순위 화면에서 읽은 그 시각의 점수와 %입니다. 같은 점수가 시즌이 끝났을 때 몇 %였는지는 끝난 뒤 모은 점수표에서 찾아 붙였습니다 (같은 사람의 같은 날 화면은 하나로 셉니다). 최종 %가 1·3·10%의 ÷1.3~×1.3 안인 것을 골라, 배율(최종 ÷ 그때)은 그대로 두고 「최종이 딱 1·3·10%였다면 그때 몇 %」로 옮겨 찍었습니다 (${SRV[srv]} ${OBS.length}개`
+    seaNote.textContent = `점 = 지난 시즌 진행 중에 올라온 순위 화면에서 읽은 그 시각의 점수와 %입니다. 같은 점수가 시즌이 끝났을 때 몇 %였는지는 끝난 뒤 모은 점수표에서 찾아 붙였습니다 (같은 사람의 같은 날 화면은 하나로 셉니다). 최종 %가 ${TGT.join("·")}%의 ÷${ru.near}~×${ru.near} 안인 것을 골라, 배율(최종 ÷ 그때)은 그대로 두고 「최종이 딱 그 %였다면 그때 몇 %」로 옮겨 찍었습니다 (${SRV[srv]} ${OBS.length}개`
       + (cvSea === "all" ? `, ${nS}개 시즌` : "") + `). 그 시즌이 평균보다 더 밀렸으면 점이 굵은 선보다 위에, 덜 밀렸으면 아래에 찍힙니다. `
       + `점선 = 그 시즌의 밀린 정도(수준 배수)를 여러 시즌 곡선에 곱해 그린 선이라, 관측을 그대로 이은 선은 아닙니다.`
       + (OBS.length < 10 ? ` ${SRV[srv]}은 관측이 적어 점이 듬성듬성합니다.` : "");
   }
   const W = Math.max(300, host.clientWidth), narrow = W < 600, H = narrow ? 300 : 380;
   const m = {l: 48, r: narrow ? 12 : 64, t: 14, b: 36};
-  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "최종 1·3·10%가 되는 시점별 지금 %"}, host);
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `최종 ${TGT.join("·")}%가 되는 시점별 지금 %`}, host);
   const X = h => m.l + h / CV.H * (W - m.l - m.r);
   const ylo = Math.log(0.03), yhi = Math.log(40);
   const Y = p => m.t + (Math.log(Math.max(0.03, Math.min(40, p))) - ylo) / (yhi - ylo) * (H - m.t - m.b);   // 위 = 상위
@@ -539,11 +550,13 @@ function drawConv() {
   for (const t of TGT) {
     const up = rows.map(r => [X(r[0]), Y(t / 10 ** (r[1] - Z80 * r[2]))]);
     const dn = rows.map(r => [X(r[0]), Y(t / 10 ** (r[1] + Z80 * r[2]))]);
-    el("path", {d: path(up.concat(dn.reverse())) + "Z", fill: COL(t), opacity: .14}, svg);
+    el("path", {d: path(up.concat(dn.reverse())) + "Z", fill: COL(t), opacity: convOk(t) ? .14 : .05}, svg);
   }
   for (const t of TGT) {
-    el("path", {d: path(rows.map(r => [X(r[0]), Y(t / 10 ** r[1])])), fill: "none", stroke: COL(t), "stroke-width": 2.2}, svg);
-    if (!narrow) el("text", {x: W - m.r + 6, y: Y(t) + 4, class: "lbl"}, svg).textContent = `최종 ${t}%`;
+    const ok = convOk(t);
+    el("path", {d: path(rows.map(r => [X(r[0]), Y(t / 10 ** r[1])])), fill: "none", stroke: COL(t), "stroke-width": ok ? 2.2 : 1.6,
+      "stroke-dasharray": ok ? null : "6 4", opacity: ok ? 1 : .55}, svg);
+    if (!narrow) el("text", {x: W - m.r + 6, y: Y(t) + 4, class: "lbl", opacity: ok ? null : .6}, svg).textContent = `최종 ${t}%`;
   }
   // 지난 시즌: 그 시즌 수준 배수를 곱한 선 + 실제 관측 점
   const hits = [];
@@ -581,7 +594,7 @@ function drawConv() {
     place(h);
     const {P, sd} = convAt(h);
     let html = `<b>${whenLab(h)}</b> <span class="muted">시작 후 ${h.toFixed(1)}시간 · ${SRV[srv]}</span>`;
-    for (const t of TGT) html += `<div class="r"><i class="sw" style="background:${COL(t)}"></i>최종 ${t}% ← 지금 <b>${pf(t / 10 ** P)}</b> <span class="muted">(${pf(t / 10 ** (P + Z80 * sd))}~${pf(t / 10 ** (P - Z80 * sd))})</span></div>`;
+    for (const t of TGT) html += `<div class="r"><i class="sw" style="background:${COL(t)}"></i>최종 ${t}% ← 지금 <b>${pf(t / 10 ** P)}</b> <span class="muted">(${pf(t / 10 ** (P + Z80 * sd))}~${pf(t / 10 ** (P - Z80 * sd))})</span>${wk(t)}</div>`;
     if (SEAS.includes(cvSea)) {
       const Ps = P * seaLev(cvSea);
       html += `<div class="muted" style="margin-top:4px">${cvSea}처럼 밀렸다면: ` + TGT.map(t => `최종 ${t}% ← ${pf(t / 10 ** Ps)}`).join(" · ") + `</div>`;
@@ -597,7 +610,7 @@ function drawConv() {
   }, () => { tip.hide(); place(curH()); });
 
   // 시점별 표
-  let th = `<thead><tr><th>시점</th>${TGT.map(t => `<th>최종 ${t}%<span class="hide-sm"> ← 지금</span></th>`).join("")}</tr></thead><tbody>`;
+  let th = `<thead><tr><th>시점</th>${TGT.map(t => `<th>최종 ${t}%<span class="hide-sm"> ← 지금</span>${convOk(t) ? "" : `<br><span class="muted">근거 부족</span>`}</th>`).join("")}</tr></thead><tbody>`;
   const pts = [];
   for (let d = 0; d < NDAY; d++) for (const hh of [0, 7, 13, 19]) if (d * 24 + hh < CV.H && d * 24 + hh >= 1) pts.push(d * 24 + hh);
   pts.push(CV.H - 0.5);
@@ -619,8 +632,8 @@ function srcText(r) {
 }
 function drawPast() {
   const R0 = DATA.past.filter(r => !(r.end && ts(r.end) > NOW));   // 아직 안 끝난 시즌은 숨김
-  // 지난 시즌 표만 30%를 더한다 (한섭만 자료가 있다, 2026-10-16) — 그 서버에 30% 값이 하나라도 있을 때만
-  const PP = R0.some(r => ((r.cuts || {})[srv] || {})["30"] != null) ? [...PCTS, "30"] : PCTS;
+  // 열·선을 넣을 지점: 값이 있는 시즌이 2개 이상인 지점 (site.py past_pcts, 2026-10-16 사용자 결정)
+  const PP = DATA.past_pcts[srv];
   const has = r => Object.keys((r.cuts || {})[srv] || {}).length > 0;
   const host = document.getElementById("pastChart"); host.innerHTML = "";
   const note = document.getElementById("pastNote"), tbl = document.getElementById("pastTable");
@@ -672,7 +685,7 @@ function drawPast() {
   });
   tbl.innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th><th class="l hide-sm">시작</th>${PP.map(p => `<th>${p}%</th>`).join("")}<th class="l hide-sm">출처</th></tr></thead><tbody>${rows.join("")}</tbody>`;
   note.innerHTML = `<sup class="cv">*</sup> = 끝난 뒤 올라온 점수·%로 그린 곡선에서 읽은 값, 표시 없는 값 = 커뮤니티 집계표(공식 확정값 아님).`
-    + (PP.includes("30") ? " 30% 컷은 시즌마다 크게 오르내리고 근거가 1·3·10%보다 약해 참고값입니다." : "")
+    + (PP.includes("30") ? " 30% 컷은 시즌마다 크게 오르내려 참고값입니다." : "")
     + (skipped.length ? ` 표에서 뺀 시즌: ${skipped[0].season}${skipped.length > 1 ? "~" + skipped[skipped.length - 1].season : ""} (${SRV[srv]} 컷 자료가 없거나 잠김).` : "");
 }
 

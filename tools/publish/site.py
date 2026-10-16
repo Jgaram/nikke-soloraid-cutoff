@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import statistics
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -40,7 +41,13 @@ FOOTER = (
 
 SERVERS = ["KR", "JP", "GL"]
 PCTS = ["1", "3", "10"]
-PAST_PCTS = {"KR": PCTS + ["30"]}   # 지난 시즌 컷만: 한섭 30%를 참고로 더한다 (2026-10-16 사용자 요청 — 일섭·글섭 30%는 집계표가 드묾)
+# 지난 시즌 컷과 계산기가 고르는 지점 (2026-10-16 사용자 결정 — 서버를 정해 두지 않고 아래 기준을 넘는 지점만 그린다)
+CAND = ["1", "3", "10", "30"]
+PAST_MIN = 2   # 지난 시즌: 값이 있는(잠기지 않은) 시즌이 이만큼 있는 지점만 열·선
+# 계산기: 최종이 그 지점의 ÷near~×near로 끝난 관측 칸으로 곡선을 대 본다 (곡선을 맞춘 그 자료라 표본 안 점검이다).
+# 넘으면 실선, 관측이 있는데 못 넘으면 흐린 점선(근거 부족), 관측 0이면 그리지 않는다.
+CONV_RULE = {"near": 1.3, "n": 30, "seasons": 4, "bias": 1.10, "cov": [0.65, 0.95]}
+SV_CSV = {"GLOBAL": "GL"}   # server_cutoffs.csv는 글섭을 GLOBAL로 적는다
 KST = dt.timezone(dt.timedelta(hours=9))
 INPUTS = ["data/solo-raid", "tools/solo_raid", "tools/publish"]
 
@@ -70,14 +77,13 @@ def season_json(s):
 
 
 def past(viz_seasons, reg):
-    """시즌마다 최종 컷과 출처. 분석된 개발 시즌은 정답 표(서버 셋, 한섭은 30%까지), 그 밖 개발 시즌은 seasons.json 한섭 3·10%와
-    server_cutoffs.csv 한섭 30%, 시험 시즌은 잠김.
-    출처(basis): table = 커뮤니티 집계표, curve = 커뮤니티 관측 점수로 그린 곡선."""
+    """시즌마다 최종 컷과 출처 (지점은 CAND). 분석된 개발 시즌은 정답 표, 그 밖 개발 시즌은 seasons.json 한섭 3·10%와
+    server_cutoffs.csv(서버 셋), 시험 시즌은 잠김. 출처(basis): table = 커뮤니티 집계표, curve = 커뮤니티 관측 점수로 그린 곡선."""
     table = {r["name"]: r for r in split.load_seasons()}   # 시험 시즌은 kr_cut_*가 빠져 온다
-    kr30 = {}   # 정답 표에 없는 시즌의 한섭 30% 집계표 (server_cutoffs.csv, 시험 시즌 행은 빠져 온다)
+    csvc = {}   # 정답 표에 없는 시즌용 집계표 {(시즌 번호, 서버): {지점: 점수}} (시험 시즌 행은 빠져 온다)
     for c in split.load_server_cutoffs():
-        if c["server"] == "KR" and c["percentile"] == "30" and c.get("score_100m"):
-            kr30.setdefault(split.snum(c["season"]), c["score_100m"])
+        if c["percentile"] in CAND and c.get("score_100m"):
+            csvc.setdefault((split.snum(c["season"]), SV_CSV.get(c["server"], c["server"])), {}).setdefault(c["percentile"], c["score_100m"])
     out = []
     for s, r in sorted(reg.items(), key=lambda kv: split.snum(kv[0])):
         t = table.get(s, {})
@@ -92,17 +98,28 @@ def past(viz_seasons, reg):
         if s in viz_seasons:
             key = viz_seasons[s]["key"]
             for sv in SERVERS:
-                c = {p: c for p, c in key.get(sv, {}).items() if p in PAST_PCTS.get(sv, PCTS)}
+                c = {p: c for p, c in key.get(sv, {}).items() if p in CAND}
                 if c:
                     row["cuts"][sv] = {p: r2(v["v"]) for p, v in c.items()}
                     row["basis"][sv] = {p: v["basis"] for p, v in c.items()}
-        elif t.get("kr_cut_3") or t.get("kr_cut_10") or split.snum(s) in kr30:
-            c = {p: r2(t.get(f"kr_cut_{p}")) for p in ("3", "10") if t.get(f"kr_cut_{p}")}
-            if split.snum(s) in kr30:
-                c["30"] = r2(kr30[split.snum(s)])
-            row["cuts"]["KR"] = c
-            row["basis"]["KR"] = {p: "table" for p in c}
+        else:
+            for sv in SERVERS:
+                c = {p: r2(v) for p, v in csvc.get((row["n"], sv), {}).items()}
+                if sv == "KR":
+                    c.update({p: r2(t[f"kr_cut_{p}"]) for p in ("3", "10") if t.get(f"kr_cut_{p}")})
+                if c:
+                    row["cuts"][sv] = c
+                    row["basis"][sv] = {p: "table" for p in c}
         out.append(row)
+    return out
+
+
+def past_pcts(rows):
+    """서버마다 지난 시즌 열·선을 넣을 지점: 값이 있는 시즌이 PAST_MIN개 이상. 그런 지점이 없으면 값이 있는 지점을 표로만."""
+    out = {}
+    for sv in SERVERS:
+        n = {p: sum(1 for r in rows if p in r["cuts"].get(sv, {})) for p in CAND}
+        out[sv] = [p for p in CAND if n[p] >= PAST_MIN] or [p for p in CAND if n[p]]
     return out
 
 
@@ -201,13 +218,34 @@ def conv(vdata):
     seas = vdata["season_list"]   # viz가 개발 시즌만 쓴다 (시험 시즌이면 viz.build가 멈춤)
     # 지난 시즌 겹쳐 보기 (2026-10-16 사용자 요청): 시즌 수준 배수와, 최종 1·3·10% 근처(÷1.3~×1.3)로 끝난 관측 칸
     # 관측 = [시즌, 시작 후 시간, 그때 %, 최종 %] — 숫자만 (사람·글 정보 없음)
+    # 지점마다 곡선 점검 (CONV_RULE): 관측 칸의 log10(최종 ÷ 그때)를 같은 시각 곡선과 견준다
+    near = CONV_RULE["near"]
     obs = {sv: [] for sv in SERVERS}
+    res = {(sv, p): [] for sv in SERVERS for p in CAND}
     for s in seas:
         for u in cv["units"][s]:
+            if u["sv"] not in obs or u["P"] is None:
+                continue
             f = u["x"] * 10 ** u["P"]
-            if u["sv"] in obs and any(t / 1.3 <= f <= t * 1.3 for t in (1, 3, 10)):
-                obs[u["sv"]].append([s, round(u["h"], 1), round(u["x"], 3), round(f, 3)])
-    return {"H": cv["H"], "seasons": seas,
+            hit = [p for p in CAND if float(p) / near <= f <= float(p) * near]
+            if not hit:
+                continue
+            obs[u["sv"]].append([s, round(u["h"], 1), round(u["x"], 3), round(f, 3)])
+            rows = cv["srv"][u["sv"]]
+            P, sd = min(rows, key=lambda r: abs(r[0] - u["h"]))[1:3]
+            for p in hit:
+                res[(u["sv"], p)].append((s, u["P"] - P, sd))
+    check = {sv: {} for sv in SERVERS}
+    for (sv, p), L in res.items():
+        if not L:
+            continue
+        bias = 10 ** statistics.median(d for _, d, _ in L)
+        cov = sum(abs(d) <= 1.2816 * sd for _, d, sd in L) / len(L)
+        nS = len({x[0] for x in L})
+        ok = (len(L) >= CONV_RULE["n"] and nS >= CONV_RULE["seasons"] and 1 / CONV_RULE["bias"] <= bias <= CONV_RULE["bias"]
+              and CONV_RULE["cov"][0] <= cov <= CONV_RULE["cov"][1])
+        check[sv][p] = {"n": len(L), "seasons": nS, "bias": round(bias, 3), "cov": round(cov, 2), "ok": ok}
+    return {"H": cv["H"], "seasons": seas, "rule": CONV_RULE, "check": check,
             "borrow": {sv: (cv["m_src"].get(sv) or "").startswith("borrow") for sv in SERVERS},
             "levels": {s: cv["levels"][s] for s in seas if s in cv["levels"]},
             "start": {s: iso(vdata["seasons"][s]["c_start"]) for s in seas},
@@ -260,7 +298,8 @@ def build(prev=None):
     reg = {r["season"]: r for r in jload(os.path.join(D, "registry.json"))["seasons"]}
     lv = live(reg)
     methods = sorted({p["method"] for x in lv for p in x["preds"]})
-    data = {"past": past(vdata["seasons"], reg), "live": lv, "latest": latest_season(reg), "conv": conv(vdata),
+    pst = past(vdata["seasons"], reg)
+    data = {"past": pst, "past_pcts": past_pcts(pst), "live": lv, "latest": latest_season(reg), "conv": conv(vdata),
             "analysis": {"seasons": vdata["season_list"], "live_method": " · ".join(methods) if methods else default_method()}}
     content = fingerprint(data, vdata)
     data = {"asof": asof_for(content, prev), "content": content, **data}
