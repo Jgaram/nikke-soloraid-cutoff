@@ -23,7 +23,8 @@ python3 -I tools/server_classify.py STATE [--posts FILE.jsonl ...] [--snap DIR .
   - 서버 섞인 덩어리 가르기 (2026-10-16, S33 c1). 이어붙인 사진·사진 한 줄이 다른 서버 화면을 한 덩어리로 이으면 앵커 한 건 차이로
     덩어리 전체 이름이 바뀌었다 (S33: 앵커 한섭 24·글섭 9·일섭 1, 72.7%로 이름 없음 → use의 82%가 서버 미정).
     이음의 세기 = 두 사진이 함께 가진 정확 점수 개수. 앵커 서버가 둘 이상인 덩어리는 세기 t+1 이상으로 다시 나눠 보고(t = 1 → 4까지),
-    그 안에 서로 다른 서버로 top7 이름이 서는 부분이 둘 이상이면 합치지 않는다. 나머지 부분은 세기 t 이음으로 가장 가까운 top7 부분에
+    그 안에 서로 다른 서버로 top7 이름이 서는 부분이 둘 이상이면 합치지 않는다 (t 상한 7 — 2026-10-16 S32에서 4 → 7).
+    이어붙인 순위표 사진(한 사진 안에서 1위가 다른 점수로 두 번 이상)은 순위표마다 마디를 나눈다 (S32 4381843_0). 나머지 부분은 세기 t 이음으로 가장 가까운 top7 부분에
     붙고, 가장 가까운 부분들의 서버가 갈리면 다리(`bridge`, 이름 없음)로 남는다. 서로 다른 서버로 확실한 부분이 없으면 전과 같다
     (S35~S41은 줄 하나 바뀌지 않음). 같은 서버 순위표 사진끼리는 1~7위 점수를 여럿 함께 가져 세기 2 이상으로 이어진다.
     server.jsonl의 `cluster`는 가른 뒤 묶음, `link`는 가르기 전 덩어리(g1…)다. 시즌 판정(post_exclude)·묶음 이음(truth)은 link를 쓴다.
@@ -39,6 +40,7 @@ python3 -I tools/server_classify.py STATE [--posts FILE.jsonl ...] [--snap DIR .
 
 서버 이름: KR(한섭·한국 서버·KOR) · JP(일섭·일본 서버) · GL(글섭·글로벌) · NA(북미) · SEA(동남아). `무섭`·`타섭`·`본섭`은 서버가 아니다.
 이름 바로 뒤가 가정·비교("한섭이였으면"·"한섭이랑"·"한섭보다")면 그 서버가 아니라는 뜻이라 세지 않는다.
+이름 바로 앞이 「번외」·「덤으로」면 덧붙인 서버라 세지 않는다 (S32 4368058 「번외 북미섭」, 2026-10-16).
 
 출력
 - STATE/server.jsonl: obs.jsonl 한 줄마다 {site, no, img, row, server, basis, cand, cluster, link, quote}. 이음 열쇠는 (img, row).
@@ -79,6 +81,8 @@ Q_RE = re.compile(r"몇\s?(?:퍼|%|프로|등|위|점)|얼마")
 # "보통 한섭이랑 30ㅡ35억정도 차이났"은 다른 서버 글)
 NOT_RE = re.compile(r"(?:\s?(?:섭|썹|서버))?(?:(?:이?[였었]?으면|이?라면|이면|보다|이?랑|과(?!금)|와)|\s?(?:보다|대비|에 ?비해)"
                     r"|(?:으로|로|에)?\s?(?:갔|넘어갔|옮겼)었?으면|(?:으로|로|에)\s?가면)")   # 「글섭갔으면」(S33 4573593, 2026-10-16)
+# 「번외 북미섭」처럼 덧붙인 서버는 글의 주 서버가 아니다 (S32 4368058, 2026-10-16)
+EXTRA_RE = re.compile(r"번외|덤으로|덤\s*:")
 ID_RE = re.compile(r"[A-Za-z0-9_]{6,}")   # 인용에서 닉네임·친구 코드처럼 보이는 긴 영숫자는 가린다
 
 
@@ -109,7 +113,7 @@ def mentions(text):
         neg, nxt = set(), None   # "일섭, 글섭이었으면"처럼 나열한 이름은 뒤의 가정을 함께 받는다
         for j in range(len(found) - 1, -1, -1):
             m = found[j][1]
-            if NOT_RE.match(s, m.end()) or (nxt is not None and nxt in neg
+            if NOT_RE.match(s, m.end()) or EXTRA_RE.search(s[max(0, m.start() - 6):m.start()]) or (nxt is not None and nxt in neg
                                             and re.fullmatch(r"[\s,·/및]*", s[m.end():found[nxt][1].start()])):
                 neg.add(j)
             nxt = j
@@ -221,8 +225,30 @@ def main():
         post[no] = text_server(no)
 
     # 2) 사진 지문 묶음: 마디 = 사진(sha1), 같은 정확 점수로 잇는다. 이음의 세기 = 두 사진이 함께 가진 정확 점수 개수
+    # 이어붙인 순위표 사진: 한 사진 안에서 순위가 1위부터 다시 시작하면(1위 점수가 둘 이상) 순위표마다 마디를 나눈다
+    # (S32 4381843_0: 한섭·일섭 순위표를 이어붙인 사진이 두 서버와 점수 5~7개씩 같아 덩어리가 갈리지 않았다, 2026-10-16).
+    # 순위 없는 줄(본인 줄 등)은 바로 앞 순위표에 붙인다.
+    seg = {}
+    by_img = collections.defaultdict(list)
+    for r in obs:
+        by_img[r["img"]].append(r)
+    collage = set()
+    for img, rs in by_img.items():
+        k, ranked, ones = 0, False, set()
+        for r in sorted(rs, key=lambda r: r["row"]):
+            if r.get("rank") == 1 and ranked:
+                k += 1
+            if r.get("rank") is not None:
+                ranked = True
+            if r.get("rank") == 1 and r.get("score"):
+                ones.add(r["score"])
+            seg[(img, r["row"])] = k
+        if k and len(ones) >= 2:
+            collage.add(img)
+
     def node(r):
-        return sha.get(r["img"], r["img"])
+        n = sha.get(r["img"], r["img"])
+        return f"{n}#{seg[(r['img'], r['row'])]}" if r["img"] in collage else n
     nscores = collections.defaultdict(set)
     nposts = collections.defaultdict(set)
     for r in obs:
@@ -246,7 +272,9 @@ def main():
     # 사진 단위 서버 고침(scope img): 그 사진(마디)은 글 텍스트 대신 고친 서버의 앵커다
     nfix = {}
     for img, it in img_fix.items():
-        nfix[sha.get(img, img)] = it["server"]
+        for r in by_img.get(img, []):
+            nfix[node(r)] = it["server"]
+        nfix.setdefault(sha.get(img, img), it["server"])   # 같은 sha1 사본
 
     def anchors(nodes):
         """앵커 수: 글 텍스트(text·fix) 글은 글마다 하나 (그 글의 사진이 모두 사진 고침이면 세지 않는다), 사진 고침은 사진마다 하나."""
@@ -294,7 +322,7 @@ def main():
     # 앵커 한 건 차이로 묶음 전체 이름이 바뀌었다. 앵커 서버가 둘 이상인 덩어리는 더 센 이음(함께 가진 점수 t+1개 이상)으로 쪼개 보고,
     # 그 안에 서로 다른 서버로 이름이 서는(top7) 부분이 둘 이상이면 합치지 않는다. 나머지 부분은 세기 t 이음으로 가장 가까운
     # top7 부분에 붙인다 (가장 가까운 부분들의 서버가 갈리면 붙이지 않고 다리 `bridge`로 둔다 — 이름 없음).
-    TMAX = 4
+    TMAX = 7   # 같은 서버 순위표끼리는 1~7위 점수를 최대 7개 함께 가진다 (4 → 7, S32 c1, 2026-10-16)
     bridge = set()
 
     def refine(nodes, t):
@@ -430,7 +458,7 @@ def main():
     for r in obs:
         no = str(r["no"])
         c = find(node(r))
-        rf = row_fix.get((r["img"], r["row"])) or row_sha.get((node(r), r["row"]))
+        rf = row_fix.get((r["img"], r["row"])) or row_sha.get((sha.get(r["img"], r["img"]), r["row"]))
         nf = nfix.get(node(r))
         if rf or nf:
             sv = rf["server"] if rf else nf
@@ -477,6 +505,7 @@ def main():
         "posts_text": dict(collections.Counter(v[1] for v in post.values())),
         "posts_with_text": sum(1 for no in post if tx.get(no)),
         "posts": len(post),
+        "collage_images": sorted(collage),
         "clusters": csum,
     }
     json.dump(summary, open(os.path.join(state, "server_summary.json"), "w", encoding="utf-8"),
