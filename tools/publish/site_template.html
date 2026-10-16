@@ -322,7 +322,7 @@ function drawLive() {
   const waiting = LAT_ON && !L.some(x => x.season === LAT.season);   // 새 시즌이 시작했지만 첫 예측 전
   if (waiting) {
     const n = document.createElement("p"); n.className = "gnote";
-    n.textContent = `${LAT.season} ${LAT.boss || ""} 챌린지가 진행 중입니다 (${isoTxt(LAT.c_start)} ~ ${isoTxt(LAT.end)}). 첫 예측은 챌린지 시작 12시간 뒤까지 올라온 자료로 냅니다.`;
+    n.textContent = `${LAT.season} ${LAT.boss || ""} 챌린지가 진행 중입니다 (${isoTxt(LAT.c_start)} ~ ${isoTxt(LAT.end)}). 첫 예측은 챌린지 시작 6시간 뒤까지 올라온 자료로 내고, 그 뒤 6시간마다 갱신합니다 (한국 시간 05·11·17·23시까지 올라온 자료, 30~50분 뒤 반영).`;
     body.appendChild(n);
   }
   if (!L.length) {
@@ -354,7 +354,7 @@ function drawLive() {
   head.innerHTML = `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤(${last.T_kst || ""})까지 올라온 자료 · 등급 <span class="grade ${g}">${GRADE[g] || g}</span> · 근거 커뮤니티 ${ls.n_persons}명`;
   body.appendChild(head);
   const meta = document.createElement("p"); meta.className = "muted";
-  meta.textContent = `예측 방법: ${last.method} · 아직 검증 중인 예측입니다.`;
+  meta.textContent = `예측 방법: ${last.method} · 아직 검증 중인 예측입니다.${done ? "" : " 6시간마다(한국 시간 05·11·17·23시까지 올라온 자료) 갱신합니다."}`;
   body.appendChild(meta);
   if (GNOTE[g]) { const n = document.createElement("p"); n.className = "gnote"; n.textContent = `${SRV[srv]} ${GRADE[g]}: ${GNOTE[g]}`; body.appendChild(n); }
   if (done && S.locked) { const n = document.createElement("p"); n.className = "muted"; n.textContent = "이 시즌은 시험 시즌이라 실제 컷과의 비교는 최종 검증 뒤 공개합니다."; body.appendChild(n); }
