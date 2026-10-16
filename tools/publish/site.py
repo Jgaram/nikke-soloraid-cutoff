@@ -47,7 +47,6 @@ PAST_MIN = 2   # 지난 시즌: 값이 있는(잠기지 않은) 시즌이 이만
 # 계산기: 최종이 그 지점의 ÷near~×near로 끝난 관측 칸으로 곡선을 대 본다 (곡선을 맞춘 그 자료라 표본 안 점검이다).
 # 넘으면 실선, 관측이 있는데 못 넘으면 흐린 점선(근거 부족), 관측 0이면 그리지 않는다.
 CONV_RULE = {"near": 1.3, "n": 30, "seasons": 4, "bias": 1.10, "cov": [0.65, 0.95]}
-SV_CSV = {"GLOBAL": "GL"}   # server_cutoffs.csv는 글섭을 GLOBAL로 적는다
 KST = dt.timezone(dt.timedelta(hours=9))
 INPUTS = ["data/solo-raid", "tools/solo_raid", "tools/publish"]
 
@@ -78,12 +77,12 @@ def season_json(s):
 
 def past(viz_seasons, reg):
     """시즌마다 최종 컷과 출처 (지점은 CAND). 분석된 개발 시즌은 정답 표, 그 밖 개발 시즌은 seasons.json 한섭 3·10%와
-    server_cutoffs.csv(서버 셋), 시험 시즌은 잠김. 출처(basis): table = 커뮤니티 집계표, curve = 커뮤니티 관측 점수로 그린 곡선."""
+    server_cutoffs.csv(서버 셋, 글섭 GLOBAL은 split이 GL로 바꿔 줌), 시험 시즌은 잠김. 출처(basis): table = 커뮤니티 집계표, curve = 커뮤니티 관측 점수로 그린 곡선."""
     table = {r["name"]: r for r in split.load_seasons()}   # 시험 시즌은 kr_cut_*가 빠져 온다
     csvc = {}   # 정답 표에 없는 시즌용 집계표 {(시즌 번호, 서버): {지점: 점수}} (시험 시즌 행은 빠져 온다)
     for c in split.load_server_cutoffs():
         if c["percentile"] in CAND and c.get("score_100m"):
-            csvc.setdefault((split.snum(c["season"]), SV_CSV.get(c["server"], c["server"])), {}).setdefault(c["percentile"], c["score_100m"])
+            csvc.setdefault((split.snum(c["season"]), c["server"]), {}).setdefault(c["percentile"], c["score_100m"])
     out = []
     for s, r in sorted(reg.items(), key=lambda kv: split.snum(kv[0])):
         t = table.get(s, {})

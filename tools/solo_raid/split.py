@@ -159,10 +159,15 @@ def load_seasons(final=False, sp=None):
     return out
 
 
+SV_CSV = {"GLOBAL": "GL"}
+
+
 def load_server_cutoffs(final=False, sp=None):
     sp = sp or load_split()
     with _real_open(SERVER_CUTOFFS, encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
+    for r in rows:   # CSV는 글섭을 GLOBAL로 적는다 — 도구들은 GL로 찾는다 (2026-10-16, 그 전에는 글섭 집계표가 정답 표·prior에서 빠졌다)
+        r["server"] = SV_CSV.get(r["server"], r["server"])
     if final:
         return rows
     return [r for r in rows if snum(r["season"]) not in sp["test"]]
