@@ -294,6 +294,30 @@ S35·S36·S37(Sonnet, 수집만)과 점검 규칙 전에 끝난 S38~S41을 Opus 
    「분석 갱신」은 시즌 README 대신 분석 문서 3.A6의 점검 세션 줄에 체크와 결과 몇 줄로 적는다 (학습 등급·검증 요약이 전과 어떻게 달라졌는지).
 4. 조율 세션에 `점검 끝: 시즌별 후보 {}·고침 {}, 점검 요청 {}번`을 보낸다. S37 결과에는 수치를 쓰지 않는다.
 
+## 등수 점검 세션 지시문
+
+S32~S41은 점검이 끝난 뒤 `rank_over_200` 후보(게임 화면 등수가 200 초과, 2026-10-16 추가)가 더해져 판단 안 한 채 남았다.
+Sonnet 세션 하나가 이 후보만 판단한다 (사용자 결정 2026-10-16). 띄운 세션의 id는 prompt에 있다. S31 이하는 시즌 세션이 7단계에서 함께 본다.
+
+1. 시즌마다 (S41 → S32 순): `S{n}/review.json`에서 `kind: rank_over_200`이고 `decision`이 없는 항목만 본다. 다른 종류 항목은 건드리지 않는다.
+   - 사진은 `refetch.py`로 받는다 (시즌당 200번 안 — `review_fetch.tsv` 줄 수를 먼저 본다, 2026-10-16 기준 남은 수가 후보 수보다 많다). 받은 사진은 세션 임시 폴더에만.
+   - 항목의 `rows`가 obs.jsonl에서 어느 줄인지는 `img`·`row`로 찾는다. 그 줄의 `rank_txt`·`pct_txt`·`score`·`note`를 원본과 견준다.
+   - 사진은 세션이 직접 본다. 많으면 `raid-vision`(Haiku)에 판독을 맡겨도 되지만 판단은 세션이 한다. Sonnet·Opus 위주 Workflow는 쓰지 않는다.
+2. 판단은 [예외 처리 규칙](#예외-처리-규칙) 3의 「200 넘는 등수」대로:
+   - 200 넘는 그 숫자가 무엇인지(배지·레벨·다른 칸 등) note에 적는다.
+   - 같은 줄의 %·점수가 원본과 같으면 `keep` (등수는 도구가 이미 비운다).
+   - %나 점수가 틀렸으면 `S{n}/discard.json`에 줄 버림(`scope: row`, `action: discard`, `img`·`row`, 바른 값은 `correct`) → decision `row`.
+   - 게임 화면이 아니거나 이번 시즌·그 서버 화면이 아니면 그 사유대로 (기존 규칙).
+   - 항목마다 `decision`·`note`·`by`(이 세션 id)·`decided`(KST 날짜)·`seen`(본 사진 id).
+   - **S34·S37은 시험 시즌**: note·README에 %·점수 값을 쓰지 않고, `correct`도 비운다 (「맞음/틀림」만).
+3. discard.json을 고친 시즌은 후처리를 다시 돌린다: `bash tools/solo_raid/post_all.sh data/solo-raid/S{n}/state`
+   (S41만 시즌 전용 입력이 붙는다 — [solo-raid-cutoff.md](solo-raid-cutoff.md)의 `build_core.py` 단락에 있는 S41 명령). 그다음 `review.py STATE --write`로 고친 후보가 사라졌는지 본다.
+4. 시즌 README 「데이터 점검」 칸에 한 줄: `등수 점검 (2026-10-16): 후보 {}개 — keep {}·row {}·기타 {}, 점검 요청 {}번` (S34·S37도 개수는 쓴다).
+   시즌마다 커밋(`S{n} 등수 점검`) → `git fetch origin main && git merge origin/main` → `git push origin HEAD:main`.
+5. 도구 코드는 고치지 않는다. 규칙으로 잡을 만한 것(예: 늘 같은 자리의 배지 숫자)은 이 문서 「바뀐 기록」에 한 줄로 남긴다.
+6. 다 끝나면 `python3 -I tools/solo_raid/analyze_all.py`를 한 번 돌리고 바뀐 파일을 커밋·push한다. 결과를 prompt의 세션 id로 `send_message`
+   (`등수 점검 끝: 시즌별 후보·keep·row, 점검 요청 수`, S34·S37은 개수만)한 뒤 끝낸다.
+
 ## S40 시범에서 따로 할 것
 
 S40 세션(Opus)은 위 지시문대로 돌리면서 아래를 재고 「다음 시즌에 바꿀 것」에 적는다. 도구를 고쳐야 하면 고쳐도 된다. 다만 S39·S38이 뜨기 전에 push를 끝내고, 이 문서와 저비용 실험 README에 무엇을 바꿨는지 적는다.
@@ -363,3 +387,4 @@ S40 세션(Opus)은 위 지시문대로 돌리면서 아래를 재고 「다음 
 - 2026-10-16 (사용자 요청): 게임 화면 등수는 200위까지 → `post_exclude.py`가 200 넘는 등수에 `rank_over_200`을 붙이고(쓸 등수 `rank_use`는 비움),
   `review.py`가 사진마다 점검 후보 `rank_over_200`을 고른다. `core.jsonl`에 `rank` 칸을 더했다 (예측에는 아직 안 씀).
   S32~S41은 post_all을 다시 돌리고 review.json에 이 후보만 더했다 (S32 31 · S33 5 · S34 25 · S35 49 · S36 26 · S37 47 · S38 60 · S39 17 · S40 3 · S41 2, 판단 전).
+  판단은 Sonnet 세션 하나가 맡는다 → [등수 점검 세션 지시문](#등수-점검-세션-지시문) (사용자 결정).
