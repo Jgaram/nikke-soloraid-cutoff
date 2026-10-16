@@ -13,7 +13,7 @@ python3 -I tools/solo_raid/review.py data/solo-raid/S{n}/state [--write]
 - rank_server: 순위표 1~3위 정확 점수가 같은데 그 사진들 글의 텍스트 서버(text·fix)가 다름 → 소수 쪽 글 (3.2b S39 5881317 같은 경우).
 - cluster_mixed: 지문 묶음의 앵커 글이 두 서버 이상 (server_summary clusters). 소수 쪽 앵커 글을 적는다.
 - server_count_text: 서버 라벨이 붙은 글인데 본문·제목이 「n서버」「전서버」「타서버」처럼 여러 서버를 말함 (3.2 S40 6066145 같은 경우).
-- cross_season: 이 시즌 줄(season in)의 정확 점수가 주로 다른 시즌 obs.jsonl에 나옴 → 지난 시즌 기록·화면일 수 있음 (3.2 S40 6069623 같은 경우).
+- cross_season: 이 시즌 기본 집합 줄(season in·core use, 2026-10-16부터)의 정확 점수가 주로 다른 시즌 obs.jsonl에 나옴 → 지난 시즌 기록·화면일 수 있음 (3.2 S40 6069623 같은 경우).
   점수의 「주인」은 그 점수가 가장 많이 나온 시즌이다. 주인이 다른 시즌이고 그 시즌 횟수가 이 시즌의 2배 이상일 때만 고른다
   (순위표 상위권 점수는 그 시즌에 수십~수백 번 나온다).
 - outlier: post_outlier가 곡면에서 크게 벗어났다고 본 줄 (surface_high·surface_low).
@@ -144,13 +144,15 @@ def collect(state):
             add("server_count_text", no, f"라벨 {sv}, 글에 「{m.group(0)}」", site=site, no=no, title=p.get("title"))
 
     # cross_season: 이 시즌 줄의 정확 점수가 주로 다른 시즌에 나옴
+    # 기본 집합(core use)에 든 줄만 후보로 올린다 — 이미 빠진 줄은 다시 볼 필요가 없다 (S34 「다음 시즌에 바꿀 것」, 2026-10-16)
+    use_oi = {c["oi"] for c in jl(os.path.join(state, "core.jsonl")) if c.get("src") == "photo" and c.get("use")}
     mine = collections.defaultdict(set)
     occ = collections.defaultdict(collections.Counter)
-    for r in obs:
+    for oi, r in enumerate(obs):
         s = exact(r)
         if s:
             occ[s][name] += 1
-            if r.get("season") == "in":
+            if r.get("season") == "in" and oi in use_oi:
                 mine[s].add((str(r["no"]), r["site"]))
     for p in sorted(glob.glob(os.path.join(DATA, "S*", "state", "obs.jsonl"))):
         on = os.path.basename(os.path.dirname(os.path.dirname(p)))
