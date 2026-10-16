@@ -38,6 +38,8 @@ SRV = {"KR": "한섭", "JP": "일섭", "GL": "글섭"}
 PCTS = [1.0, 3.0, 10.0]
 Z80 = 1.2816
 MIN_SEASONS = 8   # criteria.small_n_note: 개발 시즌 8개 이상에서 판정
+# xval 판정 문구(검증 결과 파일에 저장된 값)를 화면의 다른 요약 줄처럼 명사형으로
+COVERAGE = {"구간이 좁다(과신)": "구간이 좁음(과신)", "구간이 넓다": "구간이 넓음"}
 
 
 def jload(p):
@@ -181,7 +183,7 @@ def notes(sv, data, crit, pending):
         summary.append(f"예측 오차(18~96시간, {'·'.join(f'{p:g}%' for p in main_pts)} 평균) <b>{e * 100:.1f}%</b>"
                        + ("" if b is None else f" vs 기준선 1 {b * 100:.1f}% — <b>{'기준선보다 나음' if e < b else '아직 기준선보다 낫지 않음'}</b>"))
     if J.get("cov80_main") is not None:
-        summary.append(f"80% 구간 포함률 <b>{J['cov80_main'] * 100:.0f}%</b> (목표 70~90%) — {J['coverage']}"
+        summary.append(f"80% 구간 포함률 <b>{J['cov80_main'] * 100:.0f}%</b> (목표 70~90%) — {COVERAGE.get(J['coverage'], J['coverage'])}"
                        + (" · 시즌 1개라 판단 불가" if len(J["seasons"]) < 2 else ""))
 
     N = []
@@ -190,17 +192,17 @@ def notes(sv, data, crit, pending):
     c3 = sorted([(s, v["v"]) for s, v in c3 if v], key=lambda t: -t[1])
     if len(c3) >= 2:
         lo, hi = c3[-1][1], c3[0][1]
-        N.append(f"<b>최종 컷은 시즌(보스)마다 다르다.</b> {name} 3% 컷이 " + " · ".join(f"{s} {v:.0f}억" for s, v in c3)
-                 + f" (최대·최소 {hi / lo:.2f}배). 지난 시즌 컷만으로는 맞히기 어렵고 진행 중 관측이 필요하다.")
+        N.append(f"<b>최종 컷은 시즌(보스)마다 다릅니다.</b> {name} 3% 컷이 " + " · ".join(f"{s} {v:.0f}억" for s, v in c3)
+                 + f" (최대·최소 {hi / lo:.2f}배). 지난 시즌 컷만으로는 맞히기 어렵고 진행 중 관측이 필요합니다.")
     elif len(c3) == 1:
-        N.append(f"{name} 3% 정답 컷은 {c3[0][0]} {c3[0][1]:.0f}억 하나뿐이다.")
+        N.append(f"{name} 3% 정답 컷은 {c3[0][0]} {c3[0][1]:.0f}억 하나뿐입니다.")
     # 쓸 만함 시작 시점 · 늘 한쪽으로 치우친 시즌
     U = J.get("usable", {})
     Tm = crit["T_main"]
     for p in PCTS:
         tol = crit["tol"][f"{p:g}"]
         if p not in scored_pcts(sv, data):
-            N.append(f"{p:g}%는 어느 시즌에도 {name} 정답 근거가 없어 채점하지 않았다.")
+            N.append(f"{p:g}%는 어느 시즌에도 {name} 정답 근거가 없어 채점하지 않았습니다.")
             continue
         flags = [U.get(f"T{T:g}/{p:g}") for T in Tm]
         start = next((Tm[i] for i in range(len(Tm)) if all(flags[i:])), None)
@@ -210,49 +212,49 @@ def notes(sv, data, crit, pending):
         elif any(flags):
             s_txt = f"<b>{p:g}% 예측은 몇 시점만 「쓸 만함」</b>(" + "·".join(f"{T}" for T, f in zip(Tm, flags) if f) + "시간)"
         else:
-            s_txt = f"<b>{p:g}% 예측은 어느 시점에서도 「쓸 만함」 기준(±{tol * 100:.0f}%)을 못 넘는다</b>"
-        s_txt += f" — 채점 시즌 {ns}개."
+            s_txt = f"<b>{p:g}% 예측은 어느 시점에서도 「쓸 만함」 기준(±{tol * 100:.0f}%)을 못 넘습니다</b>"
+        s_txt += f" — 채점 시즌 {ns}개입니다."
         bias = []
         for s in (seasons if ns >= 2 else []):
             e = [r["err"] for r in rows if r["season"] == s and r["pct"] == p and r["T"] in Tm]
             if len(e) >= len(Tm) - 1 and (all(v > 0 for v in e) or all(v < 0 for v in e)) and statistics.median(abs(v) for v in e) > tol:
                 bias.append(f"{eun(s)} 늘 {'높게' if e[0] > 0 else '낮게'}({pct_txt(min(e, key=abs))}~{pct_txt(max(e, key=abs))})")
         if bias:
-            s_txt += " " + ", ".join(bias) + " 예측했다."
+            s_txt += " " + ", ".join(bias) + " 예측했습니다."
         early = [r for r in rows if r["pct"] == p and r["T"] in Tm and r["T"] <= 36]
         cd = sum(1 for r in early if r["grade"] in ("C", "D"))
         if early and cd / len(early) >= 0.5:
-            s_txt += f" 다만 18~36시간 예측의 {cd}/{len(early)}개가 등급 C·D(관측이 적어 prior에 기댐)다."
+            s_txt += f" 다만 18~36시간 예측의 {cd}/{len(early)}개가 등급 C·D(관측이 적어 prior에 기댐)입니다."
         N.append(s_txt)
     cov = J.get("cov80_main")
     if cov is not None and len(J["seasons"]) >= 2:
         if cov < 0.70:
-            N.append(f"<b>80% 구간이 너무 좁다</b>(실제 포함 {cov * 100:.0f}%). 화면의 구간보다 넓게 봐야 한다.")
+            N.append(f"<b>80% 구간이 너무 좁습니다</b>(실제 포함 {cov * 100:.0f}%). 화면의 구간보다 넓게 봐야 합니다.")
         elif cov > 0.90:
-            N.append(f"80% 구간이 넓은 편이다(실제 포함 {cov * 100:.0f}%).")
+            N.append(f"80% 구간이 넓은 편입니다(실제 포함 {cov * 100:.0f}%).")
     # 배율 근거
     m = data["conv"]["m"].get(sv, 1.0)
     src = data["conv"]["m_src"].get(sv, "")
     if src.startswith("borrow"):
-        N.append(f"{name}은 배율 근거 점이 {'없어' if n_units == 0 else '적어'} ① 배율을 한섭 것 그대로 빌린다(가정).")
+        N.append(f"{name}은 배율 근거 점이 {'없어' if n_units == 0 else '적어'} ① 배율을 한섭 것 그대로 빌립니다(가정).")
     elif sv != "KR":
-        N.append(f"① 배율은 한섭 배율에 {name} 배수 {m:.2f}를 곱한 값이다(근거 점 {n_units}개라 한섭보다 거칠다).")
+        N.append(f"① 배율은 한섭 배율에 {name} 배수 {m:.2f}를 곱한 값입니다(근거 점 {n_units}개라 한섭보다 거칩니다).")
     lv = data["conv"]["levels"]
     if len(lv) >= 2:
         lo, hi = min(lv.items(), key=lambda t: t[1]), max(lv.items(), key=lambda t: t[1])
-        N.append(f"시즌마다 밀리는 정도가 다르다: 배율 수준 {lo[0]} {lo[1]:.2f}배 ~ {hi[0]} {hi[1]:.2f}배. 새 시즌은 이 수준을 모르니 ①은 평균에 넓은 구간을 쓴다.")
+        N.append(f"시즌마다 밀리는 정도가 다릅니다: 배율 수준 {lo[0]} {lo[1]:.2f}배 ~ {hi[0]} {hi[1]:.2f}배. 새 시즌은 이 수준을 모르니 ①은 평균에 넓은 구간을 씁니다.")
     late = [s for s in seasons if not data["seasons"][s]["c_start"].endswith("05:00:00")]
     for s in late:
-        N.append(f"{eun(s)} 챌린지가 {data['seasons'][s]['c_start'][11:16]}에 시작해 「시작 후 시간」이 다른 시즌과 다른 시각이다(① 근거 그래프).")
+        N.append(f"{eun(s)} 챌린지가 {data['seasons'][s]['c_start'][11:16]}에 시작해 「시작 후 시간」이 다른 시즌과 다른 시각입니다(① 근거 그래프).")
     # 공통
     N.append(f"모든 수치는 개발 시즌 {len(seasons)}개({seasons[0]}~{seasons[-1]})의 "
-             + ("<b>시험 운전</b>이다 — 판정은 개발 시즌 8개 이상에서 한다." if len(seasons) < MIN_SEASONS else "검증 결과다.")
-             + " 시험 시즌(잠근 시즌)은 열지 않았다.")
+             + ("<b>시험 운전</b>입니다 — 판정은 개발 시즌 8개 이상에서 합니다." if len(seasons) < MIN_SEASONS else "검증 결과입니다.")
+             + " 시험 시즌(잠근 시즌)은 열지 않았습니다.")
     if pending:
         N.append("아직 분석에 들지 않은 개발 시즌: " + " · ".join(f"{s}({c})" for s, c in pending) + ".")
     if n_all:
-        N.append(f"서버 라벨이 없는 관측({n_unk / n_all * 100:.0f}%)은 ①의 점에 넣지 않았다. 예측(②)은 도구 기본값대로 서버 미상 줄을 "
-                 "사이트별 서버 비율만큼 한섭 예측에만 넣고, 일섭·글섭은 라벨 붙은 줄만 쓴다.")
+        N.append(f"서버 라벨이 없는 관측({n_unk / n_all * 100:.0f}%)은 ①의 점에 넣지 않았습니다. 예측(②)은 도구 기본값대로 서버 미상 줄을 "
+                 "사이트별 서버 비율만큼 한섭 예측에만 넣고, 일섭·글섭은 라벨 붙은 줄만 씁니다.")
     return {"summary": summary, "notes": N}
 
 

@@ -256,11 +256,11 @@ def analysis_html(vdata, data):
     seas = vdata["season_list"]
     m = data["analysis"]["live_method"]
     head = ('<p class="muted"><a href="./">← 첫 화면 (컷 예측 · 지금 몇 %면 최종 몇 % · 지난 시즌 컷)</a></p>\n'
-            '<p class="note">이 페이지는 예측 방법을 검증하는 분석 화면이다. '
-            f'아래 ①은 첫 화면의 계산기와 같은 「여러 시즌 % 변환」이고, ②의 정확도도 <b>여러 시즌 prior</b>로 잰 것이다. '
-            f'첫 화면의 진행 중 컷 예측은 이와 다른 <b>{m}</b>로 내며, 그 방법의 정확도는 아직 검증 중이다.</p>\n')
+            '<p class="note">이 페이지는 예측 방법을 검증하는 분석 화면입니다. '
+            f'아래 ①은 첫 화면의 계산기와 같은 「여러 시즌 % 변환」이고, ②의 정확도도 <b>여러 시즌 prior</b>로 잰 것입니다. '
+            f'첫 화면의 진행 중 컷 예측은 이와 다른 <b>{m}</b>로 내며, 그 방법의 정확도는 아직 검증 중입니다.</p>\n')
     sub = "개발 시즌 {}~{} ({}개) · {} KST 기준".format(seas[0], seas[-1], len(seas), data["asof"])
-    stamp = "정답 표는 개발 시즌만 쓴다 — 시험 시즌(잠근 시즌)은 열지 않았다."
+    stamp = "정답 표는 개발 시즌만 씁니다 — 시험 시즌(잠근 시즌)은 열지 않았습니다."
     foot = '  <footer class="muted" style="margin-top:28px">\n' + FOOTER + "  </footer>\n"
     tail = ("<script>\n"
             f'document.getElementById("sub").textContent = {js(sub)};\n'
