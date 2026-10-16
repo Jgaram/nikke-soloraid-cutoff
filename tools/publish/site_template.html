@@ -472,7 +472,7 @@ function drawConv() {
   seaNote.hidden = cvSea === "off";
   if (cvSea !== "off") {
     const nS = new Set(OBS.map(o => o[0])).size;
-    seaNote.textContent = `점 = 지난 시즌 진행 중에 올라온 순위 화면에서 읽은 그 시각의 점수와 %입니다. 같은 점수가 시즌이 끝났을 때 몇 %였는지는 끝난 뒤 모은 점수표에서 찾아 붙였습니다 (같은 사람의 같은 날 화면은 하나로 셉니다). 그 최종 %가 1·3·10%의 ÷1.3~×1.3 안인 것만 찍어, 점이 선에서 조금 벗어나는 데는 이 폭도 섞여 있습니다 (${SRV[srv]} ${OBS.length}개`
+    seaNote.textContent = `점 = 지난 시즌 진행 중에 올라온 순위 화면에서 읽은 그 시각의 점수와 %입니다. 같은 점수가 시즌이 끝났을 때 몇 %였는지는 끝난 뒤 모은 점수표에서 찾아 붙였습니다 (같은 사람의 같은 날 화면은 하나로 셉니다). 최종 %가 1·3·10%의 ÷1.3~×1.3 안인 것을 골라, 배율(최종 ÷ 그때)은 그대로 두고 「최종이 딱 1·3·10%였다면 그때 몇 %」로 옮겨 찍었습니다 (${SRV[srv]} ${OBS.length}개`
       + (cvSea === "all" ? `, ${nS}개 시즌` : "") + `). 그 시즌이 평균보다 더 밀렸으면 점이 굵은 선보다 위에, 덜 밀렸으면 아래에 찍힙니다. `
       + `점선 = 그 시즌의 밀린 정도(수준 배수)를 여러 시즌 곡선에 곱해 그린 선이라, 관측을 그대로 이은 선은 아닙니다.`
       + (OBS.length < 10 ? ` ${SRV[srv]}은 관측이 적어 점이 듬성듬성합니다.` : "");
@@ -516,7 +516,7 @@ function drawConv() {
     }
     for (const o of OBS) {
       const t = TGT.reduce((a, b) => Math.abs(Math.log(o[3] / b)) < Math.abs(Math.log(o[3] / a)) ? b : a);
-      const x = X(o[1]), y = Y(o[2]);
+      const x = X(o[1]), y = Y(t * o[2] / o[3]);   // 배율(최종 ÷ 그때)은 그대로 두고 최종이 딱 t%였다면의 그때 %로 옮긴다
       el("circle", {cx: x, cy: y, r: narrow ? 2.8 : 3.3, fill: COL(t), stroke: "var(--surface-1)", "stroke-width": 1, opacity: .9}, svg);
       hits.push({x, y, o, t});
     }
@@ -550,7 +550,8 @@ function drawConv() {
     for (const c of hits) { const d = (c.x - mx) ** 2 + (c.y - my) ** 2; if (d < bd) { bd = d; best = c; } }
     if (best) {
       const [s, hh, x, f] = best.o;
-      html += `<div class="r" style="margin-top:4px"><i class="dot" style="background:${COL(best.t)}"></i>관측 ${s} ${kstLab(ts(CV.start[s]) + hh * 3600e3)}: 그때 <b>${pf(x)}</b> → 최종 <b>${pf(f)}</b></div>`;
+      html += `<div class="r" style="margin-top:4px"><i class="dot" style="background:${COL(best.t)}"></i>관측 ${s} ${kstLab(ts(CV.start[s]) + hh * 3600e3)}: 그때 <b>${pf(x)}</b> → 최종 <b>${pf(f)}</b> (×${(f / x).toFixed(2)})</div>`
+        + `<div class="muted">최종 ${best.t}%로 옮기면 그때 ${pf(best.t * x / f)} (점 위치)</div>`;
     }
     tip.show(html, ...hostXY(host, ev));
   }, () => { tip.hide(); place(curH()); });
