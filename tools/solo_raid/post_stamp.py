@@ -4,7 +4,7 @@ python3 -I tools/solo_raid/post_stamp.py STATE [--extra 이름=경로 ...]      
 python3 -I tools/solo_raid/post_stamp.py STATE --check                          # 지금 입력이 도장과 같은지 (fresh·stale·never)
 
 도장은 결정적이다 (시각을 넣지 않는다 — 두 번 돌려 결과 파일이 같아야 한다). 실행 시각은 등록부가 git 커밋 시각으로 본다.
-- inputs: STATE의 입력 파일(아래 OUTPUTS·ANALYSIS가 아닌 것)마다 sha1, runs/*/fetchlog.tsv sha1 묶음, S{n}/discard.json(버릴 것·고칠 것) 항목,
+- inputs: STATE의 입력 파일(아래 OUTPUTS·ANALYSIS가 아닌 것)마다 sha1, runs/*/fetchlog.tsv sha1 묶음, S{n}/discard.json(버릴 것·고칠 것) 항목, 앞 시즌 route.jsonl sha1 (xseason — 시즌을 건넌 재업로드),
   그리고 post_all에 준 시즌 전용 입력(--posts·--snap·--parsed·--alt·--runs, 폴더는 파일 sha1 묶음)
 - tools: 후처리 도구 파일 sha1
 - digest: 위 둘을 합친 sha1 (등록부·분석 결과에 남기는 값)
@@ -19,6 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import discard  # noqa: E402
+import xseason  # noqa: E402
 
 STAMP = "post_all_stamp.json"
 OUTPUTS = {"server.jsonl", "server_claims.jsonl", "server_summary.json", "post_exclude.jsonl", "post_link.jsonl",
@@ -27,7 +28,7 @@ OUTPUTS = {"server.jsonl", "server_claims.jsonl", "server_summary.json", "post_e
 ANALYSIS = {"prior.json", "post_server_mix.jsonl", "post_server_mix_summary.json"}   # 후처리 뒤 분석 층 (입력 아님)
 TOOLS = ["tools/solo_raid/post_all.sh", "tools/solo_raid/post_exclude.py", "tools/solo_raid/post_link.py",
          "tools/solo_raid/post_time.py", "tools/solo_raid/truth.py", "tools/solo_raid/post_outlier.py",
-         "tools/solo_raid/build_core.py", "tools/solo_raid/discard.py",
+         "tools/solo_raid/build_core.py", "tools/solo_raid/discard.py", "tools/solo_raid/xseason.py",
          "experiments/2026-10-15-solo-raid-low-cost/tools/server_classify.py"]
 
 
@@ -67,6 +68,7 @@ def compute(state, extra=None, opts=""):
     runs = resolve(extra["runs"]) if "runs" in extra else os.path.join(state, "..", "runs")
     fl = sorted(os.path.join(dp, f) for dp, _, fs in os.walk(runs) for f in fs if f == "fetchlog.tsv") if os.path.isdir(runs) else []
     inputs["runs/*/fetchlog.tsv"] = sha1_obj([(os.path.relpath(p, runs), sha1_file(p)) for p in fl])
+    inputs["앞 시즌 route.jsonl (xseason)"] = sha1_obj([(n, sha1_file(p)) for n, p in xseason.stamp_paths(state)])
     inputs["discard.json(시즌 항목)"] = sha1_obj(list(discard.items(state).values()))   # 열쇠 순서
     ex = {}
     for k, v in sorted(extra.items()):

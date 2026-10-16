@@ -56,6 +56,8 @@ flag (빼지 않고 표시만)
 - final_pre_end: 최종 결과 화면(screen season_end, 보상 구간 표 빼고)인데 글이 시즌 끝(season.json end) 전에 올라왔다 → prev.
   끝나기 전에는 이번 시즌 최종 %가 없다. 그 사진의 shot(cur) 근거는 지운다 (챌린지 중에 지난 시즌 결과를 찍은 것). 2026-10-16, S33 4550934 등
   (시즌 세션 점검이 「같은 사람 기록」으로 남긴 곡면 이탈 z 12~19 줄).
+- xseason: 같은 사진 파일(sha1)이 앞 시즌(수집 끝난 시즌) 받기 구간에 이미 있다 → prev (`xseason.py`, 2026-10-17 분석 ②).
+  S31 4183097·4196485가 S30 3940094_1(S29 3810211_0의 재업로드)을 다시 올린 일. 수동 판정처럼 다른 근거보다 앞서고, 묶음으로 퍼뜨리지 않는다.
 - note_date: 판독 메모의 연·월·일이 모두 챌린지 시작 전 (예: 명예의 전당 「2024.02.09-02.16」) → prev.
 - label: 판독 label의 시즌 표기가 이번 시즌 → cur.
 - text: 글 제목·본문에서 이 줄의 %(와 점수)가 함께 나온 기록 조각을 찾는다. 조각에 이번 시즌 이름(S41)·보스 이름·
@@ -79,6 +81,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import discard  # noqa: E402
+import xseason  # noqa: E402
 
 KST_MONTH = re.compile(r"(?<!\d)(?:(\d{2})\s?년\s?)?(\d{1,2})(?:\s?~\s?(\d{1,2}))?\s?월")
 YYMM = re.compile(r"(?<![\d.])(\d{2})\.(\d{2})(?![\d.]|\s*(?:%|퍼))")
@@ -241,6 +244,11 @@ def main():
                 and not (o.get("pct_txt") or "").strip().startswith("~") and not REWARD_NOTE.search(o.get("note") or "")):
             ev[o["img"]] = {e for e in ev[o["img"]] if e[1] != "shot"} | {("prev", "final_pre_end", o["post_t"][:16])}
 
+    # 앞 시즌에 이미 올라온 같은 사진 → 지난 시즌 (2026-10-17, 시즌을 건넌 재업로드)
+    # 사진 하나에만 정하고 묶음으로 퍼뜨리지 않는다 (지문 잇기가 이번 시즌 사진과 이어 묶음 전체가 conflict가 되지 않게)
+    xs = xseason.photo_sha(st)
+    xs_img = {o["img"]: xs[sha[o["img"]]] for o in obs if sha.get(o["img"]) in xs}
+
     # 2) 묶음: 지문 묶음 이름, 없으면 같은 사진(sha1)
     group = {}
     for o, s in zip(obs, srv):
@@ -259,6 +267,8 @@ def main():
     def img_season(img):
         if img in manual:
             return manual[img]["season"], f"manual: {manual[img]['why'][:60]}"
+        if img in xs_img:
+            return "prev", f"xseason 앞 시즌에 같은 사진 {xs_img[img]}"
         own = ev.get(img, set())
         gs = {e for e in gev.get(group[img], set()) if e[2] != img}
         vals = {e[0] for e in own} | {e[0] for e in gs}

@@ -83,6 +83,7 @@ NOT_RE = re.compile(r"(?:\s?(?:섭|썹|서버))?(?:(?:이?[였었]?으면|이?�
                     r"|(?:으로|로|에)?\s?(?:갔|넘어갔|옮겼)었?으면|(?:으로|로|에)\s?가면)")   # 「글섭갔으면」(S33 4573593, 2026-10-16)
 # 「번외 북미섭」처럼 덧붙인 서버는 글의 주 서버가 아니다 (S32 4368058, 2026-10-16)
 EXTRA_RE = re.compile(r"번외|덤으로|덤\s*:")
+TRACKER_NO_ANCHOR = True
 ID_RE = re.compile(r"[A-Za-z0-9_]{6,}")   # 인용에서 닉네임·친구 코드처럼 보이는 긴 영숫자는 가린다
 
 
@@ -199,8 +200,12 @@ def main():
                     help="코드 OCR 줄(score_txt 없음)의 점수도 지문으로 쓴다 (기본 켬, 2026-10-16. post_link.py와 같은 기준)")
     ap.add_argument("--single-anchor", action=argparse.BooleanOptionalAction, default=True,
                     help="앵커 글이 1개인 묶음(top7_1)의 줄에 그 서버를 붙인다 (기본 켬, 2026-10-16. 끄면 후보로만)")
+    ap.add_argument("--tracker-anchor", action=argparse.BooleanOptionalAction, default=False,
+                    help="트래커 화면만 있는 사진도 글 텍스트 앵커로 센다 (2026-10-17 전 동작. 기본 끔)")
     a = ap.parse_args()
     state = a.state
+    global TRACKER_NO_ANCHOR
+    TRACKER_NO_ANCHOR = not a.tracker_anchor
 
     obs = jl(os.path.join(state, "obs.jsonl"))
     sha = {r["id"]: r["sha1"] for r in jl(os.path.join(state, "route.jsonl")) if r.get("sha1")}
@@ -269,6 +274,12 @@ def main():
                 if x != y:
                     adj[x][y] += 1
     allnodes = sorted(nposts)
+    # 트래커 화면(외부 집계·비교표)만 있는 마디는 글 텍스트 앵커가 되지 않는다 (2026-10-17 분석 ②, S30 3941671_0 —
+    # 한국·일본·글로벌 열이 있는 컷 비교표가 제목 「일섭」으로 일섭 앵커가 되어 묶음이 섞였다). 사진 단위 고침(fix)은 그대로 센다
+    tnode = collections.defaultdict(lambda: True)
+    for r in obs:
+        n = node(r)
+        tnode[n] = tnode[n] and r.get("screen") == "tracker"
     # 사진 단위 서버 고침(scope img): 그 사진(마디)은 글 텍스트 대신 고친 서버의 앵커다
     nfix = {}
     for img, it in img_fix.items():
@@ -283,7 +294,7 @@ def main():
         for n in nodes:
             if n in nfix:
                 c[nfix[n]] += 1
-            else:
+            elif not (TRACKER_NO_ANCHOR and tnode[n]):
                 for no in nposts[n]:
                     ps[no].append(n)
         for no in sorted(ps):
