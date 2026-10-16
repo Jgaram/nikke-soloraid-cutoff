@@ -46,6 +46,9 @@ flag (빼지 않고 표시만)
 
 시즌 판정 (1.3) — 점수·%의 크기로는 정하지 않는다. 근거는 사진 하나(img) 단위로 모은다.
 - shot: 첨부 이름·epoch 시각(shot_t)이 챌린지 시작(c_start) 뒤 → cur.
+- final_pre_end: 최종 결과 화면(screen season_end, 보상 구간 표 빼고)인데 글이 시즌 끝(season.json end) 전에 올라왔다 → prev.
+  끝나기 전에는 이번 시즌 최종 %가 없다. 그 사진의 shot(cur) 근거는 지운다 (챌린지 중에 지난 시즌 결과를 찍은 것). 2026-10-16, S33 4550934 등
+  (시즌 세션 점검이 「같은 사람 기록」으로 남긴 곡면 이탈 z 12~19 줄).
 - note_date: 판독 메모의 연·월·일이 모두 챌린지 시작 전 (예: 명예의 전당 「2024.02.09-02.16」) → prev.
 - label: 판독 label의 시즌 표기가 이번 시즌 → cur.
 - text: 글 제목·본문에서 이 줄의 %(와 점수)가 함께 나온 기록 조각을 찾는다. 조각에 이번 시즌 이름(S41)·보스 이름·
@@ -222,6 +225,13 @@ def main():
                 s, why = words.judge(seg)
                 if s:
                     ev[img].add((s, "text", re.sub(r"\s+", " ", seg.strip())[-40:]))
+    # 끝나기 전에 올라온 최종 결과 화면(season_end, 보상 구간 표 빼고)은 이번 시즌일 수 없다 → 지난 시즌 (2026-10-16, S33 4550934 등).
+    # 챌린지 중에 찍은 지난 시즌 결과 화면이라 shot(cur) 근거는 지운다
+    end = season.get("end")
+    for o in obs:
+        if (end and o.get("screen") == "season_end" and o.get("post_t") and o["post_t"] < end and o.get("pct") is not None
+                and not (o.get("pct_txt") or "").strip().startswith("~") and not REWARD_NOTE.search(o.get("note") or "")):
+            ev[o["img"]] = {e for e in ev[o["img"]] if e[1] != "shot"} | {("prev", "final_pre_end", o["post_t"][:16])}
 
     # 2) 묶음: 지문 묶음 이름, 없으면 같은 사진(sha1)
     group = {}

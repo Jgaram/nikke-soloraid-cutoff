@@ -38,7 +38,7 @@ import split as SP  # noqa: E402
 
 DATA = os.path.join(ROOT, "data", "solo-raid")
 MULTI_SRV = re.compile(r"[2-9]\s*서버|[2-9]\s*섭|[이삼사오]\s*서버|전\s?서버|전섭|모든\s?서버|타\s?서버|타섭|다른\s?서버|서버\s?별|서버마다")
-KEEP = ("decision", "note", "by", "decided")
+KEEP = ("decision", "note", "by", "decided", "seen")   # seen: 이 항목을 판단하며 원본으로 본 사진 id 목록 (2026-10-16)
 
 
 def jl(p):
