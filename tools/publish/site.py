@@ -40,6 +40,7 @@ FOOTER = (
 
 SERVERS = ["KR", "JP", "GL"]
 PCTS = ["1", "3", "10"]
+PAST_PCTS = {"KR": PCTS + ["30"]}   # 지난 시즌 컷만: 한섭 30%를 참고로 더한다 (2026-10-16 사용자 요청 — 일섭·글섭 30%는 집계표가 드묾)
 KST = dt.timezone(dt.timedelta(hours=9))
 INPUTS = ["data/solo-raid", "tools/solo_raid", "tools/publish"]
 
@@ -69,9 +70,14 @@ def season_json(s):
 
 
 def past(viz_seasons, reg):
-    """시즌마다 최종 컷과 출처. 분석된 개발 시즌은 정답 표(서버 셋), 그 밖 개발 시즌은 seasons.json 한섭 3·10%, 시험 시즌은 잠김.
+    """시즌마다 최종 컷과 출처. 분석된 개발 시즌은 정답 표(서버 셋, 한섭은 30%까지), 그 밖 개발 시즌은 seasons.json 한섭 3·10%와
+    server_cutoffs.csv 한섭 30%, 시험 시즌은 잠김.
     출처(basis): table = 커뮤니티 집계표, curve = 커뮤니티 관측 점수로 그린 곡선."""
     table = {r["name"]: r for r in split.load_seasons()}   # 시험 시즌은 kr_cut_*가 빠져 온다
+    kr30 = {}   # 정답 표에 없는 시즌의 한섭 30% 집계표 (server_cutoffs.csv, 시험 시즌 행은 빠져 온다)
+    for c in split.load_server_cutoffs():
+        if c["server"] == "KR" and c["percentile"] == "30" and c.get("score_100m"):
+            kr30.setdefault(split.snum(c["season"]), c["score_100m"])
     out = []
     for s, r in sorted(reg.items(), key=lambda kv: split.snum(kv[0])):
         t = table.get(s, {})
@@ -86,12 +92,14 @@ def past(viz_seasons, reg):
         if s in viz_seasons:
             key = viz_seasons[s]["key"]
             for sv in SERVERS:
-                c = {p: c for p, c in key.get(sv, {}).items() if p in PCTS}
+                c = {p: c for p, c in key.get(sv, {}).items() if p in PAST_PCTS.get(sv, PCTS)}
                 if c:
                     row["cuts"][sv] = {p: r2(v["v"]) for p, v in c.items()}
                     row["basis"][sv] = {p: v["basis"] for p, v in c.items()}
-        elif t.get("kr_cut_3") or t.get("kr_cut_10"):
+        elif t.get("kr_cut_3") or t.get("kr_cut_10") or split.snum(s) in kr30:
             c = {p: r2(t.get(f"kr_cut_{p}")) for p in ("3", "10") if t.get(f"kr_cut_{p}")}
+            if split.snum(s) in kr30:
+                c["30"] = r2(kr30[split.snum(s)])
             row["cuts"]["KR"] = c
             row["basis"]["KR"] = {p: "table" for p in c}
         out.append(row)

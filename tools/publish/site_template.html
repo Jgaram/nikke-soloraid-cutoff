@@ -11,7 +11,7 @@
   --surface-0: #f4f3f0; --surface-1: #fcfcfb; --border: #e2e0da; --grid: #ebe9e4; --axis: #b9b7b0;
   --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #77756f;
   --band: rgba(82, 81, 78, 0.10); --band-strong: rgba(82, 81, 78, 0.18);
-  --t1: #104281; --t3: #2a78d6; --t10: #86b6ef;
+  --t1: #104281; --t3: #2a78d6; --t10: #86b6ef; --t30: #b26b00;
   --truth: #c43c3b; --warn: #b26b00;
 }
 @media (prefers-color-scheme: dark) {
@@ -20,7 +20,7 @@
     --surface-0: #121211; --surface-1: #1a1a19; --border: #2f2e2b; --grid: #2a2927; --axis: #55534e;
     --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a988f;
     --band: rgba(195, 194, 183, 0.10); --band-strong: rgba(195, 194, 183, 0.18);
-    --t1: #b7d3f6; --t3: #3987e5; --t10: #1c5cab;
+    --t1: #b7d3f6; --t3: #3987e5; --t10: #1c5cab; --t30: #e0a040;
     --truth: #e66767; --warn: #e0a040;
   }
 }
@@ -29,7 +29,7 @@
   --surface-0: #121211; --surface-1: #1a1a19; --border: #2f2e2b; --grid: #2a2927; --axis: #55534e;
   --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a988f;
   --band: rgba(195, 194, 183, 0.10); --band-strong: rgba(195, 194, 183, 0.18);
-  --t1: #b7d3f6; --t3: #3987e5; --t10: #1c5cab;
+  --t1: #b7d3f6; --t3: #3987e5; --t10: #1c5cab; --t30: #e0a040;
   --truth: #e66767; --warn: #e0a040;
 }
 * { box-sizing: border-box; }
@@ -200,7 +200,7 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
 
   <section class="card">
     <h2>지난 시즌 커트라인</h2>
-    <p class="muted">시즌이 끝났을 때의 1·3·10% 컷 (억 점). 「잠김」은 예측 방법을 정직하게 검증하려고 따로 떼어 둔 시험 시즌이라, 최종 채점 전까지 공개하지 않습니다.</p>
+    <p class="muted">시즌이 끝났을 때의 1·3·10% 컷 (억 점). 한섭은 30% 컷도 참고로 함께 보여 줍니다. 「잠김」은 예측 방법을 정직하게 검증하려고 따로 떼어 둔 시험 시즌이라, 최종 채점 전까지 공개하지 않습니다.</p>
     <div class="legend" id="pastLegend"></div>
     <div class="chart" id="pastChart"></div>
     <div class="tbl-wrap"><table id="pastTable"></table></div>
@@ -625,15 +625,17 @@ function drawConv() {
 const BASIS = {table: "집계표", curve: "관측 곡선"};
 function srcText(r) {
   const b = (r.basis || {})[srv] || {}, by = {};
-  for (const p of PCTS) if (b[p]) (by[b[p]] = by[b[p]] || []).push(p);
+  for (const p of ["1", "3", "10", "30"]) if (b[p]) (by[b[p]] = by[b[p]] || []).push(p);
   return Object.entries(by).map(([k, ps]) => `${ps.join("·")}% ${BASIS[k] || k}`).join(" · ");
 }
 function drawPast() {
   const R0 = DATA.past.filter(r => !(r.end && ts(r.end) > NOW));   // 아직 안 끝난 시즌은 숨김
+  // 지난 시즌 표만 30%를 더한다 (한섭만 자료가 있다, 2026-10-16) — 그 서버에 30% 값이 하나라도 있을 때만
+  const PP = R0.some(r => ((r.cuts || {})[srv] || {})["30"] != null) ? [...PCTS, "30"] : PCTS;
   const has = r => Object.keys((r.cuts || {})[srv] || {}).length > 0;
   const host = document.getElementById("pastChart"); host.innerHTML = "";
   const note = document.getElementById("pastNote"), tbl = document.getElementById("pastTable");
-  document.getElementById("pastLegend").innerHTML = PCTS.map(p => `<span><i class="sw" style="background:${COL(p)}"></i>${p}% 컷</span>`).join("")
+  document.getElementById("pastLegend").innerHTML = PP.map(p => `<span><i class="sw" style="background:${COL(p)}"></i>${p}% 컷</span>`).join("")
     + `<span><i class="sw band" style="background:var(--text-muted)"></i>잠김 (시험 시즌)</span>`;
   const i0 = R0.findIndex(has);
   if (i0 < 0) { empty(host, `${SRV[srv]} 지난 시즌 컷이 아직 없습니다.`); tbl.innerHTML = ""; note.textContent = ""; return; }
@@ -642,7 +644,7 @@ function drawPast() {
     const r = R.find(has);
     empty(host, `${SRV[srv]} 컷은 ${r.season} 하나뿐이라 그래프 없이 표로만 보여 줍니다.`);
   } else {
-    const vals = R.flatMap(r => PCTS.map(p => ((r.cuts || {})[srv] || {})[p]).filter(v => v != null));
+    const vals = R.flatMap(r => PP.map(p => ((r.cuts || {})[srv] || {})[p]).filter(v => v != null));
     const nt = niceTicks(0, Math.max(...vals));
     const W = Math.max(300, host.clientWidth);
     const f = frame(host, {W, H: W < 600 ? 240 : 320, m: {l: 40, r: 12, t: 12, b: 40}, xlo: -0.5, xhi: R.length - 0.5, ylo: 0, yhi: nt.hi, yt: nt.ticks, label: "지난 시즌 최종 컷"});
@@ -652,7 +654,7 @@ function drawPast() {
       if ((R.length - 1 - i) % every === 0) el("text", {x: f.X(i), y: f.y0 + 16, "text-anchor": "middle", style: r.locked ? "opacity:.6" : null}, f.svg).textContent = r.season.slice(1);
     });
     el("text", {x: f.x0 - 6, y: f.y0 + 16, "text-anchor": "end"}, f.svg).textContent = "S";
-    for (const p of PCTS) {
+    for (const p of PP) {
       let seg = [];
       const flush = () => { if (seg.length > 1) el("polyline", {points: seg.join(" "), fill: "none", stroke: COL(p), "stroke-width": 2}, f.svg); seg = []; };
       R.forEach((r, i) => {
@@ -669,18 +671,19 @@ function drawPast() {
       const sx = svgX(f.svg, W, ev);
       const i = Math.max(0, Math.min(R.length - 1, Math.round((sx - f.X(0)) / bw))), r = R[i], c = (r.cuts || {})[srv] || {}, b = (r.basis || {})[srv] || {};
       const lines = r.locked ? `<span class="muted">잠김 — 최종 채점 뒤 공개</span>`
-        : PCTS.filter(p => c[p] != null).map(p => `<div class="r"><i class="sw" style="background:${COL(p)}"></i>${p}% ${fmt(c[p], 2)}억 <span class="muted">${BASIS[b[p]] || ""}</span></div>`).join("") || `<span class="muted">${SRV[srv]} 컷 없음</span>`;
+        : PP.filter(p => c[p] != null).map(p => `<div class="r"><i class="sw" style="background:${COL(p)}"></i>${p}% ${fmt(c[p], 2)}억 <span class="muted">${BASIS[b[p]] || ""}</span></div>`).join("") || `<span class="muted">${SRV[srv]} 컷 없음</span>`;
       tip.show(`<b>${r.season} ${r.boss}</b> · ${r.start}<br>${lines}`, ...hostXY(host, ev));
     }, () => tip.hide());
   }
   const rows = R.slice().reverse().map(r => {
     const c = (r.cuts || {})[srv] || {}, b = (r.basis || {})[srv] || {};
-    const cells = r.locked ? `<td class="lock" colspan="3">잠김</td>`
-      : PCTS.map(p => `<td>${c[p] != null ? fmt(c[p], 2) + (b[p] === "curve" ? `<sup class="cv">*</sup>` : "") : "–"}</td>`).join("");
+    const cells = r.locked ? `<td class="lock" colspan="${PP.length}">잠김</td>`
+      : PP.map(p => `<td>${c[p] != null ? fmt(c[p], 2) + (b[p] === "curve" ? `<sup class="cv">*</sup>` : "") : "–"}</td>`).join("");
     return `<tr><td>${r.season}<span class="boss-sm">${r.boss}</span></td><td class="l hide-sm">${r.boss}</td><td class="l hide-sm">${r.start}</td>${cells}<td class="l muted hide-sm">${r.locked ? "" : srcText(r)}</td></tr>`;
   });
-  tbl.innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th><th class="l hide-sm">시작</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}<th class="l hide-sm">출처</th></tr></thead><tbody>${rows.join("")}</tbody>`;
+  tbl.innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th><th class="l hide-sm">시작</th>${PP.map(p => `<th>${p}%</th>`).join("")}<th class="l hide-sm">출처</th></tr></thead><tbody>${rows.join("")}</tbody>`;
   note.innerHTML = `<sup class="cv">*</sup> = 끝난 뒤 올라온 점수·%로 그린 곡선에서 읽은 값, 표시 없는 값 = 커뮤니티 집계표(공식 확정값 아님).`
+    + (PP.includes("30") ? " 30% 컷은 시즌마다 크게 오르내리고 근거가 1·3·10%보다 약해 참고값입니다." : "")
     + (skipped.length ? ` 표에서 뺀 시즌: ${skipped[0].season}${skipped.length > 1 ? "~" + skipped[skipped.length - 1].season : ""} (${SRV[srv]} 컷 자료가 없거나 잠김).` : "");
 }
 
