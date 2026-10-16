@@ -141,6 +141,13 @@ robots.txt도 다시 봤다 — `game.naver.com` `*` 허용, `comm-api.game.nave
 - 제목 검색은 `s_type=search_subject&s_keyword={검색어}`를 사용한다. 검색 결과는 글 번호 구간으로 나뉘며, 첫 구간의 결과가 비어 있다고 전체 기간에 글이 없다는 뜻은 아니다.
 - 페이지 하단의 `이전 검색`·`다음 검색` 링크에 있는 `search_pos`를 따라 과거 구간으로 이동한다. 특정 구간 안의 페이지 이동과 검색 구간 이동은 별개다. 구간 크기를 고정값으로 가정하지 말고 실제 링크와 게시 시각을 확인한다.
 
+2026-10-16 역대 컷 정리 조사에서 확인 (실험):
+
+- 한 구간은 글 번호 1만 개다. 갤러리 첫 글까지 가려면 키워드 하나에 구간 631개(요청 약 630번, 1.2초 간격이면 약 30분)가 든다. 다음 구간 주소는 `a.search_next`의 `search_pos`.
+- 띄어 쓴 검색어(`솔레 컷`)는 붙인 말(`솔레컷`)과 결과가 다르다. 둘 다 돌린다.
+- 2023-08~2024-09 글의 본문 사진은 대부분 지워져 디시 기본 이미지(550×350 GIF)만 오고, 원본 첨부도 「해당 파일이나 경로가 존재하지 않습니다」다. 이 시기 값은 본문 글자에서만 얻는다.
+- 유동닉은 닉이 모두 「ㅇㅇ」이니 사람을 가를 때 닉만으로 묶지 않는다 (IP 앞자리나 글 단위로).
+
 ### 본문
 - `GET https://gall.dcinside.com/mgallery/board/view/?id=gov&no={글번호}`
 - 본문 영역: `div.write_div`
@@ -224,6 +231,10 @@ robots.txt도 다시 봤다 — `game.naver.com` `*` 허용, `comm-api.game.nave
   - 링크가 `/b/nikketgv/{글번호}?p=1` 꼴이라 `href`를 `^/b/nikketgv/(\d+)`로 매칭한다 (재확인 2026-10-07: 첫 조사의 `href="/b/nikketgv/{글번호}"` 완전 일치로는 안 잡힘)
   - 제목 `.title`, 댓글 수 `.comment-count`, 작성자 `.user-info [data-filter]`, 작성시각 `time[datetime]`
   - 공지는 `notice` 클래스 (공지 제목은 `.col-title`)
+
+2026-10-16 확인 (`Claude-User`, 실험): 채널 검색(`?target=title|all&keyword=`)은 「전산 점검 중」 503이 몇 시간 계속됐다.
+대신 `?category=솔로레이드`(「솔레/뮤지엄」, 2024-07부터 글 있음)와 `before={ISO 시각}`으로 원하는 날짜 근처 목록을 바로 열 수 있었다 (카테고리·개념글 목록 모두).
+이미지에 `&type=orig`를 붙이면 302라 빈 파일이 된다 — 서명 URL 그대로 받는다.
   - 같은 `a.vrow.column`으로 다른 채널 광고(`notice-service`, 링크 `https://arca.live/b/{다른 채널}/...`)와 "숨겨진 공지 펼치기"(링크 없음)도 들어 있으니 걸러야 함
 
 ### 본문
@@ -276,6 +287,8 @@ robots.txt도 다시 봤다 — `game.naver.com` `*` 허용, `comm-api.game.nave
 - 인기순: `...&sort_index=pop&order_type=desc`
 - 페이지: `...&page=N`
 - 파싱: 글 링크 `td.title > a:not(.replyNum)`, 댓글 수 `a.replyNum`
+- 검색 (2026-10-16 확인): `https://www.fmkorea.com/search.php?mid=nikke&search_target=title&search_keyword={검색어}&page=N` (`title_content`는 본문까지). `index.php`로 보내면 302.
+  한 검색어에 보통 4~30쪽까지만 나오고 2023~2024 전반 글은 거의 걸리지 않는다. 이미지는 본문의 `.png.webp` 주소만 받아지고 `.png`만 요청하면 404.
   - 재확인 2026-10-07: 첫 조사의 `td.title > a[href]`는 댓글 수 링크(`a.replyNum`, `...#{글번호}_comment`)까지 잡아서 댓글 있는 글이 두 번 나온다
   - 공지는 `tr.notice`
 
@@ -361,6 +374,9 @@ API 기본 주소: `https://comm-api.game.naver.com/nng_main/v1`
 2026-10-15 확인 (자기 이름 UA): `boardId=0` 페이지 0·1이 각각 25개, 두 페이지가 약 하루치(10-14 20:19~10-15 19:30)였다. `boardId=4&offset=40`은 09-24 글이었다 → 시즌 하나 거슬러 가는 데 목록 수십 번이면 된다.
 목록 1페이지 응답은 약 18만~20만 바이트(`contents` SmartEditor JSON 포함)라 필요한 필드만 뽑는다.
 오래된 글: `boardId=0`에서 `offset`을 건너뛰어 요청하면 바로 그 시점 글이 온다 — 100→2026-09-26, 300→2026-09-05, 1000→2026-06-19, 3000→2025-11-06, 10000→2023-10-30, 30000→빈 목록. 원하는 날짜는 offset을 이분 탐색하면 몇 번 만에 찾는다.
+
+검색 (2026-10-16 확인, 웹 스크립트 `index-*.js`에서 찾은 경로): `GET https://comm-api.game.naver.com/nng_main/v2/search/feeds?keyword={검색어}&limit=50&offset={N}&loungeId=nikke&searchOption=COMMUNITY_FEED_TITLE&orderType=LATEST`
+(`COMMUNITY_FEED_TITLE_CONTENT`면 본문까지). 응답에 `totalCount`·제목·작성일·미리보기가 있다. 검색어 하나에 최근 2,000건까지만 나온다 (「솔레」 3,025건 중 2,000건).
 
 ### 본문
 - `GET /community/lounge/nikke/feed/{feedId}`
@@ -487,6 +503,15 @@ API 기본 주소: `https://api.blablalink.com/api/ugc/direct/standalonesite/Dyn
 - 댓글 응답의 `replies`와 답글 API의 관계
 
 ---
+
+## 그 밖의 사이트 (2026-10-16)
+
+역대 컷 정리 조사에서 쓴 사이트와 지킬 점.
+
+- `cdn.syndication.twimg.com`(X 트윗 JSON)은 robots.txt가 `Disallow: /`다. 이 조사에서 10건을 받은 뒤에야 알았다 — 쓰지 않는다. 트윗은 검색 결과에 나온 글자만 쓴다.
+- `www.gamemeca.com`은 robots.txt `Crawl-delay: 30`. 30초 간격을 지킨다 (`trees.gamemeca.com`은 지연 요구 없음).
+- note.com(일본 블로그)·`wiki3.jp/nikke`(JP 위키)·티스토리·다모앙은 `Claude-User`로 받아졌다. 연결 끊김은 재시도로 풀렸다.
+- WebSearch 도구는 reddit.com·naver.com(블로그·카페) 도메인을 거부했다.
 
 ## 재검토 (2026-10-07)
 
