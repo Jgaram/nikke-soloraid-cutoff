@@ -29,6 +29,15 @@ D = os.path.join(ROOT, "data", "solo-raid")
 sys.path.insert(0, SR)
 import split  # noqa: E402
 
+# 두 페이지 맨 아래에 같이 붙이는 출처·권리 문구 (2026-10-16 사용자 결정, 합니다체)
+FOOTER = (
+    '    <p>코드와 수집 방법: <a href="https://github.com/jgaram/nikke-soloraid-cutoff">github.com/jgaram/nikke-soloraid-cutoff</a>'
+    ' (CC0 1.0 — 이 프로젝트가 만든 코드와 숫자에만 해당합니다).</p>\n'
+    '    <p>컷 정보는 커뮤니티 이용자분들이 공개로 올린 순위 화면에서 모았습니다. 예측값이라 실제 컷과 다를 수 있습니다.</p>\n'
+    '    <p>「승리의 여신: 니케」와 게임 속 이름·내용의 권리는 SHIFT UP과 Level Infinite에 있습니다.'
+    ' 이 사이트는 게임사와 관계없는 비공식 팬 프로젝트입니다.</p>\n'
+)
+
 SERVERS = ["KR", "JP", "GL"]
 PCTS = ["1", "3", "10"]
 KST = dt.timezone(dt.timedelta(hours=9))
@@ -252,12 +261,14 @@ def analysis_html(vdata, data):
             f'첫 화면의 진행 중 컷 예측은 이와 다른 <b>{m}</b>로 내며, 그 방법의 정확도는 아직 검증 중이다.</p>\n')
     sub = "개발 시즌 {}~{} ({}개) · {} KST 기준".format(seas[0], seas[-1], len(seas), data["asof"])
     stamp = "정답 표는 개발 시즌만 쓴다 — 시험 시즌(잠근 시즌)은 열지 않았다."
+    foot = '  <footer class="muted" style="margin-top:28px">\n' + FOOTER + "  </footer>\n"
     tail = ("<script>\n"
             f'document.getElementById("sub").textContent = {js(sub)};\n'
             f'document.getElementById("stamp").textContent = {js(stamp)};\n'
             "</script>\n")
     return (tpl.replace("/*DATA*/", js(vdata)).replace("__ASOF__", data["asof"])
-            .replace("<main>", "<main>\n" + head, 1).replace("</body>", tail + "</body>", 1))
+            .replace("<main>", "<main>\n" + head, 1).replace("</main>", foot + "</main>", 1)
+            .replace("</body>", tail + "</body>", 1))
 
 
 def main():
@@ -271,7 +282,7 @@ def main():
         json.dump(data, f, ensure_ascii=False, indent=1)
         f.write("\n")
     with open(os.path.join(HERE, "site_template.html"), encoding="utf-8") as f:
-        html = f.read().replace("/*DATA*/", js(data))
+        html = f.read().replace("/*DATA*/", js(data)).replace("<!--FOOTER-->\n", FOOTER, 1)
     with open(os.path.join(a.out, "index.html"), "w", encoding="utf-8") as f:
         f.write(html)
     with open(os.path.join(a.out, "analysis.html"), "w", encoding="utf-8") as f:
