@@ -185,11 +185,13 @@ def live(reg):
 
 
 def latest_season(reg):
-    """state/season.json이 있는 가장 최근 시즌의 일정. 진행 중이면 계산기가 지금 시각을 그 시즌 기준으로 보여 준다 (예측이 아직 없어도)."""
-    for s in sorted(reg, key=split.snum, reverse=True):
+    """state/season.json이 있는 가장 최근 시즌의 일정. 진행 중이면 계산기가 지금 시각을 그 시즌 기준으로 보여 준다 (예측이 아직 없어도).
+    등록부(registry.json)는 분석 도구가 끝난 시즌만 올리므로, 진행 중 시즌은 폴더의 state/season.json으로 찾는다 (2026-10-16, S42)."""
+    names = set(reg) | {os.path.basename(os.path.dirname(os.path.dirname(p))) for p in glob.glob(os.path.join(D, "S*", "state", "season.json"))}
+    for s in sorted(names, key=split.snum, reverse=True):
         sj = season_json(s)
         if sj.get("c_start") and sj.get("end"):
-            return {"season": s, "boss": sj.get("boss") or reg[s].get("boss"), "c_start": iso(sj["c_start"]), "end": iso(sj["end"])}
+            return {"season": s, "boss": sj.get("boss") or (reg.get(s) or {}).get("boss"), "c_start": iso(sj["c_start"]), "end": iso(sj["end"])}
     return None
 
 
