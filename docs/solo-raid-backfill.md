@@ -352,7 +352,7 @@ Sonnet 세션 하나가 이 후보만 판단한다 (사용자 결정 2026-10-16)
 1. **준비.** 변수는 시즌 세션 지시문과 같다. `python3 -I tools/state_sync.py import "$DEST" "$STATE"`로 잇는다.
    `$STATE/season.json`의 `e_end`만 `seasons.json`의 새 `e_end`로 바꾼다 (후보 규칙 E의 기간이 여기서 나온다). 다른 값은 그대로.
    `$DEST/review.json`의 항목 id 목록을 세션 임시 폴더에 적어 둔다 (7에서 새 항목만 고르려고).
-2. **받기.** `windows`의 **넷째 구간 하나만** 시즌 세션 지시문 3단계대로 돈다. 커밋 이름 `S{n} 받기 +2~+4일`. 끝나면 조율 세션에 `S{n} 소급 받기 끝: 글 {k}개, 요청 {r}번, 실패 {f}번, 403·429 {x}번`.
+2. **받기.** `windows`의 **넷째 구간 하나만** 시즌 세션 지시문 3단계대로 돈다. `run_window.sh`는 반드시 Bash `run_in_background`(timeout 7200000)로 띄운다 — `nohup … &`로 띄우면 끝 알림이 오지 않아 세션이 쉰 채 멈춘다 (S40 소급, 2026-10-16). 커밋 이름 `S{n} 받기 +2~+4일`. 끝나면 조율 세션에 `S{n} 소급 받기 끝: 글 {k}개, 요청 {r}번, 실패 {f}번, 403·429 {x}번`.
 3. **판독·합치기·원본 대기.** 시즌 세션 지시문 4·5단계대로 (원본 대기 구간은 새 `e_end` 직전 1시간). 커밋 이름 `S{n} 합치기 +2~+4일`.
 4. **후처리.** `git fetch origin main && git merge origin/main` 뒤 `bash $REPO/tools/solo_raid/post_all.sh "$DEST/state"`.
    다른 세션(등수 점검 등)이 같은 시즌의 `review.json`·`discard.json`·`README.md`나 후처리 파일을 고쳤을 수 있다. 부딪히면 그쪽(`--theirs`)을 받고 후처리를 다시 돌린다.
