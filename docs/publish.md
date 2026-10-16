@@ -13,7 +13,7 @@
 
 ## 정한 것
 
-- **공개 범위는 솔로레이드 파이프라인만이다.** 문서 5개(`docs/solo-raid-*.md`·`community-access.md`)와 이 문서를 공개한다.
+- **공개 범위는 솔로레이드 파이프라인만이다.** 문서 `docs/solo-raid-*.md`(새로 만든 것도 자동)·`community-access.md`와 이 문서를 공개한다.
   코드는 `tools/solo_raid/`·`tools/publish/`, 수집 단계 `experiments/2026-10-15-solo-raid-low-cost/`의 `tools/`·`README.md`다.
   그 밖에 `.claude`의 raid-vision 에이전트·워크플로, 설정 `split.json`·`criteria.json`을 공개한다.
   목록은 `build_public.py`의 `ALLOW`가 정본이다 (허용 목록 방식 — 새 파일을 공개하려면 여기에 더한다).
