@@ -28,7 +28,8 @@ surf 열을 붙인다 (다르면 멈춘다 — post_all.sh로 다시 돌린다).
 - h_lo_top7 · h_hi_top7: post_time.jsonl의 top7 시각 구간 (B·C 사진만, 없으면 null. 주장은 null). h_lo·h_hi·t_grade와 따로 둔다
 - pct: 사진은 post_exclude의 pct_use, 주장은 글에 적은 %. score: 0.1억 (사진은 score_use). score_raw: 억, 반올림 안 함
 - rank: 등수 1~200 (사진은 post_exclude의 rank_use, 주장은 claims.jsonl의 rank). 게임은 200위까지 등수, 그 아래는 %로 보여 준다.
-  200을 넘거나 트래커 화면이면 null (사진은 flag rank_over_200). 예측·use에는 아직 쓰지 않는다 (2026-10-16, 실어 두기만)
+  200을 넘거나, 같은 줄에 %가 있거나(레벨 배지), 트래커 화면이면 null (사진은 flag rank_over_200·rank_with_pct).
+  예측·use에는 아직 쓰지 않는다 (2026-10-16, 실어 두기만)
 - screen · self: 사진은 obs 값. 주장은 screen null, self는 kind == "self"
 - person · moment: 사진은 post_link 값. 사진과 이어진 주장(link)은 그 사진의 값. 이어지지 않은 주장은
   person = "W{site}:{no}"(같은 글의 주장은 글쓴이 한 사람으로 본다, 사진의 사람 열쇠와는 잇지 않음), moment = person + "#c{i}"

@@ -187,7 +187,9 @@ python3 -I tools/solo_raid/post_exclude.py data/solo-raid/S{n}/state
 - **표시(빼지 않음).** `season_unsure_mixed`(이번·지난 기록을 함께 올린 글인데 사진을 가를 근거 없음), `ctx_overridden`, `curve_outlier`, `score_short`(9자리 이하), `verify_differ`·`verify_unresolved`,
   `best_record`(메모에 「나의 최고 기록」 — 그 줄의 %는 기록을 세운 때 값일 수 있다),
   `rank_over_200`(게임 화면 등수가 200 초과 — 게임은 200위까지만 등수로, 그 아래는 %로 보여 준다(사용자 확인, 2026-10-16). 배지 같은 다른 숫자를 등수로 읽은 줄로 보이고,
-  점검 후보 `rank_over_200`으로 원본을 다시 본다. 쓸 등수 `rank_use`는 1~200만 남기고 나머지는 비운다. S31~S41 311줄, 대부분 %가 함께 있는 순위표 줄).
+  점검 후보 `rank_over_200`으로 원본을 다시 본다. S31~S41 311줄, 대부분 %가 함께 있는 순위표 줄. S32~S41 265장을 점검하니 모두 아바타 아래 계정 레벨 배지였고 %·점수는 맞았다),
+  `rank_with_pct`(게임 화면 한 줄에 1~200 등수와 %가 함께 — 게임은 한 줄에 둘 중 하나만 보여 주므로 등수 쪽을 레벨 배지로 본다. 점검 후보로 올리지 않는다. S31~S41 69줄, 2026-10-16).
+  쓸 등수 `rank_use`는 게임 화면에서 1~200이고 %가 없는 줄만 남기고 나머지는 비운다. 판독 지시문(`tile_prompt.md`)도 2026-10-16부터 레벨 배지를 순위로 적지 않게 했다.
 - **S41 숫자.** 시즌 안 % 관측 738줄 중 25줄을 뺀다 (지난 시즌 12, 보상 구간 표 11, `pct_no_sign` 2, 그중 1줄은 `pct_over_100`도) → 713줄.
   표시는 `ctx_overridden` 18, `season_unsure_mixed` 16(모두 디시 6243823, 역대 기록 글), `best_record` 20, `verify_differ` 10(모두 원값 유지, 1줄 `verify_unresolved`)이다.
   유니온 화면 4줄은 시즌 안이 아니라 unsure 쪽에 있었다. 모의전 줄은 0줄이다.
@@ -270,7 +272,7 @@ tools/solo_raid/post_all.sh data/solo-raid/S41/state \
 ```
 
 - **줄.** 사진 관측은 obs 줄 전부(시즌 밖·트래커도 `exclude`로 표시해 넣는다), 글 주장은 post_claims `keep` 줄만.
-- **열.** `src`(photo·claim)·`oi`/`i`·`site`·`no`·`server`·`server_basis`·`h`·`h_lo`·`h_hi`·`t_kind`·`t_grade`·`day`·`day_lo`·`pct`·`score`(0.1억)·`score_raw`(억)·`rank`(등수 1~200, post_exclude `rank_use`)·`screen`·`self`·`person`·`moment`·`indep`·`use_indep`·`link`·`link_time`·`exclude`·`flag`·`use`,
+- **열.** `src`(photo·claim)·`oi`/`i`·`site`·`no`·`server`·`server_basis`·`h`·`h_lo`·`h_hi`·`t_kind`·`t_grade`·`day`·`day_lo`·`pct`·`score`(0.1억)·`score_raw`(억)·`rank`(등수 1~200, %가 없는 게임 화면 줄만 — post_exclude `rank_use`)·`screen`·`self`·`person`·`moment`·`indep`·`use_indep`·`link`·`link_time`·`exclude`·`flag`·`use`,
   그리고 `h_lo_top7`·`h_hi_top7`(post_time의 top7 시각 구간)·`surf_z`·`surf_flag`(곡면 이탈 표시, 아래).
 - **곡면 이탈 표시 `surf_z`·`surf_flag` (1.7, 2026-10-16).** [`post_outlier.py`](../tools/solo_raid/post_outlier.py)가 서버별 곡면 `log % = F(점수) + c·(√(h/120) − 1)`(A·독립 줄로 강건 적합)에서
   사람 하나씩 뺀 잔차로 z(점수·log % 두 축 중 작은 쪽, 척도 1.4826·MAD)를 잰다. |z| > 3.5면 `surface_low`·`surface_high`, 그 밖에 `stale_fit`(늦게 올린 화면일 수 있음)·`out_of_support`·`no_server_fit`(서버 미상 줄이 곡면 있는 어느 서버에도 안 맞음 — 서버는 채우지 않는다).

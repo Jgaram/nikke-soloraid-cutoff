@@ -11,7 +11,7 @@ ocr.jsonl·ocr2.jsonl, 그리고 수동 판정 STATE/post_manual_season.json(있
 출력: STATE/post_exclude.jsonl — obs.jsonl 한 줄마다, 같은 순서로
   {oi, site, img, row, exclude:[…], flag:[…], pct_use, score_use, rank_use, why}
   oi = obs.jsonl 줄 번호(0부터). score_use는 억 단위, 0.1억 반올림. pct_use는 %.
-  rank_use는 게임 화면 등수 1~200만 (200을 넘으면 null, flag rank_over_200). 트래커 화면은 null.
+  rank_use는 게임 화면 등수 1~200이고 %가 없는 줄만 (200을 넘거나 %가 함께 있으면 null + flag). 트래커 화면은 null.
 표준 출력에 사유별 줄 수 (전체, 시즌 안 % 관측 = season in·pct 있음·tracker 아님).
 
 exclude (기본으로 뺀다)
@@ -40,7 +40,10 @@ flag (빼지 않고 표시만)
 - score_short: 게임 화면 점수가 9자리 이하 (자릿수가 빠졌을 수 있다).
 - rank_over_200: 게임 화면(트래커 아님)의 등수가 200을 넘는다. 게임은 200위까지만 등수로 보여 주고 그 아래는 %다 (사용자 확인,
   2026-10-16). 배지 숫자 같은 다른 숫자를 등수로 읽은 줄로 보인다 — %·점수도 함께 잘못 읽었는지 review.py 후보 rank_over_200으로 다시 본다.
-  rank_use는 null. S31~S41 obs 311줄(대부분 % 있는 순위표 줄).
+  rank_use는 null. S31~S41 obs 311줄(대부분 % 있는 순위표 줄). 등수 점검 세션(2026-10-16)이 S32~S41 265장을 원본으로 보니
+  모두 아바타 아래 계정 레벨 배지였고 %·점수는 맞았다 (전부 keep).
+- rank_with_pct: 게임 화면 한 줄에 1~200 등수와 %가 함께 있다. 게임은 한 줄에 둘 중 하나만 보여 주므로 등수 쪽은 200 이하 레벨 배지로 본다
+  (2026-10-16, 사용자 결정). rank_use는 null, 점검 후보로 올리지 않는다 (위 점검 결과로 %·점수는 그대로 쓴다). S31~S41 obs 69줄.
 - best_record: 판독 메모에 「나의 최고 기록」·BEST DAMAGE가 나오는 줄 (트래커 제외). 「나의 최고 기록」 줄의 %는 지금 %가 아니라
   그 기록을 세운 때의 %일 수 있다 (S41 oi 2039: 종료 후 올린 my_rank 1.40%·250.4억, 한섭 종료 3% 컷 250.35억). 2026-10-16.
 - other_raid_maybe: 메모에 협동작전·유니온 레이드가 나오지만 확실하지 않다.
@@ -367,10 +370,16 @@ def main():
         if scr != "tracker" and BEST_RECORD.search(note):
             fl.append("best_record")
         rank = o.get("rank")
-        rank_use = rank if scr != "tracker" and isinstance(rank, int) and 1 <= rank <= RANK_MAX else None
-        if scr != "tracker" and isinstance(rank, (int, float)) and rank > RANK_MAX:
-            fl.append("rank_over_200")
-            why.append(f"등수 {rank}: 게임 화면 등수는 {RANK_MAX}위까지")
+        rank_use = None
+        if scr != "tracker" and isinstance(rank, (int, float)):
+            if rank > RANK_MAX:
+                fl.append("rank_over_200")
+                why.append(f"등수 {rank}: 게임 화면 등수는 {RANK_MAX}위까지")
+            elif o.get("pct") is not None:
+                fl.append("rank_with_pct")
+                why.append(f"등수 {rank}와 %가 한 줄: 등수 쪽은 레벨 배지로 봄")
+            elif isinstance(rank, int) and rank >= 1:
+                rank_use = rank
 
         if sea != "out":
             s, swhy = img_season(o["img"])

@@ -8,7 +8,7 @@ python3 -I tools/solo_raid/review.py data/solo-raid/S{n}/state [--write]
 
 고르는 것 (kind)
 - truth_flag: 서버가 붙은 정답 점(truth_points, 등급 A·A2·C)에 강한 플래그(mono_viol·verify_unresolved·curve_outlier)가 있음. 점마다 하나.
-- truth_flag_group: 약한 플래그(ctx_overridden·season_conflict·verify_differ 등, best_record·rank_over_200 빼고)는 플래그마다 한 항목으로 묶는다 (사진 목록).
+- truth_flag_group: 약한 플래그(ctx_overridden·season_conflict·verify_differ 등, best_record·rank_over_200·rank_with_pct 빼고)는 플래그마다 한 항목으로 묶는다 (사진 목록).
   묶음은 표본 몇 장을 보고 판단해도 된다 (S38 season_conflict처럼 수가 많을 때).
 - rank_server: 순위표 1~3위 정확 점수가 같은데 그 사진들 글의 텍스트 서버(text·fix)가 다름 → 소수 쪽 글 (3.2b S39 5881317 같은 경우).
 - cluster_mixed: 지문 묶음의 앵커 글이 두 서버 이상 (server_summary clusters). 소수 쪽 앵커 글을 적는다.
@@ -92,7 +92,7 @@ def collect(state):
                     site=d["site"], img=d["img"], row=d["row"], pct=val(t["pct"]), score=val(t["score"]))
             else:
                 for f in t["flags"]:
-                    if f not in ("best_record", "rank_over_200"):   # rank_over_200은 아래 사진별 항목으로
+                    if f not in ("best_record", "rank_over_200", "rank_with_pct"):   # rank_over_200은 아래 사진별 항목으로, rank_with_pct는 후보 아님
                         group[f].append(f"{d['img']}#{d['row']}")
     for f, lst in sorted(group.items()):
         add("truth_flag_group", f, f"정답 점 {len(lst)}개에 {f}", imgs=sorted(set(lst)))
