@@ -4,33 +4,33 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>니케 솔로레이드 컷</title>
-<meta name="description" content="승리의 여신: 니케 솔로레이드 지난 시즌 커트라인과 진행 중 시즌 예측">
+<meta name="description" content="승리의 여신: 니케 솔로레이드 최종 컷 예측, 지금 몇 %면 최종 몇 %인지, 지난 시즌 커트라인">
 <style>
 :root {
   color-scheme: light;
   --surface-0: #f4f3f0; --surface-1: #fcfcfb; --border: #e2e0da; --grid: #ebe9e4; --axis: #b9b7b0;
   --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #77756f;
-  --band: rgba(82, 81, 78, 0.10);
+  --band: rgba(82, 81, 78, 0.10); --band-strong: rgba(82, 81, 78, 0.18);
   --t1: #104281; --t3: #2a78d6; --t10: #86b6ef;
-  --truth: #c43c3b;
+  --truth: #c43c3b; --warn: #b26b00;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --surface-0: #121211; --surface-1: #1a1a19; --border: #2f2e2b; --grid: #2a2927; --axis: #55534e;
     --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a988f;
-    --band: rgba(195, 194, 183, 0.10);
+    --band: rgba(195, 194, 183, 0.10); --band-strong: rgba(195, 194, 183, 0.18);
     --t1: #b7d3f6; --t3: #3987e5; --t10: #1c5cab;
-    --truth: #e66767;
+    --truth: #e66767; --warn: #e0a040;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --surface-0: #121211; --surface-1: #1a1a19; --border: #2f2e2b; --grid: #2a2927; --axis: #55534e;
   --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #9a988f;
-  --band: rgba(195, 194, 183, 0.10);
+  --band: rgba(195, 194, 183, 0.10); --band-strong: rgba(195, 194, 183, 0.18);
   --t1: #b7d3f6; --t3: #3987e5; --t10: #1c5cab;
-  --truth: #e66767;
+  --truth: #e66767; --warn: #e0a040;
 }
 * { box-sizing: border-box; }
 body {
@@ -41,6 +41,7 @@ a { color: var(--t3); }
 main { max-width: 1080px; margin: 0 auto; padding: 28px 16px 64px; }
 h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
 h2 { font-size: 19px; margin: 0 0 4px; }
+h3 { font-size: 15px; margin: 18px 0 6px; color: var(--text-secondary); font-weight: 600; }
 p { margin: 6px 0; }
 .sub { color: var(--text-secondary); margin: 0 0 16px; }
 .muted { color: var(--text-muted); font-size: 13px; }
@@ -53,23 +54,29 @@ p { margin: 6px 0; }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface-1); }
 .controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 10px 0; font-size: 13.5px; }
-select { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; }
+select, input[type=number] { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; }
+button.btn { font: inherit; font-size: 13px; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 12px 0; }
 .tile { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface-0); }
 .tile .k { font-size: 13.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
 .tile .v { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
 .tile .v small { font-size: 15px; font-weight: 600; color: var(--text-secondary); margin-left: 2px; }
 .tile .r { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-.grade { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); }
+.tile.weak .v { color: var(--text-muted); font-size: 24px; }
+.tile.weak .r.range { color: var(--text-primary); font-weight: 600; }
+.grade { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+.grade.C, .grade.D { border-color: var(--warn); color: var(--warn); }
+.gnote { border-left: 3px solid var(--warn); padding: 4px 0 4px 12px; margin: 10px 0; color: var(--text-secondary); font-size: 13.5px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 8px 0 4px; font-size: 13px; color: var(--text-secondary); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
-.sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex: none; }
 .sw.band { height: 10px; opacity: .35; }
 .sw.dash { background: repeating-linear-gradient(90deg, var(--truth) 0 4px, transparent 4px 7px) !important; }
 .chart { position: relative; width: 100%; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 svg text { fill: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+svg .lbl { fill: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary);
   padding: 8px 10px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(0,0,0,.12); white-space: nowrap; z-index: 5; display: none; line-height: 1.45; }
 .tip .r { display: flex; align-items: center; gap: 6px; }
 table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
@@ -77,12 +84,31 @@ th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: r
 th:first-child, td:first-child, th.l, td.l { text-align: left; }
 th { color: var(--text-secondary); font-weight: 600; }
 td.lock { color: var(--text-muted); }
+sup.cv { color: var(--text-muted); font-size: 11px; margin-left: 1px; }
 .tbl-wrap { overflow-x: auto; margin-top: 12px; }
-.empty { padding: 32px 12px; text-align: center; color: var(--text-muted); font-size: 13.5px; border: 1px dashed var(--border); border-radius: 10px; margin-top: 8px; }
-.note { border-left: 3px solid var(--border); padding: 2px 0 2px 12px; margin: 12px 0; color: var(--text-secondary); font-size: 13.5px; }
+.empty { padding: 28px 12px; text-align: center; color: var(--text-muted); font-size: 13.5px; border: 1px dashed var(--border); border-radius: 10px; margin-top: 8px; }
+.calc { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin: 12px 0 8px; background: var(--surface-0); }
+.calc .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 10px; font-size: 14px; }
+.calc input[type=number] { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
+.calc input[type=range] { flex: 1 1 220px; min-width: 160px; accent-color: var(--t3); }
+.calc .when { font-weight: 650; font-variant-numeric: tabular-nums; }
+.calcgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.calcbox { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+.calcbox .big { display: block; font-size: 30px; font-weight: 700; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+.calcbox .rng { color: var(--text-secondary); font-size: 13px; }
+.boss-sm { display: none; }
 ul { margin: 6px 0; padding-left: 20px; }
 li { margin: 3px 0; }
 footer { color: var(--text-muted); font-size: 13px; margin-top: 28px; }
+details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5px; margin-top: 12px; }
+@media (max-width: 600px) {
+  .card { padding: 16px 14px; }
+  .hide-sm { display: none; }
+  .boss-sm { display: block; font-size: 12px; color: var(--text-muted); }
+  .rng-sm { display: block; }
+  th, td { padding: 6px 5px; }
+  .tile .v { font-size: 26px; }
+}
 </style>
 </head>
 <body>
@@ -96,10 +122,39 @@ footer { color: var(--text-muted); font-size: 13px; margin-top: 28px; }
   </div>
 
   <section class="card" id="liveCard">
-    <h2>진행 중 시즌 예측</h2>
-    <p class="muted">챌린지가 진행되는 동안 커뮤니티에 올라온 순위·점수를 모아, 시즌이 끝났을 때의 1·3·10% 컷을 예측한다. 단위는 억 점, 구간은 80% 예측 구간이다.</p>
+    <h2 id="liveTitle">최종 컷 예측</h2>
+    <p class="muted">챌린지가 진행되는 동안 커뮤니티에 올라온 순위·점수를 모아, 시즌이 끝났을 때의 1·3·10% 컷 점수를 예측한다. 단위는 억 점, 구간은 80% 예측 구간이다.</p>
     <div class="controls" id="liveCtl"></div>
     <div id="liveBody"></div>
+  </section>
+
+  <section class="card" id="calcCard">
+    <h2>지금 몇 %면 최종 몇 %?</h2>
+    <p class="muted" id="calcIntro"></p>
+    <div class="calc">
+      <div class="row">
+        <label>시점 <select id="cDay"></select></label>
+        <input type="range" id="cHour" min="0" max="47" step="1" value="14" aria-label="시각">
+        <span class="when" id="cWhen"></span>
+        <button class="btn" id="cNowBtn" hidden>지금 시각으로</button>
+      </div>
+      <div class="calcgrid">
+        <div class="calcbox">지금 <input type="number" id="cNow" value="1" min="0.01" max="100" step="0.1">% 이면 → 최종
+          <span class="big" id="oFinal"></span><span class="rng" id="oFinalR"></span></div>
+        <div class="calcbox">최종 <input type="number" id="cTgt" value="3" min="0.01" max="100" step="0.5">% 안에 들려면 → 지금
+          <span class="big" id="oNow"></span><span class="rng" id="oNowR"></span></div>
+      </div>
+      <p class="muted" id="cNote" style="margin-top:10px"></p>
+    </div>
+    <h3>최종 1·3·10%가 되는 「지금 %」</h3>
+    <div class="legend" id="lgA"></div>
+    <div class="chart" id="cvA"></div>
+    <p class="muted">선 = 중앙값, 띠 = 80% 구간(시즌마다 밀리는 정도가 달라 넓다). 시작 3시간 안은 관측이 없어 그리지 않았다. 세로축은 로그 눈금이고 위로 갈수록 상위다.</p>
+    <details>
+      <summary>시점별 표 보기</summary>
+      <div class="tbl-wrap"><table id="tvT"></table></div>
+      <p class="muted">값 = 그 시각에 이 % 안이면 최종 1·3·10% 안에 든다는 중앙값, 작은 글씨 = 80% 구간.</p>
+    </details>
   </section>
 
   <section class="card">
@@ -108,14 +163,16 @@ footer { color: var(--text-muted); font-size: 13px; margin-top: 28px; }
     <div class="legend" id="pastLegend"></div>
     <div class="chart" id="pastChart"></div>
     <div class="tbl-wrap"><table id="pastTable"></table></div>
+    <p class="muted" id="pastNote"></p>
   </section>
 
   <section class="card">
     <h2>읽는 법</h2>
     <ul>
-      <li>근거는 「커뮤니티 N건」 — 디시인사이드 니케 마이너 갤러리 · 네이버 게임 라운지 · 블라블라링크에 공개로 올라온 순위 화면과 글에서 읽은 관측 수다. 원글·사진·닉네임은 싣지 않는다.</li>
-      <li>등급은 예측을 얼마나 믿을지다: A 보통 · B 주의 · C 강한 주의 · D 숫자만 참고.</li>
-      <li>예측 방법과 지난 시즌으로 잰 정확도는 <a href="analysis.html">분석 페이지</a>에 있다.</li>
+      <li>커뮤니티는 디시인사이드 니케 마이너 갤러리 · 네이버 게임 라운지 · 블라블라링크다. 공개로 올라온 순위 화면과 글에서 숫자만 읽고, 원글·사진·닉네임은 싣지 않는다.</li>
+      <li>컷 예측의 「근거 N명」은 그 서버 예측에 쓴 사람 수다. 등급은 예측을 얼마나 믿을지다: A 보통 · B 주의 · C 강한 주의 · D 숫자만 참고(그 서버 관측 없음).</li>
+      <li>지난 시즌 컷의 출처: 「집계표」 = 커뮤니티가 모은 컷 표(공식 확정값 아님), <sup class="cv">*</sup>「관측 곡선」 = 끝난 뒤 올라온 점수·%로 그린 곡선에서 읽은 값.</li>
+      <li>컷 예측과 계산기는 아직 검증 중인 예측이다. 둘은 방법이 달라 숫자가 정확히 맞물리지 않을 수 있다. 방법과 지난 시즌으로 잰 정확도는 <a href="analysis.html">분석 페이지</a>에 있다.</li>
       <li>모든 시각은 한국 시간(KST)이다.</li>
     </ul>
   </section>
@@ -131,6 +188,21 @@ const SRV = {KR: "한섭", JP: "일섭", GL: "글섭"};
 const PCTS = ["1", "3", "10"];
 const COL = p => `var(--t${p})`;
 const NS = "http://www.w3.org/2000/svg";
+const GRADE = {A: "A 보통", B: "B 주의", C: "C 강한 주의", D: "D 숫자만 참고"};
+const GWORD = {A: "보통", B: "주의", C: "강한 주의", D: "참고만"};
+const GNOTE = {
+  B: "근거가 넉넉하지 않다 — 80% 구간을 함께 본다.",
+  C: "관측이 적거나 이른 시점이라 크게 흔들릴 수 있다 — 가운데 숫자보다 80% 구간을 본다.",
+  D: "이 서버는 아직 관측이 없어, 다른 서버와 지난 시즌 곡선으로 채운 값이다 — 숫자만 참고한다."
+};
+const WD = "일월화수목금토";
+const NOW = Date.now();
+const ts = s => new Date(s).getTime();
+const kstParts = ms => { const k = new Date(ms + 9 * 3600e3); return {Y: k.getUTCFullYear(), M: k.getUTCMonth() + 1, D: k.getUTCDate(), w: k.getUTCDay(), h: k.getUTCHours(), m: k.getUTCMinutes()}; };
+const p2 = v => String(v).padStart(2, "0");
+const kstDay = ms => { const k = kstParts(ms); return `${k.M}/${k.D}(${WD[k.w]})`; };
+const kstLab = ms => { const k = kstParts(ms); return `${k.M}/${k.D}(${WD[k.w]}) ${p2(k.h)}:${p2(k.m)}`; };
+const isoTxt = s => s ? s.slice(0, 16).replace("T", " ") : "";
 const fmt = (v, d = 1) => v == null ? "–" : v.toLocaleString("ko-KR", {minimumFractionDigits: d, maximumFractionDigits: d});
 let srv = "KR";
 try { const s = localStorage.getItem("nsp-srv"); if (SRV[s]) srv = s; } catch (e) {}
@@ -154,6 +226,13 @@ function mkTip(host) {
     hide() { t.style.display = "none"; }
   };
 }
+// 마우스는 움직일 때, 손가락은 누를 때·끌 때 보인다. 손가락을 떼도 풍선은 남는다 (다른 곳을 누르면 바뀜).
+function hover(target, move, leave) {
+  target.style.touchAction = "pan-y";
+  target.addEventListener("pointermove", move);
+  target.addEventListener("pointerdown", move);
+  target.addEventListener("pointerleave", ev => { if (ev.pointerType !== "touch") leave(); });
+}
 function empty(host, msg) {
   const p = document.createElement("div"); p.className = "empty"; p.textContent = msg; host.appendChild(p);
 }
@@ -164,9 +243,9 @@ function niceTicks(lo, hi, n = 5) {
   const out = []; for (let v = L; v <= Hh + 1e-9; v += step) out.push(+v.toFixed(6));
   return {ticks: out, lo: L, hi: Hh};
 }
-// 공통 축: o = {W, H, m:{l,r,t,b}, xlo, xhi, ylo, yhi}
+// 공통 축: o = {W, H, m:{l,r,t,b}, xlo, xhi, ylo, yhi, yt}
 function frame(host, o) {
-  const svg = el("svg", {viewBox: `0 0 ${o.W} ${o.H}`, role: "img"}); host.appendChild(svg);
+  const svg = el("svg", {viewBox: `0 0 ${o.W} ${o.H}`, role: "img", "aria-label": o.label || null}); host.appendChild(svg);
   const x0 = o.m.l, x1 = o.W - o.m.r, y0 = o.H - o.m.b, y1 = o.m.t;
   const X = v => x0 + (v - o.xlo) / (o.xhi - o.xlo || 1) * (x1 - x0);
   const Y = v => y0 - (v - o.ylo) / (o.yhi - o.ylo || 1) * (y0 - y1);
@@ -177,6 +256,8 @@ function frame(host, o) {
   el("line", {x1: x0, x2: x1, y1: y0, y2: y0, stroke: "var(--axis)"}, svg);
   return {svg, X, Y, x0, x1, y0, y1};
 }
+const svgX = (svg, W, ev) => { const bb = svg.getBoundingClientRect(); return (ev.clientX - bb.left) / bb.width * W; };
+const hostXY = (host, ev) => { const b = host.getBoundingClientRect(); return [ev.clientX - b.left, ev.clientY - b.top]; };
 
 // ---------- 서버 선택 ----------
 function drawSrv() {
@@ -189,49 +270,71 @@ function drawSrv() {
   }
 }
 
-// ---------- 진행 중 시즌 ----------
+// ---------- ① 최종 컷 예측 ----------
+const ended = x => NOW >= ts(x.end);
+const LAT = DATA.latest, LAT_ON = !!(LAT && NOW >= ts(LAT.c_start) && NOW < ts(LAT.end));
 let liveSel = null;
 function drawLive() {
-  const ctl = document.getElementById("liveCtl"), body = document.getElementById("liveBody");
+  const ctl = document.getElementById("liveCtl"), body = document.getElementById("liveBody"), title = document.getElementById("liveTitle");
   ctl.innerHTML = ""; body.innerHTML = "";
   const L = DATA.live.filter(x => x.preds.length);
-  if (!L.length) { empty(body, "지금 예측을 내고 있는 시즌이 없다. 다음 시즌 챌린지가 열리면 시점마다 갱신된다."); return; }
-  if (!liveSel || !L.find(x => x.season === liveSel)) liveSel = (L.find(x => !x.done) || L[L.length - 1]).season;
+  const waiting = LAT_ON && !L.some(x => x.season === LAT.season);   // 새 시즌이 시작했지만 첫 예측 전
+  if (waiting) {
+    const n = document.createElement("p"); n.className = "gnote";
+    n.textContent = `${LAT.season} ${LAT.boss || ""} 챌린지가 진행 중이다 (${isoTxt(LAT.c_start)} ~ ${isoTxt(LAT.end)}). 첫 예측은 챌린지 시작 12시간 뒤까지 올라온 자료로 낸다.`;
+    body.appendChild(n);
+  }
+  if (!L.length) {
+    title.textContent = "최종 컷 예측";
+    if (!waiting) empty(body, "지금 예측을 내고 있는 시즌이 없다. 다음 시즌 챌린지가 열리면 시점마다 갱신된다.");
+    return;
+  }
+  if (!liveSel || !L.find(x => x.season === liveSel)) liveSel = (L.find(x => !ended(x)) || L[L.length - 1]).season;
   if (L.length > 1) {
     const lab = document.createElement("label"); lab.textContent = "시즌 ";
     const sel = document.createElement("select");
     for (const x of L.slice().reverse()) {
-      const o = document.createElement("option"); o.value = x.season; o.textContent = `${x.season} ${x.boss || ""}${x.done ? " (끝남)" : ""}`;
+      const o = document.createElement("option"); o.value = x.season; o.textContent = `${x.season} ${x.boss || ""}${ended(x) ? " (끝남)" : " (진행 중)"}`;
       if (x.season === liveSel) o.selected = true; sel.appendChild(o);
     }
     sel.onchange = () => { liveSel = sel.value; drawLive(); };
     lab.appendChild(sel); ctl.appendChild(lab);
   }
-  const S = L.find(x => x.season === liveSel);
+  const S = L.find(x => x.season === liveSel), done = ended(S);
+  title.textContent = done ? `지난 예측 · ${S.season} ${S.boss || ""} (끝남)` : `진행 중 시즌 예측 · ${S.season} ${S.boss || ""}`;
   const info = document.createElement("span"); info.className = "muted";
-  info.textContent = `${S.season} ${S.boss || ""} · 챌린지 ${S.c_start} ~ ${S.end} · ${S.done ? "끝남" : "진행 중"}`;
+  info.textContent = `챌린지 ${isoTxt(S.c_start)} ~ ${isoTxt(S.end)} · ${done ? "끝남" : "진행 중"}`;
   ctl.appendChild(info);
   const P = S.preds.filter(p => p.srv[srv]);
   if (!P.length) { empty(body, `${SRV[srv]} 예측이 아직 없다.`); return; }
-  const last = P[P.length - 1], ls = last.srv[srv], truth = S.truth[srv] || {};
+  const last = P[P.length - 1], ls = last.srv[srv], g = ls.grade || "–", truth = S.truth[srv] || {};
+  const weak = g === "C" || g === "D";
   const head = document.createElement("p");
-  head.innerHTML = `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤 (${last.T_kst || ""} KST) · 등급 <span class="grade">${ls.label || ls.grade || "–"}</span>`;
+  head.innerHTML = `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤(${last.T_kst || ""})까지 올라온 자료 · 등급 <span class="grade ${g}">${GRADE[g] || g}</span> · 근거 커뮤니티 ${ls.n_persons}명`;
   body.appendChild(head);
+  const meta = document.createElement("p"); meta.className = "muted";
+  meta.textContent = `예측 방법: ${last.method} · 아직 검증 중인 예측이다.`;
+  body.appendChild(meta);
+  if (GNOTE[g]) { const n = document.createElement("p"); n.className = "gnote"; n.textContent = `${SRV[srv]} ${GRADE[g]}: ${GNOTE[g]}`; body.appendChild(n); }
+  if (done && S.locked) { const n = document.createElement("p"); n.className = "muted"; n.textContent = "이 시즌은 시험 시즌이라 실제 컷과의 비교는 최종 검증 뒤 공개한다."; body.appendChild(n); }
+  else if (done && !Object.keys(truth).length) { const n = document.createElement("p"); n.className = "muted"; n.textContent = "실제 컷과의 비교는 시즌 자료를 채점한 뒤 나온다."; body.appendChild(n); }
+
   const tiles = document.createElement("div"); tiles.className = "tiles"; body.appendChild(tiles);
   for (const p of PCTS) {
     const q = ls.pts[p], t = truth[p];
-    const d = document.createElement("div"); d.className = "tile";
+    const d = document.createElement("div"); d.className = "tile" + (weak ? " weak" : "");
     d.innerHTML = `<div class="k"><i class="sw" style="background:${COL(p)}"></i>최종 ${p}% 컷</div>`
-      + (q ? `<div class="v">${fmt(q.m)}<small>억</small></div><div class="r">80% 구간 ${fmt(q.lo)} ~ ${fmt(q.hi)}</div>`
+      + (q ? (weak ? `<div class="r range">80% 구간 ${fmt(q.lo)} ~ ${fmt(q.hi)}억</div><div class="v">${fmt(q.m)}<small>억</small></div><div class="r">가운데 값 (등급 ${g})</div>`
+                   : `<div class="v">${fmt(q.m)}<small>억</small></div><div class="r">80% 구간 ${fmt(q.lo)} ~ ${fmt(q.hi)}</div>`)
            : `<div class="v">–</div><div class="r">이 서버는 예측하지 않음</div>`)
-      + (t != null ? `<div class="r">실제 ${fmt(t)}억 (${q ? (q.m / t - 1 >= 0 ? "+" : "−") + Math.abs((q.m / t - 1) * 100).toFixed(1) + "%" : ""})</div>` : "");
+      + (t != null ? `<div class="r">실제 ${fmt(t)}억${q ? ` (예측 ${(q.m / t - 1 >= 0 ? "+" : "−") + Math.abs((q.m / t - 1) * 100).toFixed(1)}%)` : ""}</div>` : "");
     tiles.appendChild(d);
   }
-  if (p10note(ls)) { const n = document.createElement("p"); n.className = "muted"; n.textContent = p10note(ls); body.appendChild(n); }
+  if (ls.pts["10"]) { const n = document.createElement("p"); n.className = "muted"; n.textContent = "10% 컷은 지난 시즌의 곡선 모양을 빌려 오는 참고값이라 1·3%보다 덜 정확하다."; body.appendChild(n); }
 
   // 시점별 예측 그래프
   const lg = document.createElement("div"); lg.className = "legend"; body.appendChild(lg);
-  lg.innerHTML = PCTS.map(p => `<span><i class="sw" style="background:${COL(p)}"></i>${p}% 중앙</span>`).join("")
+  lg.innerHTML = PCTS.map(p => `<span><i class="sw" style="background:${COL(p)}"></i>${p}% 가운데 값</span>`).join("")
     + `<span><i class="sw band" style="background:var(--t3)"></i>80% 구간</span>`
     + (Object.keys(truth).length ? `<span><i class="sw dash"></i>실제 컷</span>` : "");
   const host = document.createElement("div"); host.className = "chart"; body.appendChild(host);
@@ -241,7 +344,7 @@ function drawLive() {
   const nt = niceTicks(Math.min(...vals), Math.max(...vals));
   const xt = []; for (let h = 0; h <= S.H; h += 24) xt.push(h);
   const W = Math.max(300, host.clientWidth), narrow = W < 600;
-  const f = frame(host, {W, H: narrow ? 260 : 340, m: {l: 40, r: 12, t: 12, b: 34}, xlo: 0, xhi: S.H, ylo: nt.lo, yhi: nt.hi, yt: nt.ticks});
+  const f = frame(host, {W, H: narrow ? 260 : 340, m: {l: 40, r: 12, t: 12, b: 34}, xlo: 0, xhi: S.H, ylo: nt.lo, yhi: nt.hi, yt: nt.ticks, label: "시점별 최종 컷 예측"});
   for (const h of xt) el("text", {x: f.X(h), y: f.y0 + 18, "text-anchor": "middle"}, f.svg).textContent = h ? (narrow ? `${h / 24}일` : `${h / 24}일 뒤`) : "시작";
   for (const p of PCTS) {
     const pts = P.map(r => [r.T, r.srv[srv].pts[p]]).filter(([, q]) => q);
@@ -254,42 +357,178 @@ function drawLive() {
   }
   const tip = mkTip(host), cur = el("line", {y1: f.y1, y2: f.y0, stroke: "var(--axis)", visibility: "hidden"}, f.svg);
   const hit = el("rect", {x: f.x0, y: f.y1, width: f.x1 - f.x0, height: f.y0 - f.y1, fill: "transparent"}, f.svg);
-  hit.addEventListener("mousemove", ev => {
-    const bb = f.svg.getBoundingClientRect(), sx = (ev.clientX - bb.left) / bb.width * W;
+  hover(hit, ev => {
+    const sx = svgX(f.svg, W, ev);
     const r = P.reduce((a, b) => Math.abs(f.X(b.T) - sx) < Math.abs(f.X(a.T) - sx) ? b : a);
     cur.setAttribute("x1", f.X(r.T)); cur.setAttribute("x2", f.X(r.T)); cur.setAttribute("visibility", "visible");
     const s = r.srv[srv];
     tip.show(`<b>${r.T}시간 뒤</b> · ${r.T_kst || ""}<br>` + PCTS.filter(p => s.pts[p]).map(p =>
       `<div class="r"><i class="sw" style="background:${COL(p)}"></i>${p}% ${fmt(s.pts[p].m)}억 <span class="muted">(${fmt(s.pts[p].lo)}~${fmt(s.pts[p].hi)})</span></div>`).join("")
-      + `<span class="muted">등급 ${s.label || s.grade || "–"}</span>`, ev.clientX - host.getBoundingClientRect().left, ev.clientY - host.getBoundingClientRect().top);
-  });
-  hit.addEventListener("mouseleave", () => { tip.hide(); cur.setAttribute("visibility", "hidden"); });
+      + `<span class="muted">등급 ${GRADE[s.grade] || s.grade || "–"} · 근거 ${s.n_persons}명</span>`, ...hostXY(host, ev));
+  }, () => { tip.hide(); cur.setAttribute("visibility", "hidden"); });
 
   // 표
   const wrap = document.createElement("div"); wrap.className = "tbl-wrap"; body.appendChild(wrap);
   const rows = P.slice().reverse().map(r => {
     const s = r.srv[srv];
-    return `<tr><td>${r.T}시간</td><td class="l">${r.T_kst || ""}</td>` + PCTS.map(p => s.pts[p]
-      ? `<td><b>${fmt(s.pts[p].m)}</b> <span class="muted">${fmt(s.pts[p].lo)}~${fmt(s.pts[p].hi)}</span></td>` : "<td>–</td>").join("")
-      + `<td class="l">${s.label || s.grade || "–"}</td></tr>`;
+    return `<tr><td>${r.T}시간</td><td class="l hide-sm">${r.T_kst || ""}</td>` + PCTS.map(p => s.pts[p]
+      ? `<td><b>${fmt(s.pts[p].m)}</b> <span class="muted rng-sm">${fmt(s.pts[p].lo)}~${fmt(s.pts[p].hi)}</span></td>` : "<td>–</td>").join("")
+      + `<td class="l">${s.grade || "–"} <span class="hide-sm">${GWORD[s.grade] || ""}</span></td><td class="hide-sm">${s.n_persons}명</td></tr>`;
   });
-  wrap.innerHTML = `<table><thead><tr><th>시점</th><th class="l">KST</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}<th class="l">등급</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
-}
-function p10note(s) {
-  return s.pts["10"] ? "10% 컷은 지난 시즌의 곡선 모양을 빌려 오는 참고값이라 1·3%보다 덜 정확하다." : "";
+  wrap.innerHTML = `<table><thead><tr><th>시점</th><th class="l hide-sm">KST</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}<th class="l">등급</th><th class="hide-sm">근거</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
-// ---------- 지난 시즌 ----------
+// ---------- ② 지금 몇 %면 최종 몇 % ----------
+const CV = DATA.conv, Z80 = 1.2816, TGT = [1, 3, 10], NDAY = Math.ceil(CV.H / 24);
+const CS = LAT_ON ? ts(LAT.c_start) : null;   // 진행 중 시즌이 있으면 실제 날짜로 보인다
+const pf = v => v == null ? "–" : v >= 100 ? "100%+" : (v < 0.1 ? v.toFixed(3) : v < 10 ? v.toFixed(2) : v.toFixed(1)) + "%";
+const clock = h => { const m = Math.round(5 * 60 + h * 60) % (24 * 60); return p2(Math.floor(m / 60)) + ":" + p2(m % 60); };
+const whenLab = h => {
+  if (CS != null) return kstLab(CS + h * 3600e3);
+  const c = clock(h), late = +c.slice(0, 2) < 5;
+  return `${Math.min(NDAY, Math.floor(h / 24) + 1)}일차 ${c}${late ? "(다음 날)" : ""}`;
+};
+function convAt(h) {
+  const rows = CV.srv[srv], i = Math.max(0, Math.min(rows.length - 1, Math.round(h * 2)));
+  return {P: rows[i][1], sd: rows[i][2]};
+}
+const cDay = document.getElementById("cDay"), cHour = document.getElementById("cHour");
+cDay.innerHTML = Array.from({length: NDAY}, (_, i) => i + 1).map(d => `<option value="${d}">${d}일차</option>`).join("");
+cDay.value = "2";
+const curH = () => Math.min(CV.H - 0.5, (+cDay.value - 1) * 24 + (+cHour.value) * 0.5);
+function setH(h) {
+  h = Math.max(0, Math.min(CV.H - 0.5, h));
+  const d = Math.min(NDAY, Math.floor(h / 24) + 1);
+  cDay.value = String(d); cHour.value = String(Math.round((h - (d - 1) * 24) * 2));
+}
+const nowH = () => (NOW - CS) / 3600e3;
+if (CS != null) {
+  setH(nowH());
+  const b = document.getElementById("cNowBtn"); b.hidden = false;
+  b.onclick = () => { setH((Date.now() - CS) / 3600e3); renderCalc(); };
+}
+for (const id of ["cDay", "cHour", "cNow", "cTgt"]) document.getElementById(id).addEventListener("input", renderCalc);
+let markA = () => {};
+function renderCalc() {
+  const h = curH();
+  document.getElementById("cWhen").textContent = `${whenLab(h)} · 시작 후 ${h.toFixed(1)}시간`;
+  const {P, sd} = convAt(h);
+  const now = +document.getElementById("cNow").value, tgt = +document.getElementById("cTgt").value;
+  const r = 10 ** P, rlo = 10 ** (P - Z80 * sd), rhi = 10 ** (P + Z80 * sd);
+  if (now > 0) {
+    document.getElementById("oFinal").textContent = "약 " + pf(now * r);
+    document.getElementById("oFinalR").textContent = `80% 구간 ${pf(now * rlo)} ~ ${pf(now * rhi)}`;
+  }
+  if (tgt > 0) {
+    document.getElementById("oNow").textContent = pf(tgt / r) + " 이내";
+    document.getElementById("oNowR").textContent = `80% 구간 ${pf(tgt / rhi)} ~ ${pf(tgt / rlo)} (안전하게 가려면 앞 값)`;
+  }
+  let s = `이 시점에서 최종 %는 지금 %의 약 ${r.toFixed(2)}배 (80% ${rlo.toFixed(2)}~${rhi.toFixed(2)}배)다.`;
+  if (CV.borrow[srv]) s += ` ${SRV[srv]}은 근거 관측이 없어 한섭 배율을 그대로 빌린다(가정).`;
+  if (h < 3) s += " 시작 3시간 안은 관측이 없어 모델이 늘려 그린 값이다 — 숫자만 참고.";
+  else if (h < 11) s += " 첫 11시간은 관측이 적어 곡선 모양 자체가 불확실하다(구간에 반영).";
+  document.getElementById("cNote").textContent = s;
+  markA(h);
+}
+function drawConv() {
+  const seas = CV.seasons;
+  document.getElementById("calcIntro").textContent = `같은 점수라도 뒤에 들어오는 사람에게 밀려 %가 내려간다. 지난 개발 시즌 ${seas.length}개(${seas[0]}~${seas[seas.length - 1]})에서 잰 「최종 % ÷ 지금 %」 배율(여러 시즌 평균)로 바꾼다. `
+    + `시점은 챌린지 시작 기준 — 1일차는 05:00 KST에 시작해 다음 날 04:59까지다.`
+    + (CS != null ? ` 지금 ${LAT.season} 챌린지가 진행 중이라 그 시즌 날짜로 보인다.` : "");
+  const host = document.getElementById("cvA"); host.innerHTML = "";
+  document.getElementById("lgA").innerHTML = TGT.map(t => `<span><i class="sw" style="background:${COL(t)}"></i>최종 ${t}%</span>`).join("") +
+    `<span><i class="sw band" style="background:var(--text-muted)"></i>80% 구간</span>` + (CS != null ? `<span><i class="sw" style="background:var(--truth)"></i>지금</span>` : "");
+  const W = Math.max(300, host.clientWidth), narrow = W < 600, H = narrow ? 300 : 380;
+  const m = {l: 48, r: narrow ? 12 : 64, t: 14, b: 36};
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "최종 1·3·10%가 되는 시점별 지금 %"}, host);
+  const X = h => m.l + h / CV.H * (W - m.l - m.r);
+  const ylo = Math.log(0.03), yhi = Math.log(40);
+  const Y = p => m.t + (Math.log(Math.max(0.03, Math.min(40, p))) - ylo) / (yhi - ylo) * (H - m.t - m.b);   // 위 = 상위
+  for (const v of (narrow ? [0.05, 0.1, 0.3, 1, 3, 10, 30] : [0.05, 0.1, 0.2, 0.5, 1, 2, 3, 5, 10, 20, 30])) {
+    el("line", {x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)"}, svg);
+    el("text", {x: m.l - 6, y: Y(v) + 4, "text-anchor": "end"}, svg).textContent = v + "%";
+  }
+  for (let d = 0; d <= NDAY; d++) {
+    const x = X(Math.min(CV.H, d * 24));
+    el("line", {x1: x, x2: x, y1: H - m.b, y2: m.t, stroke: "var(--grid)", "stroke-dasharray": d ? "3 3" : null}, svg);
+    if (d < NDAY) el("text", {x: X(d * 24 + 12), y: H - m.b + 16, "text-anchor": "middle"}, svg).textContent =
+      CS != null ? (narrow ? kstDay(CS + d * 24 * 3600e3).replace(/\(.\)$/, "") : kstDay(CS + d * 24 * 3600e3)) : (narrow ? `${d + 1}일` : `${d + 1}일차`);
+  }
+  el("line", {x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: "var(--axis)"}, svg);
+  const rows = CV.srv[srv].filter(r => r[0] >= 3);
+  const path = pts => pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join("");
+  for (const t of TGT) {
+    const up = rows.map(r => [X(r[0]), Y(t / 10 ** (r[1] - Z80 * r[2]))]);
+    const dn = rows.map(r => [X(r[0]), Y(t / 10 ** (r[1] + Z80 * r[2]))]);
+    el("path", {d: path(up.concat(dn.reverse())) + "Z", fill: COL(t), opacity: .14}, svg);
+  }
+  for (const t of TGT) {
+    el("path", {d: path(rows.map(r => [X(r[0]), Y(t / 10 ** r[1])])), fill: "none", stroke: COL(t), "stroke-width": 2.2}, svg);
+    if (!narrow) el("text", {x: W - m.r + 6, y: Y(t) + 4, class: "lbl"}, svg).textContent = `최종 ${t}%`;
+  }
+  if (CS != null) {
+    const hn = nowH();
+    if (hn >= 0 && hn <= CV.H) el("line", {x1: X(hn), x2: X(hn), y1: m.t, y2: H - m.b, stroke: "var(--truth)", "stroke-width": 1.5}, svg);
+  }
+  const cross = el("line", {y1: m.t, y2: H - m.b, stroke: "var(--text-secondary)", "stroke-width": 1, "stroke-dasharray": "2 2"}, svg);
+  const dots = TGT.map(t => el("circle", {r: 4.5, fill: COL(t), stroke: "var(--surface-1)", "stroke-width": 2}, svg));
+  const place = h => {
+    cross.setAttribute("x1", X(h)); cross.setAttribute("x2", X(h));
+    const {P} = convAt(h);
+    TGT.forEach((t, i) => { dots[i].setAttribute("cx", X(h)); dots[i].setAttribute("cy", Y(t / 10 ** P)); });
+  };
+  markA = place;
+  const tip = mkTip(host);
+  const ov = el("rect", {x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent"}, svg);
+  hover(ov, ev => {
+    const mx = svgX(svg, W, ev);
+    const h = Math.max(3, Math.min(CV.H - 0.5, (mx - m.l) / (W - m.l - m.r) * CV.H));
+    place(h);
+    const {P, sd} = convAt(h);
+    let html = `<b>${whenLab(h)}</b> <span class="muted">시작 후 ${h.toFixed(1)}시간 · ${SRV[srv]}</span>`;
+    for (const t of TGT) html += `<div class="r"><i class="sw" style="background:${COL(t)}"></i>최종 ${t}% ← 지금 <b>${pf(t / 10 ** P)}</b> <span class="muted">(${pf(t / 10 ** (P + Z80 * sd))}~${pf(t / 10 ** (P - Z80 * sd))})</span></div>`;
+    tip.show(html, ...hostXY(host, ev));
+  }, () => { tip.hide(); place(curH()); });
+
+  // 시점별 표
+  let th = `<thead><tr><th>시점</th>${TGT.map(t => `<th>최종 ${t}%<span class="hide-sm"> ← 지금</span></th>`).join("")}</tr></thead><tbody>`;
+  const pts = [];
+  for (let d = 0; d < NDAY; d++) for (const hh of [0, 7, 13, 19]) if (d * 24 + hh < CV.H && d * 24 + hh >= 1) pts.push(d * 24 + hh);
+  pts.push(CV.H - 0.5);
+  for (const h of pts) {
+    const {P, sd} = convAt(h);
+    th += `<tr><td>${whenLab(h)}</td>` + TGT.map(t =>
+      `<td><b>${pf(t / 10 ** P)}</b> <span class="muted rng-sm">${pf(t / 10 ** (P + Z80 * sd))}~${pf(t / 10 ** (P - Z80 * sd))}</span></td>`).join("") + `</tr>`;
+  }
+  document.getElementById("tvT").innerHTML = th + "</tbody>";
+  renderCalc();
+}
+
+// ---------- ③ 지난 시즌 ----------
+const BASIS = {table: "집계표", curve: "관측 곡선"};
+function srcText(r) {
+  const b = (r.basis || {})[srv] || {}, by = {};
+  for (const p of PCTS) if (b[p]) (by[b[p]] = by[b[p]] || []).push(p);
+  return Object.entries(by).map(([k, ps]) => `${ps.join("·")}% ${BASIS[k] || k}`).join(" · ");
+}
 function drawPast() {
-  const R = DATA.past, host = document.getElementById("pastChart"); host.innerHTML = "";
+  const R0 = DATA.past.filter(r => !(r.end && ts(r.end) > NOW));   // 아직 안 끝난 시즌은 숨김
+  const has = r => Object.keys((r.cuts || {})[srv] || {}).length > 0;
+  const host = document.getElementById("pastChart"); host.innerHTML = "";
+  const note = document.getElementById("pastNote"), tbl = document.getElementById("pastTable");
   document.getElementById("pastLegend").innerHTML = PCTS.map(p => `<span><i class="sw" style="background:${COL(p)}"></i>${p}% 컷</span>`).join("")
     + `<span><i class="sw band" style="background:var(--text-muted)"></i>잠김 (시험 시즌)</span>`;
-  const vals = R.flatMap(r => PCTS.map(p => (r.cuts[srv] || {})[p]).filter(v => v != null));
-  if (!vals.length) empty(host, `${SRV[srv]} 지난 시즌 컷이 아직 없다.`);
-  else {
+  const i0 = R0.findIndex(has);
+  if (i0 < 0) { empty(host, `${SRV[srv]} 지난 시즌 컷이 아직 없다.`); tbl.innerHTML = ""; note.textContent = ""; return; }
+  const R = R0.slice(i0), skipped = R0.slice(0, i0), nData = R.filter(has).length;
+  if (nData < 2) {
+    const r = R.find(has);
+    empty(host, `${SRV[srv]} 컷은 ${r.season} 하나뿐이라 그래프 없이 표로만 보인다.`);
+  } else {
+    const vals = R.flatMap(r => PCTS.map(p => ((r.cuts || {})[srv] || {})[p]).filter(v => v != null));
     const nt = niceTicks(0, Math.max(...vals));
     const W = Math.max(300, host.clientWidth);
-    const f = frame(host, {W, H: W < 600 ? 240 : 320, m: {l: 40, r: 12, t: 12, b: 40}, xlo: -0.5, xhi: R.length - 0.5, ylo: 0, yhi: nt.hi, yt: nt.ticks});
+    const f = frame(host, {W, H: W < 600 ? 240 : 320, m: {l: 40, r: 12, t: 12, b: 40}, xlo: -0.5, xhi: R.length - 0.5, ylo: 0, yhi: nt.hi, yt: nt.ticks, label: "지난 시즌 최종 컷"});
     const bw = (f.X(1) - f.X(0)), every = bw < 24 ? 2 : 1;
     R.forEach((r, i) => {
       if (r.locked) el("rect", {x: f.X(i) - bw / 2, y: f.y1, width: bw, height: f.y0 - f.y1, fill: "var(--band)"}, f.svg);
@@ -300,39 +539,40 @@ function drawPast() {
       let seg = [];
       const flush = () => { if (seg.length > 1) el("polyline", {points: seg.join(" "), fill: "none", stroke: COL(p), "stroke-width": 2}, f.svg); seg = []; };
       R.forEach((r, i) => {
-        const v = (r.cuts[srv] || {})[p];
+        const v = ((r.cuts || {})[srv] || {})[p];
         if (v == null) { flush(); return; }
         seg.push(`${f.X(i)},${f.Y(v)}`);
       });
       flush();
-      R.forEach((r, i) => { const v = (r.cuts[srv] || {})[p]; if (v != null) el("circle", {cx: f.X(i), cy: f.Y(v), r: 3.5, fill: COL(p), stroke: "var(--surface-1)", "stroke-width": 1.5}, f.svg); });
+      R.forEach((r, i) => { const v = ((r.cuts || {})[srv] || {})[p]; if (v != null) el("circle", {cx: f.X(i), cy: f.Y(v), r: 3.5, fill: COL(p), stroke: "var(--surface-1)", "stroke-width": 1.5}, f.svg); });
     }
     const tip = mkTip(host);
     const hit = el("rect", {x: f.x0, y: f.y1, width: f.x1 - f.x0, height: f.y0 - f.y1, fill: "transparent"}, f.svg);
-    hit.addEventListener("mousemove", ev => {
-      const bb = f.svg.getBoundingClientRect(), sx = (ev.clientX - bb.left) / bb.width * W;
-      const i = Math.max(0, Math.min(R.length - 1, Math.round((sx - f.X(0)) / bw))), r = R[i], c = r.cuts[srv] || {};
+    hover(hit, ev => {
+      const sx = svgX(f.svg, W, ev);
+      const i = Math.max(0, Math.min(R.length - 1, Math.round((sx - f.X(0)) / bw))), r = R[i], c = (r.cuts || {})[srv] || {}, b = (r.basis || {})[srv] || {};
       const lines = r.locked ? `<span class="muted">잠김 — 최종 채점 뒤 공개</span>`
-        : PCTS.filter(p => c[p] != null).map(p => `<div class="r"><i class="sw" style="background:${COL(p)}"></i>${p}% ${fmt(c[p], 2)}억</div>`).join("") || `<span class="muted">${SRV[srv]} 컷 없음</span>`;
-      tip.show(`<b>${r.season} ${r.boss}</b> · ${r.start}<br>${lines}`, ev.clientX - host.getBoundingClientRect().left, ev.clientY - host.getBoundingClientRect().top);
-    });
-    hit.addEventListener("mouseleave", () => tip.hide());
+        : PCTS.filter(p => c[p] != null).map(p => `<div class="r"><i class="sw" style="background:${COL(p)}"></i>${p}% ${fmt(c[p], 2)}억 <span class="muted">${BASIS[b[p]] || ""}</span></div>`).join("") || `<span class="muted">${SRV[srv]} 컷 없음</span>`;
+      tip.show(`<b>${r.season} ${r.boss}</b> · ${r.start}<br>${lines}`, ...hostXY(host, ev));
+    }, () => tip.hide());
   }
   const rows = R.slice().reverse().map(r => {
-    const c = r.cuts[srv] || {};
-    const cells = r.locked ? `<td class="lock" colspan="3">잠김</td>` : PCTS.map(p => `<td>${c[p] != null ? fmt(c[p], 2) : "–"}</td>`).join("");
-    const src = r.locked ? "" : r.n_obs ? `커뮤니티 ${r.n_obs.toLocaleString("ko-KR")}건` : r.src === "table" ? "집계표 (한섭 3·10%)" : "";
-    return `<tr><td>${r.season}</td><td class="l">${r.boss}</td><td class="l">${r.start}</td>${cells}<td class="l muted">${src}</td></tr>`;
+    const c = (r.cuts || {})[srv] || {}, b = (r.basis || {})[srv] || {};
+    const cells = r.locked ? `<td class="lock" colspan="3">잠김</td>`
+      : PCTS.map(p => `<td>${c[p] != null ? fmt(c[p], 2) + (b[p] === "curve" ? `<sup class="cv">*</sup>` : "") : "–"}</td>`).join("");
+    return `<tr><td>${r.season}<span class="boss-sm">${r.boss}</span></td><td class="l hide-sm">${r.boss}</td><td class="l hide-sm">${r.start}</td>${cells}<td class="l muted hide-sm">${r.locked ? "" : srcText(r)}</td></tr>`;
   });
-  document.getElementById("pastTable").innerHTML =
-    `<thead><tr><th>시즌</th><th class="l">보스</th><th class="l">시작</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}<th class="l">근거</th></tr></thead><tbody>${rows.join("")}</tbody>`;
+  tbl.innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th><th class="l hide-sm">시작</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}<th class="l hide-sm">출처</th></tr></thead><tbody>${rows.join("")}</tbody>`;
+  note.innerHTML = `<sup class="cv">*</sup> = 끝난 뒤 올라온 점수·%로 그린 곡선에서 읽은 값, 표시 없는 값 = 커뮤니티 집계표(공식 확정값 아님).`
+    + (skipped.length ? ` 표에서 뺀 시즌: ${skipped[0].season}${skipped.length > 1 ? "~" + skipped[skipped.length - 1].season : ""} (${SRV[srv]} 컷 자료가 없거나 잠김).` : "");
 }
 
-function drawAll() { drawSrv(); drawLive(); drawPast(); }
-document.getElementById("sub").textContent = `${DATA.asof} KST 기준 · 한섭·일섭·글섭`;
-document.getElementById("foot").textContent = `분석에 든 개발 시즌: ${DATA.analysis.seasons.join(" · ") || "없음"} · 분석 도구 ${DATA.analysis.stamp.xval_head || ""}`;
+function drawAll() { drawSrv(); drawLive(); drawConv(); drawPast(); }
+document.getElementById("sub").textContent = `자료 기준 ${DATA.asof} KST · 한섭·일섭·글섭`;
+document.getElementById("foot").textContent = `분석에 든 개발 시즌: ${DATA.analysis.seasons.join(" · ") || "없음"}`;
 drawAll();
-let rz; window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(drawAll, 150); });
+let rz, rw = window.innerWidth;
+window.addEventListener("resize", () => { if (window.innerWidth === rw) return; rw = window.innerWidth; clearTimeout(rz); rz = setTimeout(drawAll, 150); });
 </script>
 </body>
 </html>

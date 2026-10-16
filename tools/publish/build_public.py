@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -142,11 +143,22 @@ def main():
     staged = build(a.out)
     print(f"{a.out}: 파일 {len(staged)}개, {sum(len(b) for b in staged.values()) / 1024:.0f} KB")
     if a.site:
+        # 지금 공개된 data.json을 site.py에 넘긴다 — 내용이 같으면 기준 시각을 그대로 둬서 gh-pages에 커밋이 생기지 않는다
+        prev = None
+        old = os.path.join(a.site, "data.json")
+        if os.path.isfile(old):
+            fd, prev = tempfile.mkstemp(suffix=".json")
+            os.close(fd)
+            shutil.copyfile(old, prev)
         for name in os.listdir(a.site) if os.path.isdir(a.site) else []:
             if name != ".git":
                 p = os.path.join(a.site, name)
                 shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
-        subprocess.run([sys.executable, "-I", os.path.join(HERE, "site.py"), "--out", a.site], check=True)
+        try:
+            subprocess.run([sys.executable, "-I", os.path.join(HERE, "site.py"), "--out", a.site] + (["--prev", prev] if prev else []), check=True)
+        finally:
+            if prev:
+                os.remove(prev)
         for name in os.listdir(a.site):
             p = os.path.join(a.site, name)
             if os.path.isfile(p):

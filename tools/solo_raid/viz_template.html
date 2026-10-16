@@ -185,7 +185,7 @@ li { margin: 3px 0; }
 
   <section class="card">
     <h2>② 예측 정확도 — 시즌 하나씩 빼고 맞히기 <span class="srvtag"></span></h2>
-    <p class="muted">나머지 시즌으로 prior를 만들고, 맞힐 시즌은 T시간까지 올라온 자료만 써서 최종 컷을 예측했다. 개발 시즌 4개로 돌린 시험 운전이라 판정에는 쓰지 않는다(기준: 시즌 8개 이상).</p>
+    <p class="muted">나머지 시즌으로 prior를 만들고, 맞힐 시즌은 T시간까지 올라온 자료만 써서 최종 컷을 예측했다. <span id="xvN"></span></p>
     <div class="controls">
       <span>시즌 <span class="seg" id="selS"></span></span>
       <span>지점 <span class="seg" id="selP"></span></span>
@@ -636,6 +636,7 @@ function renderNotes() {
   document.getElementById("summary").innerHTML = DATA.notes[SV].summary.map(s => `<li>${s}</li>`).join("");
   document.getElementById("notes").innerHTML = DATA.notes[SV].notes.map(s => `<li>${s}</li>`).join("");
 }
+document.getElementById("xvN").textContent = SEAS.length < 8 ? `개발 시즌 ${SEAS.length}개로 돌린 시험 운전이라 판정에는 쓰지 않는다(기준: 시즌 8개 이상).` : `개발 시즌 ${SEAS.length}개로 잰 결과다.`;
 document.getElementById("sub").innerHTML = `개발 시즌 ${SEAS[0]}~${SEAS[SEAS.length - 1]} (${SEAS.length}개) · 만든 시각 __ASOF__ KST · 자료: <code>data/solo-raid/analysis/</code>, 시즌별 <code>state/</code>`;
 document.getElementById("stamp").textContent = `만든 도구: tools/solo_raid/viz.py · 검증 xval_dev.json (도구 ${DATA.stamp.xval_head}) · prior ${DATA.stamp.prior} · 정답 표 ${DATA.stamp.answer_key_final ? "최종" : "개발 시즌만"}`;
 
