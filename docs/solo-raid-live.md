@@ -1,6 +1,6 @@
 # 솔로레이드 진행 중 시즌 (6시간 자동 수집·예측·웹 → 끝나면 보강)
 
-2026-10-16 사용자와 정한 운영 방식. S42부터 **Claude 예약 작업**이 6시간마다 새 세션(Sonnet)을 하나 띄워 받기 → 판독 → 예측 → 커밋·push를 하고,
+2026-10-16 사용자와 정한 운영 방식. S42부터 **Claude 예약 작업**이 6시간마다 시즌 전용 세션(Sonnet, 레포를 붙인 세션)을 깨워 받기 → 판독 → 예측 → 커밋·push를 하고,
 push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 갱신한다 (docs/publish.md).
 처음에는 세션 하나가 `send_later`로 정해진 시점(T = 12·18·24·36·48·72·96)마다 깨는 방식이었다가 같은 날 바꿨다 (사용자 결정).
 
@@ -12,8 +12,11 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 
 ## 정한 것 (사용자 결정, 2026-10-16)
 
-- **실행 위치:** Claude 예약 작업 하나 (「솔로레이드 6시간 자동 수집」, 실행마다 새 세션, 이 환경). GitHub Actions에서는 Haiku 판독을 돌릴 수 없어서다.
-  조율 세션 모델은 **Sonnet** (판독은 `raid-vision` Haiku — Haiku 기반 Workflow라 상시 허락, AGENTS.md).
+- **실행 위치:** Claude 예약 작업 하나(「솔로레이드 6시간 자동 수집」)가 **시즌 전용 세션 하나**(레포를 붙여 `create_session`으로 만든 세션)를 칸마다 깨운다.
+  GitHub Actions에서는 Haiku 판독을 돌릴 수 없어서다. 처음에는 실행마다 새 세션을 띄웠는데, 예약 작업이 띄운 새 세션에는 레포가 붙지 않았다
+  (2026-10-16 점검: 작업 폴더가 비어 있음, Workflow는 있음, `get_trigger`는 없음). 그래서 같은 날 바꿨다.
+  세션은 같은 대화로 깨어나지만 컨테이너는 그사이 바뀔 수 있다 — 상태는 언제나 커밋된 `data/solo-raid/S{n}/`에서 잇는다.
+  조율 세션 모델은 **Sonnet** (판독은 `raid-vision` Haiku — Haiku 기반 Workflow라 상시 허락, AGENTS.md). 권한 모드는 auto (점검에서 권한 질문 없음).
 - **칸:** 챌린지 시작(`c_start`, 05:00)부터 6시간마다 — 한국 시간 05·11·17·23시가 칸 경계다.
   구간은 **게시 시각으로 경계에서 자른다** (`[지난 성공 끝, 경계)`). 그래서 경계 뒤에 올라온 인증은 늦게 깨어도 이번 칸에 들지 않고 다음 칸으로 간다.
   실행을 경계 15분 뒤로 미루는 안은 자료는 그대로이고 웹만 늦어서 버렸다 (사용자 지적). 예약 작업은 **경계 1분 뒤(05:01·11:01·17:01·23:01)** 에 깬다
@@ -45,7 +48,7 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 | 마지막 예측 T=120 | 10-22(목) 05:01 실행 (종료 04:59:59를 덮는 칸) |
 | 종료 후 수집 | 10-26(월) 05:01 실행 (`e_end` 05:00) → 예약 작업이 저절로 꺼짐 |
 
-예측 20번 + 종료 후 수집 1번 = 세션 21개(+ T=0 칸 05:01의 빈 실행 1개). 지난 시즌 2일 구간 기록(새 글 1,100~3,100개, 시트 300~950장)으로 어림하면
+예측 20번 + 종료 후 수집 1번 = 깨우기 21번(+ T=0 칸 05:01의 빈 깨우기 1번). 지난 시즌 2일 구간 기록(새 글 1,100~3,100개, 시트 300~950장)으로 어림하면
 6시간 칸 하나는 새 글 150~400개·시트 40~120장, 판독 에이전트 3~10개, 20~40분이다.
 
 ## 1. 켜기 (시즌 시작 — 사용자가 「S{n} 자동 수집 켜」라고 할 때)
@@ -55,13 +58,16 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
    `name`·`boss`·`start`·`end`, `c_start`(기본 3일차 05:00 — 공지가 다르게 말하면 그것, 근거를 README에), `e_start` = `c_start`, `e_end` = 종료 + 4일 05:00.
 3. `data/solo-raid/S{n}/README.md`를 만든다 (일괄 수집 「시즌 요약」 형식의 머리 + 몫 `python3 -I tools/solo_raid/split.py role S{n}`).
    **맨 끝 절은 「자동 실행」 표로 둔다** — 실행마다 `live_tick.py record`가 README 맨 끝에 줄을 덧붙인다.
-4. 예약 작업을 켠다.
-   - 있으면(`data/solo-raid/live.json`의 `trigger`, 없으면 `list_triggers`에서 이름 「솔로레이드 6시간 자동 수집」): `update_trigger`로
-     `cron_expression` = `CRON_TZ=Asia/Seoul 1 5,11,17,23 * * *`, `enabled` = true (지난 시즌 끝에 한 번짜리로 바뀌어 꺼져 있다).
-   - 없으면 `create_trigger`: 이름 「솔로레이드 6시간 자동 수집」, 위 cron, `create_new_session_on_fire` = true, `notifications` = `{"push": true}`,
-     `initiation` = human_request, `prompt`는 아래 「예약 작업 프롬프트」 그대로. 만든 뒤 `update_trigger`로 `model` = Sonnet(`claude-sonnet-5-5`).
-   - 응답의 `next_run_at`이 다음 칸 1분 뒤인지 확인한다 (분이 바뀌어 있으면 고친다).
-5. `data/solo-raid/live.json`: `{"season": "S{n}", "trigger": "trig_…", "cron": "…", "on": "켠 KST 시각", "by": "세션 id"}`.
+4. 시즌 전용 세션과 예약 작업을 만든다 (켜는 세션이 `claude-code-remote` 도구로).
+   - `create_session`: `source_url` = `https://github.com/jgaram/nikke-community`, `model` = `claude-sonnet-5-5`, `permission_mode` = `auto`,
+     제목 「솔로레이드 S{n} 6시간 자동 수집」, 태그 `solo-raid-live`·`S{n}`. 첫 메시지는 점검으로 한다 —
+     레포·main 브랜치, `live_tick.sh plan`, `git push --dry-run origin HEAD:main`, Workflow·`raid-vision`·`PushNotification`·예약 작업 도구가 있는지, 권한 질문이 있었는지.
+     `list_events`로 답을 확인한다.
+   - `create_trigger`: 이름 「솔로레이드 6시간 자동 수집」, `cron_expression` = `CRON_TZ=Asia/Seoul 1 5,11,17,23 * * *`, `persistent_session_id` = 위 세션,
+     `initiation` = human_request, `prompt`는 아래 「예약 작업 프롬프트」 그대로. 이 방식에는 `notifications`를 줄 수 없어 알림은 세션이 `PushNotification`으로 보낸다.
+     응답의 `next_run_at`이 다음 칸 1분 뒤인지 확인한다.
+   - 지난 시즌 예약 작업이 남아 있으면 `delete_trigger`로 지운다 (전용 세션은 예약 작업이 띄운 세션이 아니라 함께 지워지지 않는다).
+5. `data/solo-raid/live.json`: `{"season": "S{n}", "trigger": "trig_…", "session": "session_…", "cron": "…", "model": "…", "on": "켠 KST 시각", "by": "세션 id"}`.
 6. 커밋(`S{n} 자동 수집 켬`) → push. `season.json`이 올라가 웹에 「챌린지 진행 중 · 첫 예측은 6시간 뒤」가 뜬다 (시작 뒤부터).
 7. 사용자에게 첫 실행 시각(KST)을 알린다.
 
@@ -70,14 +76,17 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 ```
 솔로레이드 자동 수집 한 번. docs/solo-raid-live.md의 「2. 자동 실행 한 번」을 처음부터 끝까지 그대로 따른다.
 사람이 보고 있지 않으니 묻지 말고, 그 절이 멈추라고 하는 곳에서만 멈춘다. 마지막 답은 그 절의 형식대로 한국어로 쓴다.
+이 세션은 6시간마다 같은 대화로 깨어난다. 앞 실행의 기억에 기대지 말고 매번 git pull로 최신 main을 받고 문서를 다시 읽어 판정부터 한다.
 ```
 
 절차는 이 문서에 두므로, 절차를 바꿀 때 예약 작업은 고치지 않는다.
 
-## 2. 자동 실행 한 번 (예약 작업이 띄운 세션이 따른다)
+## 2. 자동 실행 한 번 (예약 작업이 깨운 시즌 전용 세션이 따른다)
 
 규칙: 사람이 보고 있지 않다 — 묻지 않는다. `tools/`·`.claude/`·문서를 고치지 않는다. Workflow 결과 파일을 열어 해석하지 않고 숫자를 고치지 않는다.
 커밋·push는 `live_tick.sh`가 한다 (main에 바로). 시각은 KST로 쓴다.
+
+0. **최신 main:** `git checkout main && git fetch origin main && git merge origin/main` (같은 세션이 다시 깨어나므로 앞 실행 뒤의 커밋을 받는다). 이 절을 다시 읽는다.
 
 1. **판정:** `bash tools/solo_raid/live_tick.sh plan` → JSON 한 줄 (`action`·`T`·`start`·`end_w`·`after`·`trigger`·`reason`).
    - `idle` → 6으로 (보통 할 일 없음. `after`가 있으면 예약 작업만 손본다).
@@ -101,12 +110,16 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
      push가 `publish.yml`을 돌려 웹이 몇 분 안에 바뀐다. 출력 끝에 `[요약]` 줄과 경고(`!!`)가 나온다.
    - `final`: 내보내기·커밋·push → `post_all.sh` → `live/final_done.json`, `live.json`의 `season`을 비움 → 커밋(`S{n} 종료 후 수집 끝`)·push.
    - 종료 1 (예측 실패) → 이미 기록·커밋됐다. 7로.
-6. **예약 작업 손보기** (1의 `after`):
-   - `set_once {시각}` → `update_trigger(trigger_id={trigger}, run_once_at={시각})`. 반복 일정이 e_end 한 번짜리로 바뀐다 (T_end 칸, 또는 종료 뒤 `idle`인데 아직 반복일 때).
-     `get_trigger`로 이미 그 시각 한 번짜리면 건너뛴다.
-   - `finish` → 할 것 없음 (한 번짜리는 실행 뒤 저절로 꺼진다).
-   - 실패하면 7의 답에 「예약 작업을 못 바꿨다 — 사람이 바꿔야 함」을 적는다.
-7. **마지막 답** (세션 기록과 push 알림에 남는다. 해석을 덧붙여 확신을 키우지 않는다):
+6. **예약 작업 손보기** (1의 `after`, `update_trigger` 도구가 있을 때만):
+   - `set_once {시각}` → `update_trigger(trigger_id={trigger}, run_once_at={시각})`. 반복 일정이 e_end 한 번짜리로 바뀌어 그사이 빈 깨우기가 없어진다
+     (T_end 칸, 또는 종료 뒤 `idle`인데 아직 반복일 때. `get_trigger`가 되면 이미 그 시각 한 번짜리인지 먼저 본다).
+   - `finish` → 한 번짜리면 실행 뒤 저절로 꺼진다. 아직 반복이면 `update_trigger(enabled=false)`.
+   - 도구가 없거나 실패해도 수집은 돈다 — 반복 일정이 매일 05:01에 깨우므로 e_end 05:01에 종료 후 수집이 그대로 돌고, 그사이 깨우기는 `idle`이다.
+     이때 7의 답과 알림에 「예약 작업을 못 바꿨다 — 끝나면 사람이 꺼야 함」을 적는다.
+7. **마지막 답** (세션 기록에 남는다. 해석을 덧붙여 확신을 키우지 않는다).
+   **알림:** 실패·멈춤, 첫 예측(T=6), 마지막 예측(T_end), 종료 후 수집 끝, 예약 작업을 못 바꿨을 때만 `PushNotification`(status proactive)으로 첫 줄과 등급·사유를 한두 줄 보낸다
+   (지연 도구라 처음 쓸 때 `ToolSearch`의 `select:PushNotification`으로 불러온다).
+   그 밖의 칸은 알리지 않는다 (하루 4번 알림을 피함).
    - `run`: 첫 줄 `S{n} T{T} 예측 — {칸 시각} 칸, {올린 시각} 올림`. 다음에 `finish` 출력의 `[요약]` 줄과 `!!` 경고를 그대로, 받은 글·시트·요청 수를 한 줄로.
      맨 끝에 「검증 안 된 예측」.
    - `final`: 받은 글·관측 수 한 줄과 「남은 일: 데이터 점검·수집 끝 표시·채점 (docs/solo-raid-live.md 「3. 끝난 뒤」)」.
@@ -139,3 +152,4 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 - 2026-10-16: 받기 끝 `e_end`를 종료 + 2일 → + 4일 05:00으로 (사용자 결정, 일괄 수집과 같게).
 - 2026-10-16: 6시간 자동 수집으로 바꿈 (사용자 결정) — `send_later` 시점 방식 대신 예약 작업이 칸마다 새 세션, 예측 T=6부터 6시간마다·매번 웹 반영,
   시작은 사람·끝은 자동, `e_end`를 종료 + 2일 → 4일 05:00, 종료 후 수집은 e_end에 한 번. 도구 `tools/solo_raid/live_tick.py`·`live_tick.sh`.
+- 2026-10-16: 예약 작업이 띄운 새 세션에 레포가 붙지 않아(점검), 레포를 붙인 시즌 전용 세션을 예약 작업이 깨우는 방식으로 바꿈. 알림은 세션의 PushNotification으로 고비마다만.
