@@ -138,12 +138,13 @@ def main():
     # S41 묶음 이음: 챌린지 기간 안에 찍힌(첨부 시각) 문맥 cur·시즌 in 사진이 있는 묶음 → 그 글 번호 집합
     linked = collections.defaultdict(set)
     for o, s in zip(obs, srv):
-        if (s.get("cluster") and o["season"] == "in" and o.get("ctx") == "cur" and o.get("shot_t")
+        c = s.get("link") or s.get("cluster")   # 서버로 가르기 전 이음 덩어리 (2026-10-16)
+        if (c and o["season"] == "in" and o.get("ctx") == "cur" and o.get("shot_t")
                 and C0 <= o["shot_t"] <= END):
-            linked[s["cluster"]].add(str(o["no"]))
+            linked[c].add(str(o["no"]))
 
     def is_linked(o, s):
-        c = s.get("cluster")
+        c = s.get("link") or s.get("cluster")
         return bool(c and linked.get(c, set()) - {str(o["no"])})
 
     # 같은 사진 재게시(dup_of)의 원본 글 시각: 원본이 종료 전에 올라왔으면 재게시도 종료 전 화면이다

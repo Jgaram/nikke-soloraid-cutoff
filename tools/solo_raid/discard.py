@@ -12,15 +12,21 @@
   server_classify는 이 줄의 점수를 지문 잇기에 쓰지 않는다. 바른 값을 원본에서 읽었으면 `correct`({"pct":…, "score":…})에 적어 둔다 —
   적용하지는 않는다 (obs.jsonl을 읽는 도구가 많아 값 바꿔 넣기를 한곳에서 할 수 없다. 사례가 쌓이면 다시 정한다).
 
-items(state) → {열쇠: 항목} (열쇠: post는 글 번호 문자열, row는 "img#row"). posts(state) → post·discard, fixes(state) → post·server,
-rows(state) → {(img, row): 항목}. 시즌은 STATE/season.json의 name. 글 번호 문자열은 obs.jsonl의 no와 같은 꼴 (dc는 숫자, naver·blabla는 수집 도구의 no).
+- scope row (+ `img`·`row`), action server (+ `server`): 그 줄 하나만 서버를 고친다 (이어붙인 사진처럼 한 사진에 여러 서버가 있을 때, 2026-10-16).
+  server_classify가 그 줄에 근거 `fix`로 쓴다. 줄의 점수는 지문 잇기에 그대로 쓴다.
+- scope img (+ `img`, row 없음), action server (+ `server`): 사진 한 장 전체의 서버를 고친다 (한 글에 서로 다른 서버 사진이 섞인 경우 —
+  S33 4573600·4573011, 2026-10-16). server_classify가 그 사진(같은 sha1 사본 포함)의 모든 줄에 `fix`를 쓰고, 그 사진을 묶음의 앵커로 센다.
+  그 글의 텍스트 서버는 이 사진의 앵커가 되지 않는다.
+
+items(state) → {열쇠: 항목} (열쇠: post는 글 번호 문자열, row는 "img#row", img는 "img#"). posts(state) → post·discard, fixes(state) → post·server,
+rows(state) → {(img, row): 항목} (버린 줄만), row_fixes(state) → {(img, row): 항목}, img_fixes(state) → {img: 항목}. 시즌은 STATE/season.json의 name. 글 번호 문자열은 obs.jsonl의 no와 같은 꼴 (dc는 숫자, naver·blabla는 수집 도구의 no).
 """
 import json
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(os.path.dirname(os.path.dirname(HERE)), "data", "solo-raid")
-SCOPES = ("post", "row")
+SCOPES = ("post", "row", "img")
 ACTIONS = ("discard", "server")
 SERVERS = ("KR", "JP", "GL", "NA", "SEA")
 
@@ -41,16 +47,21 @@ def check(it, name):
     sc, ac = it.get("scope"), it.get("action", "discard")
     assert sc in SCOPES and ac in ACTIONS, it
     if ac == "server":
-        assert sc == "post" and it.get("server") in SERVERS, it
+        assert it.get("server") in SERVERS, it
     if sc == "row":
-        assert ac == "discard" and it.get("img") and isinstance(it.get("row"), int), it
-        assert str(it["img"]).split("_")[0] == str(it["no"]), f"img와 no가 다른 글: {it}"
+        assert it.get("img") and isinstance(it.get("row"), int), it
+    elif sc == "img":
+        assert ac == "server" and it.get("img") and "row" not in it, it
     else:
         assert "img" not in it and "row" not in it, it
+    if sc in ("row", "img"):
+        assert str(it["img"]).split("_")[0] == str(it["no"]), f"img와 no가 다른 글: {it}"
 
 
 def key(it):
-    return str(it["no"]) if it["scope"] == "post" else f"{it['img']}#{it['row']}"
+    if it["scope"] == "post":
+        return str(it["no"])
+    return f"{it['img']}#{it.get('row', '')}"
 
 
 def load(name):
@@ -81,4 +92,13 @@ def fixes(state):
 
 
 def rows(state):
-    return {(it["img"], it["row"]): it for it in items(state).values() if it["scope"] == "row"}
+    return {(it["img"], it["row"]): it for it in items(state).values()
+            if it["scope"] == "row" and it.get("action", "discard") == "discard"}
+
+
+def row_fixes(state):
+    return {(it["img"], it["row"]): it for it in items(state).values() if it["scope"] == "row" and it.get("action") == "server"}
+
+
+def img_fixes(state):
+    return {it["img"]: it for it in items(state).values() if it["scope"] == "img"}

@@ -226,7 +226,8 @@ def main():
     # 2) 묶음: 지문 묶음 이름, 없으면 같은 사진(sha1)
     group = {}
     for o, s in zip(obs, srv):
-        group[o["img"]] = s.get("cluster") or ("sha:" + (sha.get(o["img"]) or o["img"]))
+        # 이음 덩어리(link): 서버로 가르기 전의 지문 덩어리 (2026-10-16 server_classify가 섞인 묶음을 가른 뒤에도 시즌 판정은 같은 사람 잇기 그대로)
+        group[o["img"]] = s.get("link") or s.get("cluster") or ("sha:" + (sha.get(o["img"]) or o["img"]))
     members = collections.defaultdict(set)
     for img, g in group.items():
         members[g].add(img)

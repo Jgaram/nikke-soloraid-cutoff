@@ -20,18 +20,28 @@ python3 -I tools/server_classify.py STATE [--posts FILE.jsonl ...] [--snap DIR .
     앵커 글의 텍스트를 그 글의 줄에 믿는 것과 같은 근거다. S41에서 시즌 안 % 관측 14줄이 더 붙었다
     (한섭 9·일섭 4·북미 1, 모든 줄 22줄. 서버가 바뀌는 줄 0). post_link의 글 단위 열쇠(post_self·post_one)로만 이어진 줄과
     top7_post로만 서버가 정해진 사진의 다른 글 사본에는 붙이지 않는다.
+  - 서버 섞인 덩어리 가르기 (2026-10-16, S33 c1). 이어붙인 사진·사진 한 줄이 다른 서버 화면을 한 덩어리로 이으면 앵커 한 건 차이로
+    덩어리 전체 이름이 바뀌었다 (S33: 앵커 한섭 24·글섭 9·일섭 1, 72.7%로 이름 없음 → use의 82%가 서버 미정).
+    이음의 세기 = 두 사진이 함께 가진 정확 점수 개수. 앵커 서버가 둘 이상인 덩어리는 세기 t+1 이상으로 다시 나눠 보고(t = 1 → 4까지),
+    그 안에 서로 다른 서버로 top7 이름이 서는 부분이 둘 이상이면 합치지 않는다. 나머지 부분은 세기 t 이음으로 가장 가까운 top7 부분에
+    붙고, 가장 가까운 부분들의 서버가 갈리면 다리(`bridge`, 이름 없음)로 남는다. 서로 다른 서버로 확실한 부분이 없으면 전과 같다
+    (S35~S41은 줄 하나 바뀌지 않음). 같은 서버 순위표 사진끼리는 1~7위 점수를 여럿 함께 가져 세기 2 이상으로 이어진다.
+    server.jsonl의 `cluster`는 가른 뒤 묶음, `link`는 가르기 전 덩어리(g1…)다. 시즌 판정(post_exclude)·묶음 이음(truth)은 link를 쓴다.
   - 글 단위 `top7_post`: 글의 사진들이 이름 붙은 묶음 하나로만 가면, 묶음 밖 사진(잘라 낸 점수 막대 등)과 글 주장도 그 서버다.
-    글의 사진이 서로 다른 서버 묶음으로 가면 후보로만 남긴다.
+    글의 사진이 서로 다른 서버 묶음으로 가면 후보로만 남긴다. 사진 자신이 앵커 1개 묶음(top7_1)이고 그 서버가 글의 다른 사진 묶음에
+    없으면 top7_post로 덮지 않는다 (한 글에 한섭·북미 순위표, S33 4555355, 2026-10-16).
 - 최종 `server`: text와 지문이 같으면 `text+top7`(`text+top7_post`), 하나만 있으면 그것, 다르면 `conflict`(server 없음).
 - 고침 `fix`: data/solo-raid/S{n}/discard.json의 action server 항목 (원본을 보고 서버만 고친 글, 2026-10-16). 글 텍스트 대신 쓰고,
   앵커로도 세며, 묶음 이름과 달라도 fix가 이긴다. action discard 글은 텍스트를 쓰지 않는다 (줄은 post_exclude가 뺀다).
   줄 하나를 버린 항목(scope row, 판독 틀림 등)의 점수는 지문 잇기에 쓰지 않는다.
+  사진 단위 고침(scope img, action server)은 그 사진(같은 sha1 사본 포함)의 모든 줄에 fix를 쓰고 그 사진을 앵커 하나로 센다 (글 텍스트는
+  그 사진의 앵커가 되지 않는다). 줄 단위 고침(scope row, action server)은 그 줄에만 fix를 쓴다 (2026-10-16, S33 4573600·4573011).
 
 서버 이름: KR(한섭·한국 서버·KOR) · JP(일섭·일본 서버) · GL(글섭·글로벌) · NA(북미) · SEA(동남아). `무섭`·`타섭`·`본섭`은 서버가 아니다.
 이름 바로 뒤가 가정·비교("한섭이였으면"·"한섭이랑"·"한섭보다")면 그 서버가 아니라는 뜻이라 세지 않는다.
 
 출력
-- STATE/server.jsonl: obs.jsonl 한 줄마다 {site, no, img, row, server, basis, cand, cluster, quote}. 이음 열쇠는 (img, row).
+- STATE/server.jsonl: obs.jsonl 한 줄마다 {site, no, img, row, server, basis, cand, cluster, link, quote}. 이음 열쇠는 (img, row).
   `quote`는 서버 이름 앞뒤 짧은 원문이다 (작성자 정보는 넣지 않는다).
 - STATE/server_claims.jsonl: claims.jsonl 한 줄마다 {i(줄 순서), site, no, server, basis, cand, quote}. 글 단위 근거만 쓴다.
 - STATE/server_summary.json: 근거별 줄 수, 묶음별 사진 수·앵커·이름, 시즌 안 % 관측의 서버별 줄 수.
@@ -67,7 +77,8 @@ SENT_END = re.compile(r"[?!\n]+|(?<!\d)\.+|\.+(?!\d)")   # 0.53퍼의 점에서�
 Q_RE = re.compile(r"몇\s?(?:퍼|%|프로|등|위|점)|얼마")
 # 서버 이름 바로 뒤가 가정·비교면 그 서버가 아니라는 뜻이라 근거에서 뺀다 (S41: "한섭이였으면 3퍼 명함도 못내밀"은 일섭 글,
 # "보통 한섭이랑 30ㅡ35억정도 차이났"은 다른 서버 글)
-NOT_RE = re.compile(r"(?:\s?(?:섭|썹|서버))?(?:(?:이?[였었]?으면|이?라면|이면|보다|이?랑|과(?!금)|와)|\s?(?:보다|대비|에 ?비해))")
+NOT_RE = re.compile(r"(?:\s?(?:섭|썹|서버))?(?:(?:이?[였었]?으면|이?라면|이면|보다|이?랑|과(?!금)|와)|\s?(?:보다|대비|에 ?비해)"
+                    r"|(?:으로|로|에)?\s?(?:갔|넘어갔|옮겼)었?으면|(?:으로|로|에)\s?가면)")   # 「글섭갔으면」(S33 4573593, 2026-10-16)
 ID_RE = re.compile(r"[A-Za-z0-9_]{6,}")   # 인용에서 닉네임·친구 코드처럼 보이는 긴 영숫자는 가린다
 
 
@@ -196,6 +207,8 @@ def main():
     # 서버 고침(discard.json action server): 글 텍스트 대신 고친 서버를 근거 fix로 쓴다 (3.2b, 2026-10-16)
     fix = discard.fixes(state)
     bad_rows = set(discard.rows(state))   # 버린 줄(판독 틀림 등)의 점수는 지문으로 잇지 않는다
+    img_fix = discard.img_fixes(state)    # 사진 단위 서버 고침 (scope img, 2026-10-16)
+    row_fix = discard.row_fixes(state)    # 줄 단위 서버 고침 (scope row, action server)
 
     def text_server(no):
         if no in fix:
@@ -207,64 +220,167 @@ def main():
     for no in sorted({str(r["no"]) for r in obs}):   # 순서를 고정한다 (server_summary.json이 실행마다 같게)
         post[no] = text_server(no)
 
-    # 2) 사진 지문 묶음: 마디 = 사진(sha1), 같은 정확 점수로 잇는다
-    par = {}
-
-    def find(x):
-        par.setdefault(x, x)
-        while par[x] != x:
-            par[x] = par[par[x]]
-            x = par[x]
-        return x
-
+    # 2) 사진 지문 묶음: 마디 = 사진(sha1), 같은 정확 점수로 잇는다. 이음의 세기 = 두 사진이 함께 가진 정확 점수 개수
     def node(r):
         return sha.get(r["img"], r["img"])
-    first = {}
+    nscores = collections.defaultdict(set)
+    nposts = collections.defaultdict(set)
     for r in obs:
         n = node(r)
-        find(n)
+        nposts[n].add(str(r["no"]))
         s = None if (r["img"], r["row"]) in bad_rows else exact(r, a.code_scores)
-        if s is None:
-            continue
-        if s in first:
-            par[find(n)] = find(first[s])
-        else:
-            first[s] = n
-    linked = collections.Counter(find(node(r)) for r in obs
-                                 if (r["img"], r["row"]) not in bad_rows and exact(r, a.code_scores) is not None)
-    SINGLE = a.single_anchor
-    comp_imgs = collections.defaultdict(set)
-    comp_posts = collections.defaultdict(set)
-    for r in obs:
-        c = find(node(r))
-        comp_imgs[c].add(node(r))
-        comp_posts[c].add(str(r["no"]))
+        if s is not None:
+            nscores[n].add(s)
+    by_score = collections.defaultdict(set)
+    for n, ss in nscores.items():
+        for s in ss:
+            by_score[s].add(n)
+    adj = collections.defaultdict(collections.Counter)
+    for s in sorted(by_score):
+        ns = sorted(by_score[s])
+        for x in ns:
+            for y in ns:
+                if x != y:
+                    adj[x][y] += 1
+    allnodes = sorted(nposts)
+    # 사진 단위 서버 고침(scope img): 그 사진(마디)은 글 텍스트 대신 고친 서버의 앵커다
+    nfix = {}
+    for img, it in img_fix.items():
+        nfix[sha.get(img, img)] = it["server"]
+
+    def anchors(nodes):
+        """앵커 수: 글 텍스트(text·fix) 글은 글마다 하나 (그 글의 사진이 모두 사진 고침이면 세지 않는다), 사진 고침은 사진마다 하나."""
+        c = collections.Counter()
+        ps = collections.defaultdict(list)
+        for n in nodes:
+            if n in nfix:
+                c[nfix[n]] += 1
+            else:
+                for no in nposts[n]:
+                    ps[no].append(n)
+        for no in sorted(ps):
+            if post[no][1] in ("text", "fix"):
+                c[post[no][0]] += 1
+        return c
+
+    def name_rule(anc):
+        n = sum(anc.values())
+        if n:
+            k, m = sorted(anc.items(), key=lambda x: (-x[1], x[0]))[0]
+            if n >= 2 and m / n >= 0.75:
+                return k, "top7"
+            if n == 1:
+                return k, "top7_1"
+        return None, None
+
+    def parts(nodes, t):
+        """nodes 안에서 세기 t 이상 이음으로 이어진 덩어리들 (정렬된 목록)."""
+        ns, seen, out = set(nodes), set(), []
+        for x in sorted(ns):
+            if x in seen:
+                continue
+            st, cc = [x], set()
+            while st:
+                y = st.pop()
+                if y in cc:
+                    continue
+                cc.add(y)
+                st.extend(z for z, w in adj[y].items() if w >= t and z in ns and z not in cc)
+            seen |= cc
+            out.append(frozenset(cc))
+        return out
+
+    # 서버 섞인 묶음 가르기 (2026-10-16, S33 c1 — 다음 시즌에 바꿀 것). 다른 서버 화면이 이어붙인 사진·사진 한 줄로 한 묶음이 되면
+    # 앵커 한 건 차이로 묶음 전체 이름이 바뀌었다. 앵커 서버가 둘 이상인 덩어리는 더 센 이음(함께 가진 점수 t+1개 이상)으로 쪼개 보고,
+    # 그 안에 서로 다른 서버로 이름이 서는(top7) 부분이 둘 이상이면 합치지 않는다. 나머지 부분은 세기 t 이음으로 가장 가까운
+    # top7 부분에 붙인다 (가장 가까운 부분들의 서버가 갈리면 붙이지 않고 다리 `bridge`로 둔다 — 이름 없음).
+    TMAX = 4
+    bridge = set()
+
+    def refine(nodes, t):
+        out = []
+        for c in parts(nodes, t):
+            if t < TMAX and len(anchors(c)) >= 2:
+                subs = refine(c, t + 1)
+                lab = [name_rule(anchors(x)) for x in subs]
+                conf = {i for i, (k, b) in enumerate(lab) if b == "top7"}
+                if len({lab[i][0] for i in conf}) >= 2:
+                    out += attach(c, subs, lab, conf, t)
+                    continue
+            out.append(c)
+        return out
+
+    def attach(c, subs, lab, conf, t):
+        where = {n: i for i, x in enumerate(subs) for n in x}
+        nb = collections.defaultdict(set)
+        for n in c:
+            for z, w in adj[n].items():
+                if w >= t and z in where and where[z] != where[n]:
+                    nb[where[n]].add(where[z])
+        dist = {i: 0 for i in conf}
+        got = {i: {lab[i][0]} for i in conf}
+        front = sorted(conf)
+        while front:   # 여러 출발점 너비 우선: 같은 거리에서 닿은 서버를 모두 모은다
+            nxt = []
+            for i in front:
+                for j in sorted(nb[i]):
+                    if j in conf:
+                        continue
+                    if j not in dist:
+                        dist[j] = dist[i] + 1
+                        got[j] = set()
+                        nxt.append(j)
+                    if dist[j] == dist[i] + 1:
+                        got[j] |= got[i]
+            front = sorted(set(nxt))
+        grp = collections.defaultdict(set)
+        out = []
+        for i, x in enumerate(subs):
+            g = got.get(i, set())
+            if len(g) == 1:
+                grp[next(iter(g))] |= x
+            else:
+                if len(g) >= 2:
+                    bridge.update(x)
+                out.append(x)
+        return [frozenset(grp[k]) for k in sorted(grp)] + out
+
+    link = parts(allnodes, 1)
+    final = refine(allnodes, 1)
+    cid = {n: i for i, x in enumerate(final) for n in x}
+    lid = {n: i for i, x in enumerate(link) for n in x}
+    linked = {i for i, x in enumerate(final) if any(nscores[n] for n in x)}
+    comp_imgs = {i: set(x) for i, x in enumerate(final)}
+    comp_posts = {i: set().union(*(nposts[n] for n in x)) for i, x in enumerate(final)}
     # 사진 둘 이상을 이은 묶음만 지문으로 쓴다
-    comps = [c for c in comp_imgs if len(comp_imgs[c]) >= 2 and linked[c]]
-    comps.sort(key=lambda c: (-len(comp_imgs[c]), c))
+    comps = [i for i in comp_imgs if len(comp_imgs[i]) >= 2 and i in linked]
+    comps.sort(key=lambda i: (-len(comp_imgs[i]), min(comp_imgs[i])))
     cname = {c: f"c{i + 1}" for i, c in enumerate(comps)}
+    lk = [i for i, x in enumerate(link) if len(x) >= 2 and any(nscores[n] for n in x)]
+    lk.sort(key=lambda i: (-len(link[i]), min(link[i])))
+    lname = {c: f"g{i + 1}" for i, c in enumerate(lk)}
     clabel, csum = {}, []
     for c in comps:
-        anc = collections.Counter(post[no][0] for no in sorted(comp_posts[c]) if post[no][1] in ("text", "fix"))
-        n = sum(anc.values())
-        lab, basis = None, None
-        if n:
-            k, m = anc.most_common(1)[0]
-            if n >= 2 and m / n >= 0.75:
-                lab, basis = k, "top7"
-            elif n == 1:
-                lab, basis = k, "top7_1"
+        anc = anchors(comp_imgs[c])
+        lab, basis = (None, None) if comp_imgs[c] & bridge else name_rule(anc)
         clabel[c] = (lab, basis)
+        g = lid[min(comp_imgs[c])]
         csum.append({"cluster": cname[c], "images": len(comp_imgs[c]), "posts": len(comp_posts[c]),
-                     "anchors": dict(anc), "label": lab, "basis": basis})
+                     "anchors": dict(sorted(anc.items())), "label": lab, "basis": basis, "link": lname.get(g),
+                     "link_images": len(link[g]), **({"bridge": True} if comp_imgs[c] & bridge else {})})
 
     # 같은 사진이 여러 글에 올라온 사진 하나 덩어리: 앵커 글이 1개면 top7_1 (묶음 번호 없음, 요약 csum에도 넣지 않음)
     for c in sorted(comp_imgs):
-        if c in clabel or len(comp_posts[c]) < 2:
+        if c in clabel or len(comp_posts[c]) < 2 or comp_imgs[c] & bridge:
             continue
-        anc = collections.Counter(post[no][0] for no in sorted(comp_posts[c]) if post[no][1] in ("text", "fix"))
+        anc = anchors(comp_imgs[c])
         if sum(anc.values()) == 1:
             clabel[c] = (next(iter(anc)), "top7_1")
+
+    SINGLE = a.single_anchor
+
+    def find(n):
+        return cid[n]
 
     # 글 단위 지문: 글의 사진들이 이름 붙은 묶음 하나로만 가면, 묶음 밖 사진(잘라 낸 점수 막대 등)과 글 주장도 그 서버로 본다
     post_c = collections.defaultdict(set)
@@ -283,8 +399,13 @@ def main():
             cand = list(dict.fromkeys(cand + [c_lab]))
             single = c_lab
             c_lab = c_basis = None
+        pc = post_c.get(no, set())
+        if single and pc and single not in pc:
+            # 사진 자신의 묶음(앵커 1개) 서버가 글의 다른 사진 묶음 어디에도 없으면 글 단위(top7_post)로 덮지 않는다
+            # (S33 4555355·4560439: 한섭 순위표 + 북미 순위표 한 글, 2026-10-16). 그 서버가 다른 사진 묶음에도 있으면 전처럼 후보만
+            cand = list(dict.fromkeys(cand + sorted(pc)))
+            pc = set()
         if c_lab is None:
-            pc = post_c.get(no, set())
             if len(pc) == 1:
                 c_lab, c_basis = next(iter(pc)), "top7_post"
             elif pc:
@@ -299,19 +420,29 @@ def main():
             return t_srv, "text", cand
         if c_lab:
             return c_lab, c_basis, cand
-        if single and SINGLE and (not t_cand or single in t_cand) and not post_c.get(no):
+        if single and SINGLE and (not t_cand or single in t_cand) and not pc:
             return single, "top7_1", cand
         return None, t_basis or ("top7_1" if cand else None), cand
 
-    # 3) 줄마다 합치기
+    # 3) 줄마다 합치기 (줄 단위 서버 고침은 같은 사진 사본의 같은 줄에도 쓴다)
+    row_sha = {(sha.get(i, i), rw): it for (i, rw), it in row_fix.items()}
     out, cnt = [], collections.Counter()
     for r in obs:
         no = str(r["no"])
         c = find(node(r))
-        srv, basis, cand = combine(post[no], clabel.get(c, (None, None)), no)
+        rf = row_fix.get((r["img"], r["row"])) or row_sha.get((node(r), r["row"]))
+        nf = nfix.get(node(r))
+        if rf or nf:
+            sv = rf["server"] if rf else nf
+            srv, basis = sv, "fix"
+            cand = [x for x in combine(post[no], clabel.get(c, (None, None)), no)[2] if x != sv]
+            quote = ("고침: " + (rf or img_fix.get(r["img"]) or {"reason": "같은 사진 사본"})["reason"])[:120]
+        else:
+            srv, basis, cand = combine(post[no], clabel.get(c, (None, None)), no)
+            quote = post[no][3]
         cnt[basis] += 1
         out.append({"site": r["site"], "no": r["no"], "img": r["img"], "row": r["row"], "server": srv,
-                    "basis": basis, "cand": cand, "cluster": cname.get(c), "quote": post[no][3]})
+                    "basis": basis, "cand": cand, "cluster": cname.get(c), "link": lname.get(lid[node(r)]), "quote": quote})
 
     # 4) 글 숫자 주장 (claims.jsonl 줄 순서 i로 잇는다)
     claims = jl(os.path.join(state, "claims.jsonl"))
