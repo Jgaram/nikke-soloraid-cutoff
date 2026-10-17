@@ -215,11 +215,16 @@ def main():
     if a.final:
         raise SystemExit("xval은 개발 시즌 검증이다 — 시험(3.7)은 따로 한다")
     SP.guard_args(a)
+    # 커밋된 xval_dev.json은 analyze_all의 forward·loso 결과이고 웹 빌드(viz.py)가 loso 요약을 검사한다 (2026-10-17 레포 정리).
+    # --tag 없이 다른 방식으로 돌려 덮어쓰면 push 뒤 공개 웹 빌드가 멈춘다.
+    if os.path.abspath(a.out or os.path.join(AN, f"xval_{a.tag}.json")) == os.path.abspath(os.path.join(AN, "xval_dev.json")) \
+            and (a.fixed_prior or "loso" not in a.scheme.split(",")):
+        raise SystemExit("xval_dev.json 자리는 analyze_all의 forward·loso 결과만 쓴다 — --tag나 --out을 따로 준다")
     reg = FM.registry()
     crit = jload(os.path.join(AN, "criteria.json"))
     akey = jload(os.path.join(AN, "answer_key.json"))["rows"]
     seasons = a.seasons.split(",") if a.seasons else sorted({r["season"] for r in akey if r["truth"] is not None}, key=SP.snum)
-    seasons = [s for s in seasons if reg[s]["role"] == "dev"]
+    seasons = [s for s in seasons if reg[s]["role"] == "dev" and reg[s].get("collect") == "완료"]   # 수집 끝난 시즌만 (2026-10-17, truth_grade와 같게)
     Ts = [float(x) for x in a.T.split(",")] if a.T else [float(t) for t in crit["T"]]
     work = a.work or os.path.join(os.environ.get("CLAUDE_SCRATCH", "/tmp"), "solo_raid_xval")
     os.makedirs(work, exist_ok=True)

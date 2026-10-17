@@ -133,8 +133,11 @@ def build(seasons, final=False):
 
 
 def default_seasons():
+    # 수집이 끝난 시즌만 (2026-10-17 레포 정리): 진행 중 시즌(S42 등)은 끝나기 전 정답 점이 없어도 목록에 들어가,
+    # 종료 뒤 정답 점이 생기면 채점(score_live) 전에 xval이 그 시즌을 맞혀 보게 된다. collect_done.json은 채점 뒤에 쓴다 (solo-raid-live.md 「3. 끝난 뒤」).
     reg = json.load(open(os.path.join(DATA, "registry.json"), encoding="utf-8"))
-    return [r["season"] for r in reg["seasons"] if r["role"] == "dev" and (r.get("data") or {}).get("has_truth_points")]
+    return [r["season"] for r in reg["seasons"]
+            if r["role"] == "dev" and r.get("collect") == "완료" and (r.get("data") or {}).get("has_truth_points")]
 
 
 def main():

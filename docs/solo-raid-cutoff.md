@@ -8,7 +8,8 @@
 
 2026-10-11 사용자 설명 반영. 목표는 서버별로 솔로레이드 챌린지의 시간대별 상위 %에 해당하는 점수와 최종 커트라인(예: 1%, 3%, 10%)을 추정하는 것이다. 늦게 참여하는 사람과 기록을 갱신하는 사람 때문에 진행 중의 %는 계속 바뀐다.
 
-현재 우선순위는 **예측 모델보다 신뢰할 수 있는 관측 자료의 수집**이다. 분석 단계에서는 AI 분석 가이드를 참고한다. 분석 할 일과 진행 상태는 [분석 할 일](solo-raid-analysis.md)에 있다 (2026-10-16). 첨부 가이드는 원문 그대로 보관했으며, 가이드에서 언급하는 원본 HTML은 이번에 제공되지 않았다.
+처음(2026-10-11) 우선순위는 **예측 모델보다 신뢰할 수 있는 관측 자료의 수집**이었다. 지난 시즌 일괄 수집(S40→S19)과 3.7 시험이 끝난 지금(2026-10-17)은
+[예측 모델 다시 세우기](solo-raid-analysis.md#4-예측-모델-다시-세우기-37-미통과-뒤-2026-10-17)가 할 일이다. 분석 단계에서는 AI 분석 가이드를 참고한다. 분석 할 일과 진행 상태는 [분석 할 일](solo-raid-analysis.md)에 있다 (2026-10-16). 첨부 가이드는 원문 그대로 보관했으며, 가이드에서 언급하는 원본 HTML은 이번에 제공되지 않았다.
 
 ### 수집에서 구분할 것
 
@@ -27,7 +28,7 @@
 - **작성자 정보:** 필수 수집 여부는 아직 정하지 않았다. 서버 판정이나 반복 기록 연결에 필요한 경우에만 최소한으로 남기고, 서로 다른 커뮤니티의 동일 인물을 무리하게 식별하지 않는다.
 - **표본의 치우침:** 자발적으로 인증하는 사람과 기록을 자주 갱신하는 사람이 더 많이 잡힐 수 있다. 게시물 수를 독립 참여자 수나 전체 참여자 분포로 해석하지 않는다.
 
-수집 항목·보관 형식과 신뢰도 판정 기준은 후속 작업에서 구체화한다. 2026-10-14부터 역대 일정과 종료 후 커트라인 출처를 조사했으며, 예측 모델 검증은 수행하지 않았다.
+수집 항목·보관 형식과 신뢰도 판정 기준은 후속 작업에서 구체화한다. 2026-10-14부터 역대 일정과 종료 후 커트라인 출처를 조사했으며, 그때는 예측 모델 검증을 하지 않았다 (그 뒤 검증·시험은 [분석 할 일](solo-raid-analysis.md) 3·4).
 
 ### 역대 일정과 최종 컷을 조사할 때
 
@@ -105,9 +106,10 @@
 **점수·%의 크기로는 서버를 정하지 않는다.**
 
 ```bash
-python3 -I tools/server_classify.py data/solo-raid/S{n}/state
-# S41은 디시 글이 state에 없어 실험 사본을 더 준다
-python3 -I tools/server_classify.py data/solo-raid/S41/state \
+# 보통은 post_all.sh가 1단계로 부른다. 도구는 실험 폴더에 있다 (2026-10-17 경로 바로잡음 — 옮기기는 시즌 경계 할 일, 분석 4.0a)
+python3 -I experiments/2026-10-15-solo-raid-low-cost/tools/server_classify.py data/solo-raid/S{n}/state
+# S41은 디시 글이 state에 없어 실험 사본을 더 준다 (post_all은 도장의 extra로 준다 — 손으로 빼고 돌리면 서버 라벨이 바뀐다)
+python3 -I experiments/2026-10-15-solo-raid-low-cost/tools/server_classify.py data/solo-raid/S41/state \
   --posts experiments/2026-10-15-s41-opus-blind/data/posts_min.jsonl \
   --snap experiments/2026-10-15-s41-collection-baseline/data/snapshot/posts
 ```
@@ -453,12 +455,16 @@ python3 -I tools/solo_raid/split.py check                     # 시험 시즌 �
 python3 -I tools/solo_raid/registry.py --write                # 시즌 등록부
 python3 -I tools/solo_raid/truth_grade.py                     # 정답 표 (개발 시즌)
 python3 -I tools/solo_raid/fit_prior_multi.py S38,S40,S41 --out PRIOR.json
-python3 -I tools/solo_raid/xval.py [--scheme forward,loso] [--fixed-prior P --fixed-train S41]
+python3 -I tools/solo_raid/xval.py [--scheme forward,loso] [--fixed-prior P --fixed-train S41] [--tag NAME | --out PATH]
 ```
+
+- **`xval.py` 출력 자리** (2026-10-17). 기본 출력은 `analysis/xval_{tag}.json`이고 tag 기본은 `dev`다. `xval_dev.json`은 analyze_all의 forward·loso 결과 자리이고
+  공개 웹 빌드(`viz.py`)가 그 loso 요약을 다시 계산해 견준다 — 다르면 빌드가 멈춰 진행 중 시즌 웹 갱신도 멈춘다. 그래서 다른 방식(`--fixed-prior`, loso 없는 scheme)은 `--tag`·`--out` 없이 돌지 않는다.
+  `xval.summarize`를 바꾸면 같은 커밋에 `xval_dev.json`도 다시 만든다. 분석 도구를 고친 push 전에는 `python3 -I tools/publish/build_public.py --out DIR --site DIR2`로 빌드를 확인한다.
 
 - **학습·검증·시험 분리** (`split.py`, `data/solo-raid/split.json`). 시험 S19·S24·S29·S30·S34·S37 (정답 보기 전, 시드 고정 구간별 무작위). S42부터는 sha256 규칙.
   분석 도구는 `split.install_guard()`로 시험 시즌의 `truth*` 읽기를 막고, seasons.json·server_cutoffs.csv는 `load_seasons()`·`load_server_cutoffs()`로만 읽는다 (시험 시즌 컷 뺌).
-  `--final`은 3.7 시험에서만. 본 기록은 `split.py seen`. 감시는 읽기만 막는다 — 분석 결과 파일 이름은 `truth*`로 짓지 않는다 (정답 표가 `answer_key.json`인 까닭).
+  `--final`은 정답을 보는 시험 채점에서만 — 3.7, 그리고 공개 결정 A(2026-10-17) 뒤 시험 몫 시즌이 끝난 뒤 한 번 하는 `score_live` 채점. 본 기록은 `split.py seen`. 감시는 읽기만 막는다 — 분석 결과 파일 이름은 `truth*`로 짓지 않는다 (정답 표가 `answer_key.json`인 까닭).
 - **버릴 것·고칠 것** (`data/solo-raid/S{n}/discard.json`, `discard.py`, 2026-10-16 시즌별 파일로 옮김 — 여러 세션이 한 파일을 함께 고치면 충돌). 원자료는 그대로다. 항목마다 사유·날짜·결정자.
   - 글 버림(scope post, action `discard`): server_classify는 그 글 텍스트를 서버 근거로 쓰지 않고, post_exclude는 그 글의 줄과 같은 사진(sha1·dup_of) 사본에 exclude `discard`를 붙인다.
   - 서버 고침(scope post, action `server`): 판독은 맞고 서버만 틀린 글. server_classify가 글 텍스트 대신 `server`를 근거 `fix`로 쓴다 (앵커로도 세고, 묶음 이름보다 앞선다).
@@ -471,14 +477,17 @@ python3 -I tools/solo_raid/xval.py [--scheme forward,loso] [--fixed-prior P --fi
   - 처음 돌린 후보 수 (2026-10-16, 판단 전): S38 28 · S39 10 · S40 16 · S41 10. 「다른 시즌이 주인인 점수」는 같은 순위표 상위권 점수가 그 시즌에 수십~수백 번 나오는 것을 써서
     지난 시즌 기록 모음 글을 잡는다 — 예: S41 6249904(정확 점수 38개가 S38~S40 것), S39 5880343(29개). 이런 글의 줄이 지금 이번 시즌 기본 집합에 들어 있을 수 있다.
   - 처음에는 다른 시즌과 겹치는 점수를 모두 골라 시즌마다 수백 개였다 — 그 시즌 상위권 점수가 다음 시즌 초반 「지난 시즌 결과」 화면에도 나오기 때문이다. 그래서 「주인」(가장 많이 나온 시즌)을 따진다.
+  - 위 괄호의 후보 종류는 첫 판이다. 뒤에 더한 것(`rank_over_200`·`truth_flag_same_score`·`rank1_low` 등)까지 지금 목록의 정본은 `review.py`와 [일괄 수집 「7. 데이터 점검」](solo-raid-backfill.md#7-데이터-점검-s34-이하실시간)이다 (2026-10-17).
 - **진행 중 예측 채점** ([`score_live.py`](../tools/solo_raid/score_live.py), 2026-10-16). 진행 중 시즌 세션이 커밋한 `S{n}/predict/T*/`를 끝난 뒤 정답 표 규칙으로 채점한다 (xval.score와 같다).
-  시험 시즌은 3.7(`--final`)에서만.
+  시험 몫 시즌은 `--final`로 (공개 결정 A 전에는 3.7에서만). 끝난 시즌은 도구·설정을 고치기 전에, `collect_done.json`을 쓰기 전에 먼저 채점한다
+  ([진행 중 시즌 「3. 끝난 뒤」](solo-raid-live.md#3-끝난-뒤-e_end-이후), 2026-10-17).
 - **수집 끝 표시** (`S{n}/collect_done.json`, 2026-10-16). 등록부의 수집 상태는 이 파일 → PROGRESS.md 순으로 본다. 끝나지 않은 시즌은 analyze_all이 후처리를 다시 돌리지 않고 학습에서 뺀다
-  (여러 시즌 세션이 함께 돌 때 다른 세션의 시즌 폴더를 건드리지 않게).
+  (여러 시즌 세션이 함께 돌 때 다른 세션의 시즌 폴더를 건드리지 않게). 정답 표(`truth_grade.py`)와 검증(`xval.py`)도 수집이 끝난 시즌만 쓴다 —
+  전에는 진행 중인 S42가 정답 표 목록에 들어가 있었다 (2026-10-17 고침, 종료 뒤 채점 전에 xval이 그 시즌을 맞혀 보지 않게).
 - **후처리 도장** (`post_stamp.py`, post_all.sh 끝). `state/post_all_stamp.json` = 입력 파일·fetchlog·버릴 것 항목·시즌 전용 입력(--posts 등)·도구 파일의 sha1.
   시각은 넣지 않는다 (두 번 돌려 같은 파일). `--check`가 fresh·stale_input·stale_tools·never. S41처럼 시즌 전용 입력이 있는 시즌은 도장의 `extra`가 다시 돌릴 때의 인자다.
 - **등록부** (`registry.py` → `data/solo-raid/registry.json`). 몫·수집 상태(collect_done.json → PROGRESS.md)·형식(시작 규칙·길이)·후처리 최신 여부·품질 개수·학습 등급. 정답 값은 넣지 않는다.
-  학습 등급 full = 한섭 정답 점 A+A2 ≥ 8 그리고 라벨 종료 전 한섭 사람 ≥ 5. S39는 한섭 정답 점 6이라 table_only (학습에서 빠지고 맞힐 시즌으로만).
+  학습 등급 full = 한섭 정답 점 A+A2 ≥ 8 그리고 라벨 종료 전 한섭 사람 ≥ 5. 2026-10-16 첫 판에서는 S39가 한섭 정답 점 6이라 table_only였다 (학습에서 빠지고 맞힐 시즌으로만). 지금은 S39도 full이다 (2026-10-17 등록부).
 - **정답 표** (`truth_grade.py` → `analysis/answer_key.json`). 지점마다 집계표와 곡선(A+A2·A만)을 따로. 곡선은 덮인 구간 꺾은선, 덮이지 않아도 ×1.05 안 점이 있으면 그 점.
   점 하나씩 빼기로 가장 크게 바뀐 비율 ≤ 1%면 strong, 넘거나 값이 사라지면 fragile. 채점 정답은 criteria.json 규칙.
 - **여러 시즌 prior** (`fit_prior_multi.py`). predict.py가 그대로 읽는 꼴. 시즌마다 같은 무게, 칸마다 그 시즌 길이 H (S38 113시간).
@@ -532,7 +541,7 @@ python3 -I tools/solo_raid/xval.py [--scheme forward,loso] [--fixed-prior P --fi
 - 같은 인증이 여러 곳에 올라올 수 있다. 중복 출처는 연결하고 분석에서 중복 집계하지 않는다. 같은 점수의 새로운 시점 관측은 보존한다.
 - 수치가 스크린샷에만 있는 경우가 많다. 이미지를 모델에 보여주면 이미지 토큰이 따로 든다.
 - 정기 수집의 상태·관측은 시즌별로 `data/solo-raid/S{n}/`(`state/`·`runs/`)에 커밋한다 (사용자 위임으로 정함, 2026-10-15).
-  옮기는 도구는 `state_sync.py`다 (export·import, 2026-10-15). 무엇을 넣고 빼는지는 그 파일 머리말에 있다. 컷 추정·분석 답은 채팅으로 한다.
+  옮기는 도구는 `state_sync.py`다 (export·import, 2026-10-15). 무엇을 넣고 빼는지는 그 파일 머리말에 있다. 컷 추정·분석 답은 채팅으로 하되, 분석 설정·결과 파일과 진행 중 예측은 커밋한다 (AGENTS.md 「결과물」 예외, 2026-10-16).
 
 ## 보관한 조사 기록
 
