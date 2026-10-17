@@ -152,7 +152,7 @@ li { margin: 3px 0; }
 <body>
 <main>
 <p class="muted"><a href="./">← 첫 화면 (컷 예측 · 지금 몇 %면 최종 몇 % · 지난 시즌 컷)</a></p>
-<p class="note">이 페이지는 예측 방법을 검증하는 분석 화면입니다. 아래 ①은 첫 화면의 계산기와 같은 「여러 시즌 % 변환」이고, ②의 정확도도 <b>여러 시즌 prior</b>로 잰 것입니다. 첫 화면의 진행 중 컷 예측은 이와 다른 <b>S41 한 시즌 prior</b>로 내며, 그 방법의 정확도는 아직 검증 중입니다.</p>
+<p class="note">이 페이지는 예측 방법을 검증하는 분석 화면입니다. 아래 ①은 첫 화면의 계산기와 같은 「여러 시즌 % 변환」이고, ②의 정확도도 <b>여러 시즌 prior</b>로 잰 것입니다. 첫 화면의 진행 중 컷 예측은 <b>S41 한 시즌 prior</b>로 냅니다 (지난 시즌 검증으로 고른 방법 — 아래 ②와는 설정이 다릅니다). 그 방법의 독립 정확도는 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다.</p>
 
   <h1>솔로레이드 컷 분석 현황</h1>
   <p class="sub" id="sub"></p>
@@ -694,7 +694,7 @@ function renderNotes() {
   document.getElementById("notes").innerHTML = DATA.notes[SV].notes.map(s => `<li>${s}</li>`).join("");
 }
 document.getElementById("xvN").textContent = SEAS.length < 8 ? `개발 시즌 ${SEAS.length}개로 돌린 시험 운전이라 판정에는 쓰지 않습니다(기준: 시즌 8개 이상).` : `개발 시즌 ${SEAS.length}개로 잰 결과입니다.`;
-document.getElementById("sub").innerHTML = `개발 시즌 ${SEAS[0]}~${SEAS[SEAS.length - 1]} (${SEAS.length}개) · 만든 시각 2026-10-18 05:10 KST · 자료: <code>data/solo-raid/analysis/</code>, 시즌별 <code>state/</code>`;
+document.getElementById("sub").innerHTML = `개발 시즌 ${SEAS[0]}~${SEAS[SEAS.length - 1]} (${SEAS.length}개) · 만든 시각 2026-10-18 08:43 KST · 자료: <code>data/solo-raid/analysis/</code>, 시즌별 <code>state/</code>`;
 document.getElementById("stamp").textContent = `만든 도구: tools/solo_raid/viz.py · 검증 xval_dev.json (도구 ${DATA.stamp.xval_head}) · prior ${DATA.stamp.prior} · 정답 표 ${DATA.stamp.answer_key_final ? "최종" : "개발 시즌만"}`;
 
 /* ---------- 서버 전환 ---------- */
@@ -715,7 +715,7 @@ function renderAll() {
 renderAll();
 </script>
 <script>
-document.getElementById("sub").textContent = "개발 시즌 S19~S41 (23개) · 2026-10-18 05:10 KST 기준";
+document.getElementById("sub").textContent = "개발 시즌 S19~S41 (23개) · 2026-10-18 08:43 KST 기준";
 document.getElementById("stamp").textContent = "정답 표는 끝난 시즌을 모두 씁니다 — 이 시즌들로 방법을 고르고 다듬었으므로 개발 검증입니다. 독립 검증은 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다.";
 </script>
 </body>
