@@ -57,20 +57,32 @@ def main():
     a = ap.parse_args()
     if bool(a.final) == bool(a.dry):
         raise SystemExit("--final(시험 세션) 또는 --dry 개발 시즌 하나만")
+    import post_stamp  # noqa: E402
+    import fit_prior_multi as FM  # noqa: E402
+    sp = SP.load_split()
+    seasons = sp["test"] if a.final else a.dry.split(",")
+    seasons = [s if str(s).startswith("S") else f"S{s}" for s in seasons]
+    if a.dry and any(SP.is_test(s, sp) for s in seasons):
+        raise SystemExit("--dry에는 개발 시즌만")
+    # 2. 후처리 최신 (파일 해시만 본다 — 값을 읽지 않으므로 감시 전에)
+    for s in seasons:
+        st = FM.state_of(s)
+        if not os.path.exists(os.path.join(st, "obs.jsonl")):
+            stop(f"{s} state 없음 — 「쓸 수 없음」으로 적는다")
+        stt, why = post_stamp.check(st)
+        if stt != "fresh":
+            stop(f"{s} 후처리 도장 {stt} ({why})")
     SP.guard_args(a)
     import predict as PR  # noqa: E402  (감시를 켠 뒤 불러온다)
     import backtest as BT  # noqa: E402
     import xval as XV  # noqa: E402
-    import post_stamp  # noqa: E402
     import truth_grade as TG  # noqa: E402
-    import fit_prior_multi as FM  # noqa: E402
 
     fz = jload(a.freeze)
     crit_p = os.path.join(ROOT, fz["criteria"]["path"])
     if sha1(crit_p) != fz["criteria"]["sha1"]:
         stop(f"criteria.json sha1이 고정 때와 다르다 ({fz['criteria']['sha1']})")
     crit = jload(crit_p)
-    sp = SP.load_split()
     if sp["version"] != fz["split_version"]:
         stop(f"split.json 판이 고정 때({fz['split_version']})와 다르다")
     priors = {}
@@ -85,19 +97,7 @@ def main():
                 stop(f"지점 {q}를 두 묶음이 맡는다")
             owner[float(q)] = c["name"]
     main_name = fz["main_config"]
-    seasons = sp["test"] if a.final else a.dry.split(",")
-    seasons = [s if str(s).startswith("S") else f"S{s}" for s in seasons]
-    if a.dry and any(SP.is_test(s, sp) for s in seasons):
-        raise SystemExit("--dry에는 개발 시즌만")
     reg = FM.registry()
-    # 2. 후처리 최신
-    for s in seasons:
-        st = FM.state_of(s)
-        if not os.path.exists(os.path.join(st, "obs.jsonl")):
-            stop(f"{s} state 없음 — 「쓸 수 없음」으로 적는다")
-        stt, why = post_stamp.check(st)
-        if stt != "fresh":
-            stop(f"{s} 후처리 도장 {stt} ({why})")
     # 3. 정답 표
     akey = TG.build(seasons, final=bool(a.final))["rows"]
     Ts = [float(t) for t in crit["T"]]
