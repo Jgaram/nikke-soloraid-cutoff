@@ -348,7 +348,10 @@ function drawLive() {
     : `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤(${last.T_kst || ""})까지 올라온 자료 · 신뢰도 <span class="grade ${g}">${GRADE[g] || g}</span> · 커뮤니티 데이터 ${ls.n_persons}개`;
   body.appendChild(head);
   const meta = document.createElement("p"); meta.className = "muted";
-  meta.textContent = `예측 방법: ${last.method} · 아직 검증 중인 예측입니다.${done ? "" : " 6시간마다(한국 시간 05·11·17·23시까지 올라온 자료) 갱신합니다."}`;
+  // 시즌 도중 방법이 바뀌었으면 앞 시점의 방법도 적는다 (S42는 T24까지 S41 한 시즌 prior — 2026-10-18 사용자 결정으로 교체)
+  const older = P.filter(p => p.method !== last.method), olderNote = older.length
+    ? ` (${older[older.length - 1].T}시간 예측까지는 ${[...new Set(older.map(p => p.method))].join(" · ")})` : "";
+  meta.textContent = `예측 방법: ${last.method}${olderNote} · 아직 검증 중인 예측입니다.${done ? "" : " 6시간마다(한국 시간 05·11·17·23시까지 올라온 자료) 갱신합니다."}`;
   body.appendChild(meta);
   if (ls.nodata) { const n = document.createElement("p"); n.className = "gnote"; n.textContent = "아직 이번 시즌 순위 화면(% 표시)이 하나도 모이지 않아 숫자를 내지 않습니다. 관측이 1개 이상 들어오면 다음 갱신부터 표시합니다."; body.appendChild(n); }
   else if (GNOTE[g]) { const n = document.createElement("p"); n.className = "gnote"; n.textContent = `${SRV[srv]} 신뢰도 ${GRADE[g]}: ${GNOTE[g]}`; body.appendChild(n); }

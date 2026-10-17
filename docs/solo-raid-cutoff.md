@@ -381,6 +381,11 @@ python3 -I tools/solo_raid/server_mix.py data/solo-raid/S{n}/state [--gate | --c
 tools/solo_raid/predict_run.sh data/solo-raid/S{n}/state 24 --out DIR   # T = 지금까지 모은 자료의 끝 (시간 또는 'YYYY-MM-DD HH:MM')
 ```
 
+**2026-10-18부터 기본은 고정 모델이다** (`--model`, 기본 `data/solo-raid/analysis/model_{시즌}.json` — 없으면 멈춘다. S42는 T30부터, 사용자 결정).
+분석 4.3에서 고른 F: 1·3%(와 0.5·2%)는 최근 5시즌 여러 시즌 prior(구간 관측 뺌) + 「점 하나가 틀림」 끔 + 라벨 줄만 수준 갱신(`m_update`) + M1(지난 시즌 forward |z| 80% 분위로 T별 구간 넓히기),
+5·10·15·30%는 같은 5시즌 prior만 쓴 따로 실행. 빌릴 사이트 비율도 그 5시즌. 모델 파일은 [`freeze_model.py`](../tools/solo_raid/freeze_model.py)가 만든다 — 근거·숫자는 [분석 4.5](solo-raid-analysis.md#45-고정과-미래-시험).
+아래 방법 설명은 처음 만든 S41 한 시즌 기본 기준이다 — 관측을 옮기고 합치는 셈은 같고, prior·비율 빌림·수준·구간 넓히기만 다르다. 옛 방식은 `--prior data/solo-raid/S41/state/prior.json`.
+
 season.json에 `c_start`(챌린지 시작)가 없으면 멈춘다 (2026-10-16 재검토 r2 뒤). `--allow-cstart-fallback`일 때만 start 날짜 + 2일 05:00으로 대신하고
 결과 머리·JSON `warnings`·run.log에 크게 남긴다 — start를 챌린지 시작으로 잘못 넣으면 c_start가 48시간 늦어지고, 전에는 C 줄이 h = 0으로 잘려
 쓰레기 결과(S41 모의 한섭 1% 282.5 [221~624])가 경고 없이 나왔다. 지금은 게시 시각 상한 h_hi < 0인 C 줄을 버리고 개수(`drop_c_before_start`)를 적는다

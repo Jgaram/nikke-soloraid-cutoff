@@ -7,6 +7,8 @@ python3 -I tools/solo_raid/score_live.py S{n}
   S42 채점은 criteria.json 판 1(sha1 80c63e2f)로 고정한다 (분석 4.0a). 4절 후보 고르기 기준(criteria_v2.json)은 여기서 쓰지 않는다.
 - 쓰는 것: data/solo-raid/S{n}/predict/score.json, 표준 출력에 T × 한섭 1·3·10% 오차·80% 포함 표.
   T마다 그 예측을 낸 도구 커밋(run.tool_head)·prior·core sha1을 `runs`에 남긴다 — 진행 중에 도구가 바뀌었으면 tool_head별로 나눠 적는다 (분석 4.0).
+  방법(줄의 method: 고정 모델 이름(model) 또는 「prior 하나」)도 T마다 남긴다 — S42는 T24까지 S41 한 시즌 prior, T30부터 모델 F (사용자 결정 2026-10-18).
+  방법이 둘 이상이면 방법별로 나눠 읽는다 (같은 시즌이라도 다른 방법의 시험이다).
 - **미래 시험 (split.json 판 2 v2.future_protocol, 사용자 2026-10-17):** S42부터 모든 새 시즌은 끝나면 도구·설정을 고치기 전에
   이 채점을 먼저 한 번 한다 → 수집 끝 표시 → 개발. 그래서 정답 표는 수집이 끝나기 전 시즌도 만든다(truth_grade.build는 등록부와 상관없이 이름으로 받는다).
   진행 중 예측은 그때의 기본 도구·prior로 낸 것이라 그 자체가 정직한 표본 밖 시험이다 — 결과를 보고 도구를 고치면 그 뒤 성능은 「미검증」이다.
@@ -52,13 +54,17 @@ def main():
         T = float(out["T"]) if not isinstance(out["T"], str) else float(re.sub(r"[^\d.]", "", out["T"]))
         run = out.get("run") or {}
         prior = run.get("prior_sha1") or run.get("prior")
+        md = out.get("model")
+        method = f"model {md['name']} ({md.get('file')})" if md else "prior 하나"
         rs = XV.score(out, akey, name, T, "live", [f"prior {prior}"], crit)
         for r in rs:
             r["tool_head"] = run.get("tool_head")
+            r["method"] = method
         rows += rs
         st = run.get("state") or {}
         runs.append({"T": T, "file": os.path.relpath(p, ROOT), "tool_head": run.get("tool_head"), "tool_dirty": run.get("tool_dirty"),
-                     "prior_sha1": prior, "core_sha1": st.get("core_sha1"), "rows_le_T": st.get("rows_le_T")})
+                     "prior_sha1": prior, "core_sha1": st.get("core_sha1"), "rows_le_T": st.get("rows_le_T"), "method": method,
+                     "model_sha1": run.get("model_sha1"), "m1_c": (md or {}).get("m1_c")})
     heads = []
     for r in runs:
         if r["tool_head"] not in heads:
@@ -68,7 +74,7 @@ def main():
     res = {"about": "진행 중 예측 채점 (tools/solo_raid/score_live.py). 줄 꼴은 xval.json rows와 같다 (+ tool_head). "
                     "runs = T마다 예측을 낸 도구 커밋·prior·core — 도구가 진행 중에 바뀌었으면 tool_heads별로 나눠 읽는다",
            "season": name, "final": a.final, "criteria": os.path.relpath(CRIT, ROOT), "criteria_sha1": crit_sha1,
-           "tool_heads": heads, "runs": runs, "files": [os.path.relpath(p, ROOT) for p in files], "rows": rows}
+           "tool_heads": heads, "methods": list(dict.fromkeys(r["method"] for r in runs)), "runs": runs, "files": [os.path.relpath(p, ROOT) for p in files], "rows": rows}
     out_p = os.path.join(DATA, name, "predict", "score.json")
     with open(out_p, "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
@@ -79,10 +85,13 @@ def main():
         for q in (1.0, 3.0, 10.0):
             r = next((r for r in rows if r["T"] == T and r["server"] == "KR" and r["pct"] == q), None)
             cells.append("—" if not r or r.get("err") is None else f"{r['err']:+.1%}[{'O' if r['in80'] else 'X'}] {r.get('grade') or ''}")
-        th = next((r["tool_head"] for r in runs if r["T"] == T), None)
-        print(f"  T={T:>4g}  1%: {cells[0]:16} 3%: {cells[1]:16} 10%: {cells[2]:16} 도구 {(th or '?')[:8]}")
+        ru = next((r for r in runs if r["T"] == T), {})
+        print(f"  T={T:>4g}  1%: {cells[0]:16} 3%: {cells[1]:16} 10%: {cells[2]:16} 도구 {(ru.get('tool_head') or '?')[:8]} · {ru.get('method', '?')}")
     if len(heads) > 1:
         print(f"!! 예측을 낸 도구 커밋이 {len(heads)}개다 — tool_head별로 나눠 적는다: " + ", ".join((h or "?")[:8] for h in heads))
+    ms = res["methods"]
+    if len(ms) > 1:
+        print(f"!! 방법이 {len(ms)}개다 — 방법별로 나눠 읽는다: " + " / ".join(ms))
     print("→", os.path.relpath(out_p, ROOT))
     return 0
 

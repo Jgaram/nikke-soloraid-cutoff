@@ -5,10 +5,19 @@ python3 -I tools/solo_raid/predict.py STATE --prior PRIOR.json --at T [--unknown
         [--server-mix PATH] [--grades AB|all] [--out DIR] [--draws 2000] [--seed 1] [--tau-p X] [--tau-shape X] [--tau-ratio X]
         [--tau-scale0 X] [--no-season-diff] [--p-update] [--c-delay 0] [--robust mean|wmedian] [--top-cut Q] [--eps-wrong 0.2] [--json]
         [--allow-cstart-fallback] [--contam 0.1,0.2]
+python3 -I tools/solo_raid/predict.py STATE --model MODEL.json --at T [위 옵션 중 prior·빌릴 시즌·점 하나가 틀림 밖의 것]
 진행 중 시즌은 tools/solo_raid/predict_run.sh STATE T 한 명령으로 돌린다 (post_all → (mix면) server_mix → 이것).
-직접 돌려도 --borrow-state 기본값은 predict_run.sh와 같다 (이 레포의 data/solo-raid/S41/state, 없으면 경고). ''를 주면 빌리지 않는다.
+predict_run.sh 기본은 --model data/solo-raid/analysis/model_{시즌}.json이다 (2026-10-18 사용자 결정, S42 T30부터 — 아래 「고정 모델」).
 
-**검증 안 된 예측이다.** S41 한 시즌으로 만들었고, S41 되돌아보기는 곡선 모양이 S41 정답 그 자체라 성능 근거가 아니다.
+고정 모델 (--model, 분석 4.3 마무리에서 고른 F — docs/solo-raid-analysis.md 「4.5 고정과 미래 시험」, 만드는 도구 freeze_model.py)
+- 1·3%(과 같은 실행의 0.5·2%) = main: 최근 5시즌 여러 시즌 prior(구간 관측 뺌) + 「점 하나가 틀림」 끔 + 라벨 줄만 자체 일관성 수준 갱신(m_update, M4l)
+  + M1 — 지난 시즌 forward 검증의 |z| 80% 분위로 T별 80%(와 50·95%) 구간을 넓힌다 (넓히기만, 등급은 넓히기 전 폭으로 매김).
+- 5·10·15·30% = ref: 최근 5시즌 여러 시즌 prior(그대로) · 덧붙임 없음 (M2a).
+- 빌릴 사이트 비율은 그 5시즌 (xval과 같게). 모델 파일이 prior 경로·sha1, M1 배율표, 설정을 모두 갖는다 — 시즌 안에서는 바꾸지 않는다.
+- 개발 검증(23시즌 forward)만 있다 — 미래 시험(끝나기 전에 커밋된 예측을 끝난 뒤 채점) 전이다.
+
+--prior만 주는 옛 방식 (S41 한 시즌 prior, S42 T6~T24에 쓴 것): 직접 돌리면 --borrow-state 기본값은 이 레포의 data/solo-raid/S41/state (없으면 경고). ''를 주면 빌리지 않는다.
+**검증 안 된 예측이었다.** S41 한 시즌으로 만들었고, S41 되돌아보기는 곡선 모양이 S41 정답 그 자체라 성능 근거가 아니다 (3.7 시험 미통과).
 1·3% 구간 폭의 핵심(τ_P, 1~3% 모양 차)은 가정이다. 출력 첫머리에 이 말을 늘 찍는다.
 
 서버 미상 줄 (--unknown, 기본 site — 2026-10-16 tr 점검으로 정함, docs/solo-raid-cutoff.md 「예측 도구」)
@@ -485,7 +494,9 @@ def assign_unknown(state, rows, lab_pers, u):
     if N < SITE_MIN:
         if u.get("borrow_state"):
             ratio, _ = borrowed_ratio(u["borrow_state"], u.get("borrow_kind", "label"))
-            info["ratio_source"] = f"S41에서 빌림 ({u.get('borrow_kind', 'label')}, {u['borrow_state']}) — T까지 라벨 사람 {N}명 < {SITE_MIN}"
+            bs = u["borrow_state"] if isinstance(u["borrow_state"], (list, tuple)) else [u["borrow_state"]]
+            bn = "+".join(os.path.basename(os.path.dirname(os.path.normpath(x))) for x in bs)
+            info["ratio_source"] = f"{bn}에서 빌림 ({u.get('borrow_kind', 'label')}) — T까지 라벨 사람 {N}명 < {SITE_MIN}"
             info["warnings"].append(f"사이트 비율을 끝난 시즌에서 빌림 (T까지 라벨 사람 {N}명)")
         else:
             info["warnings"].append(f"T까지 라벨 사람 {N}명 < {SITE_MIN}인데 빌릴 state가 없어 그 라벨로 잰 비율을 씀")
@@ -867,7 +878,8 @@ class Predictor:
                 xi = rng.gauss(0, 1)
             else:
                 trs = trc
-            m_season, Z, rnoise = (math.exp(self.lvl[0]) if self.lvl else 1.0), 0.0, {}
+            # 기준선(b0·b1)에는 수준 배수를 곱하지 않는다 (분석 4.3 「지표 결함」 고침, 2026-10-18 — 덧붙임 없는 실행은 그대로)
+            m_season, Z, rnoise = (math.exp(self.lvl[0]) if self.lvl and mode == "pt" else 1.0), 0.0, {}
             if not central and "iii" in comps:
                 if self.lvl:
                     m_season = math.exp(self.lvl[0] + rng.gauss(0, self.lvl[1]))
@@ -1105,6 +1117,21 @@ def predict(state, prior, T, opts, draws=2000, seed=1, comps_split=True, priors=
         lvl_info = early_level_prior(prior, state, T, H, opts["early_level"])
         if lvl_info.get("mu") is not None:
             opts = dict(opts, _lvl=(lvl_info["mu"], lvl_info["sd"]))
+    lu_info = None
+    if opts.get("level_update") is not None:
+        # 자체 일관성 수준 갱신 (m_update.m_posterior — xval.py --level-update와 같은 셈, 분석 4.3 M4l). 사람이 모자라면 None → τ_P 그대로
+        if opts.get("_lvl"):
+            raise ValueError("level_update와 early_level은 같은 자리(_lvl)라 하나만 켠다")
+        _here = os.path.dirname(os.path.abspath(__file__))
+        if _here not in sys.path:   # python3 -I는 스크립트 폴더를 sys.path에 넣지 않는다
+            sys.path.insert(0, _here)
+        import m_update as MU
+        cfg = dict(opts["level_update"])
+        tau = cfg.pop("tau", None) or prior["season_diff"]["tau_p"]["value"]
+        lu_info = MU.m_posterior(prior, rows, H, tau, **cfg)
+        if lu_info:
+            opts = dict(opts, _lvl=(lu_info["mu"], lu_info["sd"]))
+        lu_info = {"cfg": opts["level_update"], "tau": tau, "result": lu_info}
     pr = Predictor(prior, H, opts, priors)
     full = pr.run(rows, ("i", "ii", "iii"), draws, seed)
     comp = {}
@@ -1124,10 +1151,10 @@ def predict(state, prior, T, opts, draws=2000, seed=1, comps_split=True, priors=
                         "server_mix": opts.get("server_mix"), "p_update": opts.get("p_update", False),
                         "unknown": opts.get("unknown"), "robust": opts.get("robust", "mean"), "top_cut": opts.get("top_cut"),
                         "tau_p": pr.tau_p, "tau_shape": pr.tau_shape, "tau_ratio": pr.tau_ratio,
-                        "tau_scale0": pr.tau_scale0, "prior_season": prior["season"],
+                        "tau_scale0": pr.tau_scale0, "prior_season": prior["season"], "eps_wrong": opts.get("eps_wrong", EPS_WRONG),
                         "prior_form": prior["transform"]["form"]},
            "counts": {k: v for k, v in cnt.items() if k != "unknown"}, "unknown": cnt.get("unknown"),
-           "p_update": None, "early_level": lvl_info, "servers": {}}
+           "p_update": None, "early_level": lvl_info, "level_update": lu_info, "servers": {}}
     if full["post"]:
         p = full["post"]
         out["p_update"] = {"n_pairs": p["n_pairs"], "m_mean": math.exp(p["mean_lnm"]), "sd_lnm": p["sd_lnm"],
@@ -1152,13 +1179,13 @@ def predict(state, prior, T, opts, draws=2000, seed=1, comps_split=True, priors=
             basis = "관측 기반"
         elif n_pers > 0:
             basis = "관측 적음"
-        elif donor == "S41":
-            basis = "근거 없음 (S41 곡선 그대로 + 가정 폭)"
+        elif donor == "S41":   # 「S41」은 prior 곡선 그대로라는 표시 (이름은 옛 값 그대로 — site.py가 읽는다)
+            basis = f"근거 없음 ({prior['season']} prior 곡선 그대로 + 가정 폭)"
         else:
-            basis = f"근거 없음 ({SNAME.get(donor, donor)} 곡선 × S41 서버 비율)"
+            basis = f"근거 없음 ({SNAME.get(donor, donor)} 곡선 × {prior['season']} 서버 비율)"
         ys = inf.get("y_central", [])
         if prep and all(o["h"] < pr.prior["transform"]["h_support"]["h_min"] for o in prep["O"]):
-            basis += " · 모든 관측이 S41 % 변환 자료보다 이른 시각 (외삽)"
+            basis += f" · 모든 관측이 prior({prior['season']}) % 변환 자료보다 이른 시각 (외삽)"
         sv = {"basis": basis, "n_moments": n_obs, "n_persons": round(n_pers, 1), "n_persons_label": n_lab,
               "n_persons_mix_expected": round(sum(pm.values()), 1), "donor": donor,
               "grades": dict(collections.Counter(o["grade"] for o in prep["O"])) if prep else {},
@@ -1178,7 +1205,7 @@ def predict(state, prior, T, opts, draws=2000, seed=1, comps_split=True, priors=
             d["shape_flag"] = sh.flag_at(u)
             notes = []
             if d["shape_flag"] != "own":
-                notes.append(f"S41 모양 {d['shape_flag']}")
+                notes.append(f"prior 모양 {d['shape_flag']}")
             if prep and near == 0:
                 notes.append("옮긴 관측이 ×2 안에 없음 (모양 가정 의존)")
             d["notes"] = notes
@@ -1221,13 +1248,14 @@ def warning(T, s, sv, unk, prior):
     2026-10-16 재검토 r2 뒤: 12~18시간이 B였는데 S41 모의 12h −8.1%·15h −3.2%였다 → T < 18이면 C, 1·3% 80% 폭 > 15%여도 C."""
     R = []
     h_min = prior["transform"]["h_support"]["h_min"]
+    pn = prior["season"]
     if sv["donor"]:
-        R.append(("D", "이 서버 관측 0 — " + ("S41 곡선 그대로" if sv["donor"] == "S41" else
-                                             f"{SNAME.get(sv['donor'], sv['donor'])} 곡선 × S41 서버 비율")))
+        R.append(("D", "이 서버 관측 0 — " + (f"{pn} prior 곡선 그대로" if sv["donor"] == "S41" else
+                                             f"{SNAME.get(sv['donor'], sv['donor'])} 곡선 × {pn} 서버 비율")))
     if T < h_min:
-        R.append(("C", f"T {T:.1f}시간 < {h_min:.1f}시간: S41 % 변환 자료보다 이른 시각 (외삽, 꼴 차이만큼 넓힘)"))
+        R.append(("C", f"T {T:.1f}시간 < {h_min:.1f}시간: prior({pn}) % 변환 자료보다 이른 시각 (외삽, 꼴 차이만큼 넓힘)"))
     elif sv["h_range"] and sv["h_range"][1] < h_min:
-        R.append(("C", "모든 관측이 S41 % 변환 자료보다 이른 시각 (외삽)"))
+        R.append(("C", f"모든 관측이 prior({pn}) % 변환 자료보다 이른 시각 (외삽)"))
     elif T < T_TRUST:
         R.append(("C", f"T {T:.1f}시간 < {T_TRUST:g}시간: 초반 % 변환 근거가 얇다 (S41 첫 24시간 한섭 A 8줄, 모의 12h −8.1%·15h −3.2%). "
                        f"{T_TRUST:g}시간 문턱은 S41에서 본 값이라 낙관적이다"))
@@ -1251,7 +1279,7 @@ def warning(T, s, sv, unk, prior):
             R.append(("B", f"서버 라벨 사람 {sv['n_persons_label']}명 < {N_FEW} — 서버 미상 줄(사이트 비율·확률)에 기댄다. 아래 「라벨 줄만」과 견준다"))
     if sv.get("fill_draws_share", 0) > 0.1:
         R.append(("C", f"뽑기의 {sv['fill_draws_share'] * 100:.0f}%에서 쓸 점이 없어(옮긴 %가 모양 격자 밖 등) "
-                       "다른 서버·S41 곡선(+가정 폭)으로 채웠다"))
+                       "다른 서버·prior 곡선(+가정 폭)으로 채웠다"))
     if unk:
         for w in unk.get("warnings", []):
             if s in unk.get("servers", []):
@@ -1263,7 +1291,8 @@ def warning(T, s, sv, unk, prior):
 def assumptions(prior, pr):
     sd = prior["season_diff"]
     return [
-        f"[가정] prior는 {prior['season']} 한 시즌에서 잰 값이다 (% 변환 꼴·모수, 최종 곡선 모양, 서버 비율).",
+        (f"[가정] prior는 {prior['season']} 한 시즌에서 잰 값이다 (% 변환 꼴·모수, 최종 곡선 모양, 서버 비율)." if "+" not in str(prior["season"]) else
+         f"[가정] prior는 여러 시즌({prior['season']})으로 잰 값이다 (% 변환 꼴·모수·시즌 수준 퍼짐, 최종 곡선 모양·서버 비율은 시즌 평균)."),
         f"[가정] 시즌 간 P 수준 차이 τ_P = {pr.tau_p:.3f} (ln 배수 1σ). 근거: {sd['tau_p']['basis']}",
         f"[가정] 시즌 간 곡선 모양 차이 τ_shape = {pr.tau_shape:.2f} × D(u). 근거: {sd['tau_shape']['basis']}",
         f"[가정] 관측 없는 서버의 서버 비율 차이 τ_ratio = {pr.tau_ratio:.3f}. 근거: {sd['tau_ratio']['basis']}",
@@ -1308,7 +1337,12 @@ def summary_lines(out):
              + (f" · {contam_brief(kr)}" if kr.get("contam") else ""))
     L.append("[요약] " + " · ".join(f"{SNAME[s]} 등급 {out['servers'][s].get('warning', {}).get('label', '?')}" for s in ("JP", "GL"))
              + " (일섭·글섭은 라벨 줄만 쓴다)")
-    L.append("[요약] ※ 검증 안 된 예측이다 — S41 한 시즌으로 만든 도구, S41 되돌아보기는 성능 근거가 아니다. 구간에 섞임(미상 줄의 일섭·글섭)은 들어 있지 않다.")
+    if out.get("model"):
+        md = out["model"]
+        L.append(f"[요약] ※ 고정 모델 {md['name']} ({md['main']['prior_season']} 여러 시즌 prior + 라벨 줄 수준 갱신 + 80% 구간 ×{md['m1_c']:.2f}) — "
+                 "지난 23시즌 개발 검증으로 고른 방법이고 미래 시험 전이다. 구간에 섞임(미상 줄의 일섭·글섭)은 들어 있지 않다.")
+    else:
+        L.append("[요약] ※ 검증 안 된 예측이다 — S41 한 시즌으로 만든 도구, S41 되돌아보기는 성능 근거가 아니다. 구간에 섞임(미상 줄의 일섭·글섭)은 들어 있지 않다.")
     L.append("[요약] " + GRADE_RULE)
     return L
 
@@ -1349,11 +1383,23 @@ def render(out):
         p = out["p_update"]
         L.append(f"시즌 P 수준 갱신: 같은 점수 쌍 {p['n_pairs']}개 → 배수 {p['m_mean']:.3f} (ln sd {p['sd_lnm']:.3f}, 사전 τ_P {p['prior_tau_p']:.3f})")
     L.append("")
-    L.append("※ 검증 안 된 예측이다. S41 한 시즌으로 만든 도구이고, S41 되돌아보기는 곡선 모양이 S41 정답 그 자체라 성능 근거가 아니다.")
-    L.append("  1·3% 구간 폭의 핵심(시즌 간 % 변환 수준 τ_P, 1~3% 곡선 모양 차)은 가정이다 (아래 가정 목록).")
-    L.append("읽는 법: ■ 주 결과는 1·3% 컷이다. 0.5·2%는 보조. 5·10·15·30%는 「참고 — 시즌 간 모양 가정에 기댐」(S41 곡선 모양을 그대로 빌림, 맞는지 잴 수 없음).")
-    L.append("        등급 A 보통 · B 주의 · C 강한 주의 · D 숫자만 참고 (기준은 맨 위 요약). 구간은 S41 한 시즌으로 정한 가정을 포함한다 (아래 가정 목록).")
+    if out.get("model"):
+        md = out["model"]
+        L.append(f"※ 고정 모델 {md['name']} — 지난 23시즌 forward 개발 검증으로 고른 방법 (docs/solo-raid-analysis.md 4.3 마무리). 미래 시험 전이다.")
+        L.append(f"  주 결과·보조(0.5~3%)는 {md['main']['prior_season']} 여러 시즌 prior + 라벨 줄 수준 갱신, 80%(50·95%) 구간을 ×{md['m1_c']:.2f} 넓혔다 (M1).")
+        L.append("  참고(5~30%)는 같은 5시즌 prior만 쓴 따로 실행이다. 등급은 넓히기 전 폭으로 매긴다 (등급 문턱은 옛 그대로, 분석 4.3 마무리 ③).")
+        L.append("읽는 법: ■ 주 결과는 1·3% 컷이다. 0.5·2%는 보조. 5·10·15·30%는 「참고 — 시즌 간 모양 가정에 기댐」(5시즌 평균 곡선 모양).")
+        L.append("        등급 A 보통 · B 주의 · C 강한 주의 · D 숫자만 참고 (기준은 맨 위 요약). 지난 시즌 검증에서 A도 80% 구간 포함이 약 0.72였다.")
+    else:
+        L.append("※ 검증 안 된 예측이다. S41 한 시즌으로 만든 도구이고, S41 되돌아보기는 곡선 모양이 S41 정답 그 자체라 성능 근거가 아니다.")
+        L.append("  1·3% 구간 폭의 핵심(시즌 간 % 변환 수준 τ_P, 1~3% 곡선 모양 차)은 가정이다 (아래 가정 목록).")
+        L.append("읽는 법: ■ 주 결과는 1·3% 컷이다. 0.5·2%는 보조. 5·10·15·30%는 「참고 — 시즌 간 모양 가정에 기댐」(S41 곡선 모양을 그대로 빌림, 맞는지 잴 수 없음).")
+        L.append("        등급 A 보통 · B 주의 · C 강한 주의 · D 숫자만 참고 (기준은 맨 위 요약). 구간은 S41 한 시즌으로 정한 가정을 포함한다 (아래 가정 목록).")
     L.append("        「라벨 줄만」은 60시간 전에는 라벨 사람이 1~2명이라 정보가 거의 없다 — 불확실성 점검이 아니라 참고다.")
+    if out.get("model"):
+        lu = (out.get("level_update") or {}).get("result")
+        L.append("수준 갱신 (라벨 줄만): " + (f"한섭 라벨 사람 {lu.get('persons')}명 → ln 수준 {lu['mu']:+.3f} ± {lu['sd']:.3f} (사전 τ_P {lu['prior_tau']:.3f})" if lu
+                                     else "한섭 라벨 사람 3명 미만 — 갱신 안 함 (τ_P 그대로)"))
     for s, sv in out["servers"].items():
         L.append("")
         w = sv.get("warning", {})
@@ -1405,7 +1451,8 @@ def render(out):
         L.append("  점수 → 최종 % (중앙 [80%], 10% 넘는 쪽은 참고):  " + " · ".join(
             f"{r['score']:g}억 {fp(r['median'])} [{fp(r['i80'][0])}~{fp(r['i80'][1])}]" for r in sv["table"]))
     L.append("")
-    L.append("기준선0 = 지금 % 그대로 최종으로, 기준선1 = 일차별 S41 중앙 배수만 곱함 (둘 다 같은 모양·가중 평균, 점 추정만).")
+    L.append("기준선0 = 지금 % 그대로 최종으로, 기준선1 = 일차별 prior 중앙 배수만 곱함 (둘 다 같은 모양·가중 평균, 점 추정만, 수준 갱신 없음)."
+             + (" 점수 → 최종 % 표는 main 실행의 넓히기 전 뽑기다." if out.get("model") else ""))
     L.extend(out["assumptions"])
     return "\n".join(L)
 
@@ -1420,11 +1467,121 @@ def fp(v):
     return f"{v:.2f}%" if v < 10 else f"{v:.1f}%"
 
 
+# ---------------- 고정 모델 (--model, 2026-10-18 — 분석 4.3 마무리의 F, 사용자 결정으로 S42 T30부터) ----------------
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+
+
+def _rpath(p):
+    return p if os.path.isabs(p) else os.path.join(ROOT, p)
+
+
+def load_model(path):
+    """고정 모델 파일 (freeze_model.py가 씀). prior 파일의 sha1이 모델에 적힌 값과 다르면 멈춘다 (시즌 안에서 몰래 바뀌지 않게)."""
+    with safe_open(path, encoding="utf-8") as f:
+        m = json.load(f)
+    for part in ("main", "ref"):
+        pp = _rpath(m[part]["prior"])
+        h = sha1_of(pp)
+        if h != m[part]["prior_sha1"]:
+            raise SystemExit(f"모델 {path}: {part} prior의 sha1이 다르다 ({pp}: {h} ≠ {m[part]['prior_sha1']}) — freeze_model.py로 다시 고정한다")
+        with safe_open(pp, encoding="utf-8") as f:
+            m[part]["_prior"] = json.load(f)
+        m[part]["_prior_path"] = pp
+    m["_borrow"] = [os.path.join(ROOT, "data", "solo-raid", s, "state") for s in m["borrow"]]
+    m["_path"] = os.path.abspath(path)
+    m["_sha1"] = sha1_of(path)
+    return m
+
+
+def m1_factor(model, T):
+    """M1 배율 c(T): 모델의 T별 값 사이 선형 보간, 표 밖의 T는 가장 가까운 끝값 (넓히기만이라 언제나 ≥ 1)."""
+    tab = sorted((float(k), float(v)) for k, v in model["m1"]["T"].items())
+    if T <= tab[0][0]:
+        return tab[0][1]
+    if T >= tab[-1][0]:
+        return tab[-1][1]
+    for (t0, c0), (t1, c1) in zip(tab, tab[1:]):
+        if t0 <= T <= t1:
+            return c0 + (c1 - c0) * (T - t0) / (t1 - t0)
+    return 1.0
+
+
+def widen(d, c):
+    """M1: 중앙 m을 두고 로그 반폭을 c배로 (lo → m·(lo/m)^c, hi → m·(hi/m)^c — 분석 lab4 e_43.m1과 같은 셈). 50·80·95% 모두."""
+    m = d.get("median")
+    if not m or m <= 0 or c == 1.0:
+        return
+    d["i80_m1_before"] = list(d["i80"])
+    for k in ("i50", "i80", "i95"):
+        iv = d.get(k)
+        if iv and None not in iv and iv[0] > 0 and iv[1] > 0:
+            d[k] = [m * (iv[0] / m) ** c, m * (iv[1] / m) ** c]
+
+
+def predict_model(state, T, model, opts, draws=2000, seed=1):
+    """고정 모델 하나로 예측: main(1·3%·0.5·2%) 실행과 ref(5·10·15·30%) 실행을 같은 관측으로 따로 돌려 합친다.
+    등급·라벨 줄만·점수 표·섞임 민감도는 main 실행 것이다 (등급은 M1 넓히기 전 폭 — 분석 4.3 마무리 ③)."""
+    mm, mr = model["main"], model["ref"]
+    unk = dict(opts["unknown"], borrow_state=model["_borrow"])
+    oa = dict(opts, unknown=unk, eps_wrong=mm["eps_wrong"], level_update=mm.get("level_update"))
+    ob = dict(opts, unknown=unk, eps_wrong=mr["eps_wrong"])
+    ob.pop("level_update", None)
+    out = predict(state, mm["_prior"], T, oa, draws, seed)
+    ref = predict(state, mr["_prior"], T, ob, draws, seed)
+    c = m1_factor(model, out["T"])
+    ref_p = {float(q) for q in mr["pcts"]}
+    m1_p = {float(q) for q in model["m1"]["apply"]}
+    for s, sv in out["servers"].items():
+        rv = ref["servers"].get(s) or {}
+        for q in TARGETS:
+            k = str(q)
+            if q in ref_p and k in (rv.get("points") or {}):
+                d = dict(rv["points"][k])
+                d["src"] = "ref"
+                d["notes"] = list(d.get("notes") or []) + ["ref 실행 (최근 5시즌 prior만)"]
+                sv["points"][k] = d
+            elif k in sv["points"]:
+                d = sv["points"][k]
+                d["src"] = "main"
+                if q in m1_p:
+                    widen(d, c)
+                    d["m1_c"] = round(c, 4)
+                    if c != 1.0:
+                        d["notes"] = list(d.get("notes") or []) + [f"구간 ×{c:.2f} (M1)"]
+        if sv.get("contam"):   # 위로 넓힌 80%(참고)를 바뀐 80%에 맞춰 다시
+            for e in sv["contam"]["f"].values():
+                for q, pq in e["points"].items():
+                    if q in sv["points"]:
+                        lo80, hi80 = sv["points"][q]["i80"]
+                        pq["i80_ext"] = [lo80, hi80 * (1 + max(pq["shift"], 0.0))]
+        sv["ref_run"] = {"basis": rv.get("basis"), "n_persons": rv.get("n_persons"), "grade": (rv.get("warning") or {}).get("level")}
+        meds = [(q, sv["points"][str(q)].get("median")) for q in TARGETS if str(q) in sv["points"]]
+        bad = [f"{a:g}% {ma:.1f} < {b:g}% {mb:.1f}" for (a, ma), (b, mb) in zip(meds, meds[1:]) if ma is not None and mb is not None and ma < mb]
+        if bad:
+            out["warnings"].append(f"{SNAME[s]}: main·ref를 합친 중앙값이 %에 대해 줄지 않는 곳 — {', '.join(bad)}")
+    out["model"] = {"name": model["name"], "file": os.path.relpath(model["_path"], ROOT), "sha1": model["_sha1"], "season": model.get("season"),
+                    "train": model["borrow"], "m1_c": round(c, 4), "m1_apply": sorted(m1_p),
+                    "main": {"prior_season": mm["_prior"]["season"], "prior_sha1": mm["prior_sha1"], "pcts": mm["pcts"],
+                             "eps_wrong": mm["eps_wrong"], "level_update": mm.get("level_update")},
+                    "ref": {"prior_season": mr["_prior"]["season"], "prior_sha1": mr["prior_sha1"], "pcts": mr["pcts"],
+                            "eps_wrong": mr["eps_wrong"], "settings": ref["settings"]}}
+    lu = (out.get("level_update") or {}).get("result")
+    out["assumptions"] = [
+        f"[모델] 고정 모델 {model['name']} ({os.path.relpath(model['_path'], ROOT)}) — 1·3%·0.5·2%: {mm['_prior']['season']} 여러 시즌 prior(구간 관측 뺌)"
+        f" + 「점 하나가 틀림」 끔 + 라벨 줄만 수준 갱신 + 80% 구간 ×{c:.2f}(M1, 지난 시즌 forward |z| 80% 분위) · 5~30%: 같은 5시즌 prior(그대로)만.",
+        "[모델] 수준 갱신: " + (f"한섭 라벨 사람 {lu.get('persons')}명 → ln 수준 {lu['mu']:+.3f} ± {lu['sd']:.3f}" if lu else
+                               "한섭 라벨 사람이 3명 미만이라 갱신하지 않음 (τ_P 그대로)"),
+        "[모델] 개발 검증(지난 23시즌 forward)으로 고른 방법이다 — 「믿을 수 있다」는 미래 시험(끝나기 전에 커밋된 예측을 끝난 뒤 채점)이 쌓인 뒤에만 말한다.",
+    ] + out["assumptions"]
+    return out
+
+
 def main():
     install_guard()
     ap = argparse.ArgumentParser(description="솔로레이드 컷 예측 (게시 시각 ≤ T 자료만)")
     ap.add_argument("state")
-    ap.add_argument("--prior", required=True)
+    ap.add_argument("--prior", help="prior 하나로 (옛 방식 — S42 T6~T24). --model과 함께 주지 않는다")
+    ap.add_argument("--model", help="고정 모델 파일 (freeze_model.py, 예: data/solo-raid/analysis/model_S42.json) — prior·빌릴 시즌·「점 하나가 틀림」은 모델 것")
     ap.add_argument("--at", required=True)
     ap.add_argument("--server-mix", help="(예전 방식) 서버 확률 파일을 기준 검사 없이 모든 서버에 쓴다. --unknown보다 앞선다")
     ap.add_argument("--unknown", choices=UNKNOWN_MODES, default=UNKNOWN_DEFAULT,
@@ -1461,13 +1618,22 @@ def main():
     ap.add_argument("--contam", default=",".join(f"{f:g}" for f in CONTAM_DEFAULT),
                     help="섞임 민감도의 f 값들 (미상 사람 중 뺄 몫, 쉼표, 기본 0.1,0.2). ''이면 끔")
     a = ap.parse_args()
-    with safe_open(a.prior, encoding="utf-8") as f:
-        prior = json.load(f)
+    if bool(a.prior) == bool(a.model):
+        ap.error("--prior와 --model 중 하나만 준다")
+    model = None
+    if a.model:
+        model = load_model(a.model)
+        if a.borrow_state is not None or a.eps_wrong != EPS_WRONG:
+            ap.error("--model이면 빌릴 시즌·「점 하나가 틀림」은 모델 파일 것을 쓴다 (--borrow-state·--eps-wrong를 주지 않는다)")
+        prior = model["main"]["_prior"]
+    else:
+        with safe_open(a.prior, encoding="utf-8") as f:
+            prior = json.load(f)
     notes = []
     season, c0, H = season_info(a.state, allow_fallback=a.allow_cstart_fallback)
     T = parse_at(a.at, c0, H, notes)
     borrow = a.borrow_state
-    if borrow is None:   # predict_run.sh와 같은 기본값 (재검토 r2 6: 직접 실행이 비율을 다르게 냈다)
+    if borrow is None and model is None:   # 옛 방식의 기본값 (재검토 r2 6: 직접 실행이 비율을 다르게 냈다)
         borrow = DEFAULT_BORROW if os.path.isdir(DEFAULT_BORROW) else ""
         if not borrow and a.unknown != "none":
             notes.append(f"경고: --borrow-state 기본값({DEFAULT_BORROW})이 없어 비율을 빌리지 않는다 — predict_run.sh 결과와 다를 수 있다")
@@ -1481,8 +1647,15 @@ def main():
     for k in ("tau_p", "tau_shape", "tau_ratio", "tau_scale0"):
         if getattr(a, k) is not None:
             opts[k] = getattr(a, k)
-    out = predict(a.state, prior, T, opts, a.draws, a.seed)
-    out["run"] = run_meta(a.state, a.prior, out)
+    if model:
+        if model.get("season") and model["season"] != season["name"]:
+            notes.append(f"경고: 모델은 {model['season']}용인데 이 state는 {season['name']}이다")
+        out = predict_model(a.state, T, model, opts, a.draws, a.seed)
+        out["run"] = run_meta(a.state, model["main"]["_prior_path"], out)
+        out["run"].update(model_path=model["_path"], model_sha1=model["_sha1"], ref_prior_sha1=sha1_of(model["ref"]["_prior_path"]))
+    else:
+        out = predict(a.state, prior, T, opts, a.draws, a.seed)
+        out["run"] = run_meta(a.state, a.prior, out)
     txt = render(out)
     print(txt)
     if a.out:

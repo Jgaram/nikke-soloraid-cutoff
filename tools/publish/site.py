@@ -122,8 +122,17 @@ def past_pcts(rows):
     return out
 
 
+def model_label(md):
+    """고정 모델(predict.py --model, 2026-10-18)을 사람이 읽는 말로."""
+    tr = md.get("train") or []
+    span = f"{tr[0]}~{tr[-1]}" if tr else "?"
+    return f"최근 {len(tr)}시즌({span}) prior + 수준 갱신·구간 넓히기 (모델 {md.get('name', '?')})"
+
+
 def method_label(o):
-    """예측에 쓴 prior를 사람이 읽는 말로 (예측 JSON의 run.prior_path). 절대 경로는 내보내지 않는다."""
+    """예측에 쓴 방법을 사람이 읽는 말로 (예측 JSON의 model, 없으면 run.prior_path). 절대 경로는 내보내지 않는다."""
+    if o.get("model"):
+        return model_label(o["model"])
     p = ((o.get("run") or {}).get("prior_path") or "").replace("\\", "/")
     m = re.search(r"/(S\d+)/state/prior\.json$", p)
     if m:
@@ -134,14 +143,18 @@ def method_label(o):
 
 
 def default_method():
-    """진행 중 예측이 아직 없을 때 쓰는 이름: predict_run.sh의 기본 prior (읽기만 한다)."""
-    try:
-        with open(os.path.join(SR, "predict_run.sh"), encoding="utf-8") as f:
-            m = re.search(r"^PRIOR=\$ROOT/data/solo-raid/(S\d+)/state/prior\.json", f.read(), re.M)
-        if m:
-            return f"{m.group(1)} 한 시즌 prior"
-    except OSError:
-        pass
+    """진행 중 예측이 아직 없을 때 쓰는 이름: 가장 최근 시즌의 고정 모델 파일 (predict_run.sh 기본 — 읽기만 한다)."""
+    ms = []
+    for p in glob.glob(os.path.join(D, "analysis", "model_S*.json")):
+        k = re.search(r"model_(S\d+)\.json$", p)
+        if k:
+            ms.append((split.snum(k.group(1)), p))
+    if ms:
+        try:
+            m = jload(max(ms)[1])
+            return model_label({"train": m.get("borrow"), "name": m.get("name")})
+        except (OSError, ValueError, KeyError):
+            pass
     return "예측 도구 기본값"
 
 
@@ -306,7 +319,8 @@ def build(prev=None):
         vdata["notes"][sv]["notes"] = [n for n in vdata["notes"][sv]["notes"] if not n.startswith("아직 분석에 들지 않은")]
     reg = {r["season"]: r for r in jload(os.path.join(D, "registry.json"))["seasons"]}
     lv = live(reg)
-    methods = sorted({p["method"] for x in lv for p in x["preds"]})
+    lastp = [x["preds"][-1] for x in lv if x["preds"]]
+    methods = [lastp[-1]["method"]] if lastp else []   # 가장 최근 예측의 방법 (S42 도중에 바뀜 — 2026-10-18)
     pst = past(vdata["seasons"], reg)
     data = {"past": pst, "past_pcts": past_pcts(pst), "live": lv, "latest": latest_season(reg), "conv": conv(vdata),
             "analysis": {"seasons": vdata["season_list"], "live_method": " · ".join(methods) if methods else default_method()}}
@@ -328,7 +342,8 @@ def analysis_html(vdata, data):
     head = ('<p class="muted"><a href="./">← 첫 화면 (컷 예측 · 지금 몇 %면 최종 몇 % · 지난 시즌 컷)</a></p>\n'
             '<p class="note">이 페이지는 예측 방법을 검증하는 분석 화면입니다. '
             f'아래 ①은 첫 화면의 계산기와 같은 「여러 시즌 % 변환」이고, ②의 정확도도 <b>여러 시즌 prior</b>로 잰 것입니다. '
-            f'첫 화면의 진행 중 컷 예측은 이와 다른 <b>{m}</b>로 내며, 그 방법의 정확도는 아직 검증 중입니다.</p>\n')
+            f'첫 화면의 진행 중 컷 예측은 <b>{m}</b>로 냅니다 (지난 시즌 검증으로 고른 방법 — 아래 ②와는 설정이 다릅니다). '
+            '그 방법의 독립 정확도는 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다.</p>\n')
     sub = "개발 시즌 {}~{} ({}개) · {} KST 기준".format(seas[0], seas[-1], len(seas), data["asof"])
     stamp = "정답 표는 끝난 시즌을 모두 씁니다 — 이 시즌들로 방법을 고르고 다듬었으므로 개발 검증입니다. 독립 검증은 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다."
     foot = '  <footer class="muted" style="margin-top:28px">\n' + FOOTER + "  </footer>\n"
