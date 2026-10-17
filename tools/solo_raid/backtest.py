@@ -119,14 +119,46 @@ def PR_jsonable(p):
 
 # ---------------- T 절단 재처리 ----------------
 
+# post_all이 import하지만 post_stamp.TOOLS에 아직 없는 라이브러리 (넣으면 모든 시즌 도장이 stale — 시즌 경계 할 일, 분석 4.0a)
+TRUNC_LIBS = ["tools/solo_raid/explore_surface.py", "tools/solo_raid/split.py"]
+_TKEY = {}
+
+
+def trunc_key(state, T, extra):
+    """T 절단 사본의 캐시 열쇠 (2026-10-17, 분석 4.0a). 예전에는 DONE만 보고 다시 썼다 — 후처리 도구·discard.json·원본 state가 바뀌어도
+    같은 --work면 옛 사본으로 비교됐다. 열쇠 = 원본 state의 후처리 입력·도구 도장(post_stamp.compute: 입력 파일·discard.json 항목·앞 시즌 route·
+    시즌 전용 입력·후처리 도구) + TRUNC_LIBS + 이 함수의 절단 규칙(backtest.py 자체) + T. DONE 파일에 적는다."""
+    import builtins
+    import io
+    import post_stamp
+    k = (os.path.abspath(state), json.dumps(extra or {}, sort_keys=True))
+    if k not in _TKEY:
+        # 파일 바이트의 sha1만 본다 — split 감시(분석 도구가 켬)가 도구 파일 truth.py를 「정답 파일」로 막지 않게 잠시 원래 open으로
+        saved = builtins.open
+        builtins.open = io.open
+        try:
+            stamp = post_stamp.compute(state, extra or {})
+            libs = {t: post_stamp.sha1_file(os.path.join(ROOT, t)) for t in TRUNC_LIBS + ["tools/solo_raid/backtest.py"]
+                    if os.path.exists(os.path.join(ROOT, t))}
+        finally:
+            builtins.open = saved
+        _TKEY[k] = post_stamp.sha1_obj({"stamp": stamp["digest"], "libs": libs})
+    return f"{_TKEY[k]}:T{T:g}"
+
+
 def trunc_state(state, T, work, extra):
-    """T까지 게시된 것만 남긴 state 사본을 만들고 post_all.sh를 돌린다. 사본 경로."""
+    """T까지 게시된 것만 남긴 state 사본을 만들고 post_all.sh를 돌린다. 사본 경로.
+    사본은 work/trunc_T{T}에 두고, DONE 파일의 열쇠(trunc_key)가 지금과 같을 때만 다시 쓴다 (2026-10-17)."""
     season, c0, H = PR.season_info(state)
     tabs = c0 + dt.timedelta(hours=T)
     d = os.path.join(work, f"trunc_T{T:g}")
     st = os.path.join(d, "state")
-    if os.path.exists(os.path.join(st, "core.jsonl")) and os.path.exists(os.path.join(d, "DONE")):
-        return st
+    key = trunc_key(state, T, extra)
+    done = os.path.join(d, "DONE")
+    if os.path.exists(os.path.join(st, "core.jsonl")) and os.path.exists(done):
+        with open(done, encoding="utf-8") as f:
+            if f.read().strip() == key:
+                return st
     if os.path.exists(d):
         shutil.rmtree(d)
     shutil.copytree(state, st)
@@ -172,7 +204,8 @@ def trunc_state(state, T, work, extra):
     r = subprocess.run([os.path.join(HERE, "post_all.sh"), st] + args, capture_output=True, text=True)
     if r.returncode != 0:
         raise SystemExit(f"post_all.sh 실패 (T={T}): {r.stderr[-2000:]}")
-    open(os.path.join(d, "DONE"), "w").write("ok\n")
+    with open(done, "w", encoding="utf-8") as f:
+        f.write(key + "\n")
     return st
 
 

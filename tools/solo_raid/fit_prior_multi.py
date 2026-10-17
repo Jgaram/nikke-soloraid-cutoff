@@ -53,6 +53,15 @@ def registry():
         return {r["season"]: r for r in json.load(f)["seasons"]}
 
 
+def stamp_digest(name):
+    """state의 후처리 도장 digest (2026-10-17 — 전에는 등록부 값이라 등록부가 낡으면 옛 값이 적혔다, 분석 4.0a)."""
+    try:
+        with open(os.path.join(state_of(name), "post_all_stamp.json"), encoding="utf-8") as f:
+            return json.load(f)["digest"]
+    except (OSError, KeyError, ValueError):
+        return None
+
+
 def state_of(name):
     return os.path.join(DATA, name, "state")
 
@@ -395,7 +404,7 @@ def fit_multi(names, boot=100, seed=1, tiers=("full", "shape_only"), grades=("A"
         "season": "+".join(names), "generated_by": "tools/solo_raid/fit_prior_multi.py", "H": Hmin,
         "inputs": {"seasons": names, "transform_seasons": use_tr, "shape_seasons": use_sh, "boot": boot, "seed": seed,
                    "curve_grades": list(grades), "tiers": list(tiers),
-                   "post_all_digest": {n: (registry()[n].get("data") or {}).get("stamp_digest") for n in names}},
+                   "post_all_digest": {n: stamp_digest(n) for n in names}},
         "basis": lab,
         "transform": {
             "basis": lab, "form": form, "theta": th, "bx": 0.0, "m": tr["m"], "m_src": {"KR": "own (여러 시즌 공통)", "JP": m_src, "GL": "borrow_KR"},

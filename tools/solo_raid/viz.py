@@ -5,7 +5,7 @@ python3 -I tools/solo_raid/viz.py --out DIR      # DIR/solo-raid-analysis.html
 분석 결과가 바뀌면(정답 표·prior·검증을 다시 돌리면) 이 명령만 다시 돌린다. 손으로 고칠 값은 없다.
 결과물은 레포에 커밋하지 않는다 — 세션 임시 폴더에 쓰고 채팅으로 보낸다 (AGENTS.md 「결과물」).
 
-입력 (읽기만 한다. split 감시를 켠다 — 시험 시즌 정답은 열지 않고, 시즌은 정답 표에 든 개발 시즌만 쓴다)
+입력 (읽기만 한다. split 감시를 켠다 — 시즌은 정답 표에 든 개발 시즌만 쓴다. split 판 2(2026-10-17)에는 잠근 시험 시즌이 없어 끝난 시즌 모두)
 - data/solo-raid/analysis/answer_key.json  시즌 목록·서버별 정답 컷
 - data/solo-raid/analysis/xval_dev.json     시즌 하나씩 빼기 검증 (loso). 서버별 요약은 xval.summarize를 서버만 바꿔 다시 부른다
 - data/solo-raid/analysis/prior_dev.json    여러 시즌 % 변환 P(h) · 시즌 수준 · 잔차 σ(h) · τ_P · 기준선 1(일차 중앙)
@@ -249,7 +249,7 @@ def notes(sv, data, crit, pending):
     # 공통
     N.append(f"모든 수치는 개발 시즌 {len(seasons)}개({seasons[0]}~{seasons[-1]})의 "
              + ("<b>시험 운전</b>입니다 — 판정은 개발 시즌 8개 이상에서 합니다." if len(seasons) < MIN_SEASONS else "검증 결과입니다.")
-             + " 시험 시즌(잠근 시즌)은 열지 않았습니다.")
+             + " 이 시즌들로 방법을 고르고 다듬었으므로 개발 검증이고, 독립 검증은 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다.")   # 2026-10-17 공개 결정 A·split 판 2 — 잠근 시험 시즌 없음
     if pending:
         N.append("아직 분석에 들지 않은 개발 시즌: " + " · ".join(f"{s}({c})" for s, c in pending) + ".")
     if n_all:

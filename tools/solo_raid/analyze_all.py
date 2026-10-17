@@ -1,6 +1,6 @@
 """솔로레이드 여러 시즌 분석을 한 명령으로 (할 일 3.A3, 2026-10-16, 모델 0, 요청 0).
 
-python3 -I tools/solo_raid/analyze_all.py [--draws 600] [--boot 60] [--work DIR] [--skip-xval] [--viz DIR]
+python3 -I tools/solo_raid/analyze_all.py [--draws 600] [--boot 60] [--work DIR] [--jobs N] [--skip-xval] [--viz DIR]
 
 순서 (같은 입력이면 같은 결과 — 시드 고정, 결과 파일에 실행 시각을 넣지 않는다. 시각은 git 커밋으로 본다)
 1. 후처리 최신 확인: 개발 시즌 state마다 post_stamp --check. 입력·도구가 바뀌었으면 post_all.sh를 그 도장의 시즌 전용 입력으로 다시 돈다.
@@ -11,7 +11,7 @@ python3 -I tools/solo_raid/analyze_all.py [--draws 600] [--boot 60] [--work DIR]
 3. 정답 표: truth_grade.py → data/solo-raid/analysis/answer_key.json (개발 시즌만)
 4. 여러 시즌 prior: 학습 가능한 개발 시즌 전부 → data/solo-raid/analysis/prior_dev.json
    (참고용. predict_run.sh 기본 prior는 바꾸지 않는다 — 기본을 바꾸는 판정은 criteria.json 규칙, 개발 시즌 8개 이상에서)
-5. 검증: xval.py (forward·loso) → data/solo-raid/analysis/xval_dev.json
+5. 검증: xval.py (forward·loso) → data/solo-raid/analysis/xval_dev.json (--jobs N이면 xval을 N 프로세스로 — 결과는 같다, 2026-10-17)
 6. (--viz DIR일 때만) 시각화: viz.py --out DIR → DIR/solo-raid-analysis.html (세션 임시 폴더. 커밋하지 않는다)
 끝나면 바뀐 파일을 커밋한다 (이 스크립트는 커밋하지 않는다).
 """
@@ -45,6 +45,7 @@ def main():
     ap.add_argument("--boot", type=int, default=60)
     ap.add_argument("--work", default=None)
     ap.add_argument("--skip-xval", action="store_true")
+    ap.add_argument("--jobs", type=int, default=1, help="xval 프로세스 수")
     ap.add_argument("--viz", metavar="DIR", help="끝에 시각화 HTML을 DIR에 다시 만든다 (viz.py, 세션 임시 폴더)")
     a = ap.parse_args()
     sp = SP.load_split()
@@ -90,6 +91,8 @@ def main():
         args = [os.path.join(HERE, "xval.py"), "--scheme", "forward,loso", "--draws", str(a.draws), "--boot", str(a.boot)]
         if a.work:
             args += ["--work", a.work]
+        if a.jobs > 1:
+            args += ["--jobs", str(a.jobs)]
         py(*args)
     # 6
     if a.viz:

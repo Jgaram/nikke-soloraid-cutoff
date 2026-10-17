@@ -456,11 +456,26 @@ python3 -I tools/solo_raid/registry.py --write                # 시즌 등록부
 python3 -I tools/solo_raid/truth_grade.py                     # 정답 표 (개발 시즌)
 python3 -I tools/solo_raid/fit_prior_multi.py S38,S40,S41 --out PRIOR.json
 python3 -I tools/solo_raid/xval.py [--scheme forward,loso] [--fixed-prior P --fixed-train S41] [--tag NAME | --out PATH]
+python3 -I tools/solo_raid/xval.py --scheme prev,recent5,forward --targets S21-S41 --jobs 4 --tag v2_rules   # 4절 기준 시즌 규칙 (criteria_v2)
+python3 -I tools/solo_raid/xval.py --scheme pairs --jobs 4 --slim --tag m0pairs                            # M0′ 모든 쌍 진단 (고르기에 안 씀)
 ```
 
 - **`xval.py` 출력 자리** (2026-10-17). 기본 출력은 `analysis/xval_{tag}.json`이고 tag 기본은 `dev`다. `xval_dev.json`은 analyze_all의 forward·loso 결과 자리이고
   공개 웹 빌드(`viz.py`)가 그 loso 요약을 다시 계산해 견준다 — 다르면 빌드가 멈춰 진행 중 시즌 웹 갱신도 멈춘다. 그래서 다른 방식(`--fixed-prior`, loso 없는 scheme)은 `--tag`·`--out` 없이 돌지 않는다.
   `xval.summarize`를 바꾸면 같은 커밋에 `xval_dev.json`도 다시 만든다. 분석 도구를 고친 push 전에는 `python3 -I tools/publish/build_public.py --out DIR --site DIR2`로 빌드를 확인한다.
+- **`xval.py` 4절 기능** (2026-10-17, [분석 4.0a](solo-raid-analysis.md#40a-레포-정리-검토-2026-10-17)). 모두 기본 끔 — 기본 forward·loso 결과는 그대로다.
+  - scheme: `prev`(M0 — 맞힐 시즌 앞의 가장 가까운 full 시즌 하나의 **한 시즌 prior**, 운영 S41 prior와 같은 `fit_prior.fit` 붓스트랩 200, 빌릴 비율도 그 시즌) ·
+    `recent{k}`(M2a — 앞 시즌 가운데 학습 가능한 가장 가까운 k개, 모자라면 있는 만큼) · `forward`(M2b 앞 전체) · `loso`(비교) · `pairs`(M0′ — 맞힐 시즌마다 다른 full 시즌 하나씩 전부, 진단).
+  - `--targets S21-S41`: 맞힐 시즌 제한 (criteria_v2는 모든 규칙을 같은 맞힐 시즌으로 견준다). `--fixed-train`은 이제 기본이 prior의 `season`이다 (전에는 언제나 S41 — 다른 prior를 주고 잊으면 그 시즌이 자기 prior로 채점됐다).
+  - `--jobs N`: T 절단 사본과 prior를 먼저 만들고 예측을 N 프로세스로 — 결과 파일은 1 프로세스와 바이트까지 같다 (실행 정보에 jobs를 넣지 않음). 23시즌 forward·loso 4프로세스 약 몇십 분.
+  - `--slim`: 한섭 줄만·요약 열만·들여쓰기 없이 (pairs 23시즌 약 10MB). pairs면 `pairs_v2`(기준 × 맞힐 시즌의 T_main 1·3% 평균 e·|e|·포함)를 낸다.
+  - `--level-update '{}'`: M4 자체 일관성 수준 갱신([`m_update.py`](../tools/solo_raid/m_update.py), 4.1 lab4 `mupd`를 옮김) — 결과를 predict의 `_lvl`로 넣어 **한 시즌 prior 위에서도** 돈다
+    (`early_level`(3.5e)은 여러 시즌 prior의 `season_levels`·학습 5시즌 이상이 있어야 켜진다). `--unknown-opt k=v`: 서버 미상 줄 설정 일부만 바꾼다 (`--predict-opt unknown=…`은 dict 전체를 바꿔 빌릴 시즌이 빠진다).
+  - 요약: `summary`(판 1, 웹이 검사)는 그대로, `criteria_v2.json`이 있으면 `summary_v2`(T_main 18~48·T_late·T12·10% 따로, 낮게 예측한 비율·시즌별 포함 최저·자료량 셋 구간·95%)와
+    `select_v2`(고르기 규칙 (1)~(3)·late_guard, 순서 prev → recent{k} → forward, 덧붙임은 이름에 `+`)도 낸다. 여러 결과 파일을 견줄 때는 `xval.select_v2([(이름, summary_v2[scheme]), …], crit2)`.
+  - 예측이 가장자리에서 실패하면(서버 관측이 모두 걸러짐 등) 멈추지 않고 `failures`에 적는다. state 도장 digest는 등록부가 아니라 state의 `post_all_stamp.json`에서 읽는다.
+- **T 절단 사본 캐시** (`backtest.trunc_state`, 2026-10-17). 사본 폴더의 `DONE`에 열쇠(원본 state의 후처리 도장 — 입력·`discard.json`·앞 시즌 route·후처리 도구 — 와 `explore_surface`·`split`·`backtest` sha1, T)를 적고,
+  같을 때만 다시 쓴다. 전에는 `DONE`만 보고 다시 써서 도구·`discard.json`을 고친 뒤 같은 `--work`로 돌리면 옛 사본으로 비교됐다. 옛 캐시(`ok`)는 한 번 다시 만든다.
 
 - **학습·검증·시험 분리** (`split.py`, `data/solo-raid/split.json`).
   - **판 2 (2026-10-17, 사용자 「모든 새 시즌 통일」): 잠근 시험 시즌이 없다.** S19~S41 23시즌 모두 개발이고, S42부터 모든 새 시즌은 「미래 시험」 —
@@ -491,7 +506,8 @@ python3 -I tools/solo_raid/xval.py [--scheme forward,loso] [--fixed-prior P --fi
 - **후처리 도장** (`post_stamp.py`, post_all.sh 끝). `state/post_all_stamp.json` = 입력 파일·fetchlog·버릴 것 항목·시즌 전용 입력(--posts 등)·도구 파일의 sha1.
   시각은 넣지 않는다 (두 번 돌려 같은 파일). `--check`가 fresh·stale_input·stale_tools·never. S41처럼 시즌 전용 입력이 있는 시즌은 도장의 `extra`가 다시 돌릴 때의 인자다.
 - **등록부** (`registry.py` → `data/solo-raid/registry.json`). 몫·수집 상태(collect_done.json → PROGRESS.md)·형식(시작 규칙·길이)·후처리 최신 여부·품질 개수·학습 등급. 정답 값은 넣지 않는다.
-  학습 등급 full = 한섭 정답 점 A+A2 ≥ 8 그리고 라벨 종료 전 한섭 사람 ≥ 5. 2026-10-16 첫 판에서는 S39가 한섭 정답 점 6이라 table_only였다 (학습에서 빠지고 맞힐 시즌으로만). 지금은 S39도 full이다 (2026-10-17 등록부).
+  학습 등급 full = 한섭 정답 점 A+A2 ≥ 8 그리고 라벨 종료 전 한섭 사람 ≥ 5 그리고 1~2일차 한섭 칸 ≥ 5 (마지막은 2026-10-17 분석 4.1 H4 — 자료 개수만 보고 정함, S19만 1칸이라 shape_only:
+  % 변환 수준을 잴 수 없어 한 시즌 prior가 망가지고 여러 시즌 prior의 τ_P를 부풀렸다). 2026-10-16 첫 판에서는 S39가 한섭 정답 점 6이라 table_only였다 (학습에서 빠지고 맞힐 시즌으로만). 지금은 S39도 full이다 (2026-10-17 등록부).
 - **정답 표** (`truth_grade.py` → `analysis/answer_key.json`). 지점마다 집계표와 곡선(A+A2·A만)을 따로. 곡선은 덮인 구간 꺾은선, 덮이지 않아도 ×1.05 안 점이 있으면 그 점.
   점 하나씩 빼기로 가장 크게 바뀐 비율 ≤ 1%면 strong, 넘거나 값이 사라지면 fragile. 채점 정답은 criteria.json 규칙.
 - **여러 시즌 prior** (`fit_prior_multi.py`). predict.py가 그대로 읽는 꼴. 시즌마다 같은 무게, 칸마다 그 시즌 길이 H (S38 113시간).

@@ -8,8 +8,10 @@ python3 -I tools/publish/site.py --out DIR [--prev 이전_data.json]     # DIR/i
 
 공개 규칙 (docs/publish.md)
 - 숫자와 개수만 내보낸다. 글 원문·사진·닉네임·원글 주소·글 번호는 넣지 않는다. 근거는 출처 종류(집계표·관측 곡선)와 사람 수로만 쓴다.
-- 시험 시즌(split.json)의 정답 컷은 넣지 않는다 — split 감시를 켜고 seasons.json은 split.load_seasons()로만 읽는다.
-  시험 시즌은 「잠김」으로만 표시하고, 진행 중 예측의 채점(score.json)도 개발 시즌 것만 쓴다.
+- **끝난 시즌 기록은 빠짐없이 싣는다** (2026-10-17 공개 결정 A — 시험 몫이어도). 그래서 지난 시즌 컷은 split 몫과 상관없이
+  seasons.json·server_cutoffs.csv 전체(split.load_seasons(final=True))에서 읽고, 진행 중 예측의 채점(score.json)도 있으면 싣는다.
+  split 판 2(2026-10-17)에는 잠근 시험 시즌이 없다. 새 시즌의 독립 시험은 끝나기 전에 커밋된 예측을 끝난 뒤 채점하는 것이라 정답 공개와 부딪히지 않는다.
+  아직 안 끝난 시즌은 정답이 없다 (지난 시즌 표는 브라우저가 종료 시각으로 숨긴다). split 감시는 그대로 켠다 (정답 파일 읽기 규칙 — 판 2에는 막는 시즌 없음).
 - 기준 시각은 웹 내용이 바뀐 때다. --prev의 내용 지문(content)이 같으면 그 시각을 그대로 써서 결과 파일이 바뀌지 않게 한다.
 - 시즌이 끝났는지는 만들 때 정하지 않는다 (브라우저가 종료 시각으로 판단한다).
 """
@@ -77,10 +79,11 @@ def season_json(s):
 
 def past(viz_seasons, reg):
     """시즌마다 최종 컷과 출처 (지점은 CAND). 분석된 개발 시즌은 정답 표, 그 밖 개발 시즌은 seasons.json 한섭 3·10%와
-    server_cutoffs.csv(서버 셋, 글섭 GLOBAL은 split이 GL로 바꿔 줌), 시험 시즌은 잠김. 출처(basis): table = 커뮤니티 집계표, curve = 커뮤니티 관측 점수로 그린 곡선."""
-    table = {r["name"]: r for r in split.load_seasons()}   # 시험 시즌은 kr_cut_*가 빠져 온다
-    csvc = {}   # 정답 표에 없는 시즌용 집계표 {(시즌 번호, 서버): {지점: 점수}} (시험 시즌 행은 빠져 온다)
-    for c in split.load_server_cutoffs():
+    server_cutoffs.csv(서버 셋, 글섭 GLOBAL은 split이 GL로 바꿔 줌). 공개 결정 A(2026-10-17): 끝난 시즌은 몫과 상관없이 싣는다 (잠김 없음).
+    출처(basis): table = 커뮤니티 집계표, curve = 커뮤니티 관측 점수로 그린 곡선."""
+    table = {r["name"]: r for r in split.load_seasons(final=True)}
+    csvc = {}   # 정답 표에 없는 시즌용 집계표 {(시즌 번호, 서버): {지점: 점수}}
+    for c in split.load_server_cutoffs(final=True):
         if c["percentile"] in CAND and c.get("score_100m"):
             csvc.setdefault((split.snum(c["season"]), c["server"]), {}).setdefault(c["percentile"], c["score_100m"])
     out = []
@@ -90,10 +93,7 @@ def past(viz_seasons, reg):
         start = t.get("start") or sj.get("start") or ""
         end = t.get("end") or sj.get("end") or ""
         row = {"season": s, "n": split.snum(s), "boss": r["boss"], "start": start[:10], "end": iso(end) if end else None,
-               "locked": split.is_test(s), "cuts": {}, "basis": {}}
-        if row["locked"]:
-            out.append(row)
-            continue
+               "cuts": {}, "basis": {}}
         if s in viz_seasons:
             key = viz_seasons[s]["key"]
             for sv in SERVERS:
@@ -174,7 +174,7 @@ def one_pred(path):
 
 
 def live(reg):
-    """predict/가 있는 시즌. 예측은 시험 시즌도 싣고, 채점(정답)은 개발 시즌만 싣는다.
+    """predict/가 있는 시즌. 예측과, 끝난 뒤 채점(score.json)이 있으면 실제 컷도 싣는다 (공개 결정 A — 몫과 상관없이).
     파일 하나가 깨져도 그 파일(또는 그 시즌)만 빼고 경고를 남긴다 — 나머지 웹은 계속 갱신된다."""
     out = []
     for pdir in sorted(glob.glob(os.path.join(D, "S*", "predict")), key=lambda p: split.snum(os.path.basename(os.path.dirname(p)))):
@@ -195,7 +195,7 @@ def live(reg):
         preds.sort(key=lambda r: r["T"])
         truth = {}
         sc = os.path.join(pdir, "score.json")
-        if not split.is_test(s) and os.path.exists(sc):
+        if os.path.exists(sc):
             try:
                 for r in jload(sc).get("rows", []):
                     p_ = f"{r['pct']:g}"
@@ -204,7 +204,7 @@ def live(reg):
             except (KeyError, ValueError, TypeError, OSError, json.JSONDecodeError) as e:
                 warn(f"{s}/predict/score.json을 읽지 못해 실제 컷 비교를 뺐다 ({type(e).__name__}: {e})")
                 truth = {}
-        out.append({"season": s, "boss": sj.get("boss") or (reg.get(s) or {}).get("boss"), "locked": split.is_test(s),
+        out.append({"season": s, "boss": sj.get("boss") or (reg.get(s) or {}).get("boss"),
                     "c_start": iso(sj["c_start"]), "end": iso(sj["end"]), "H": round((end - c0).total_seconds() / 3600),
                     "preds": preds, "truth": truth})
     return out
@@ -224,7 +224,7 @@ def latest_season(reg):
 def conv(vdata):
     """계산기용 % 변환 (viz의 여러 시즌 평균 곡선, 0.5시간 간격). 행 = [시작 후 시간, log10(최종 % ÷ 지금 %), 80% 구간용 sd]."""
     cv = vdata["conv"]
-    seas = vdata["season_list"]   # viz가 개발 시즌만 쓴다 (시험 시즌이면 viz.build가 멈춤)
+    seas = vdata["season_list"]   # viz가 정답 표의 시즌(수집 끝난 개발 시즌 — 판 2에는 끝난 시즌 모두)을 쓴다
     # 지난 시즌 겹쳐 보기 (2026-10-16 사용자 요청): 시즌 수준 배수와, 최종 1·3·10% 근처(÷1.3~×1.3)로 끝난 관측 칸
     # 관측 = [시즌, 시작 후 시간, 그때 %, 최종 %] — 숫자만 (사람·글 정보 없음)
     # 지점마다 곡선 점검 (CONV_RULE): 관측 칸의 log10(최종 ÷ 그때)를 같은 시각 곡선과 견준다
@@ -330,7 +330,7 @@ def analysis_html(vdata, data):
             f'아래 ①은 첫 화면의 계산기와 같은 「여러 시즌 % 변환」이고, ②의 정확도도 <b>여러 시즌 prior</b>로 잰 것입니다. '
             f'첫 화면의 진행 중 컷 예측은 이와 다른 <b>{m}</b>로 내며, 그 방법의 정확도는 아직 검증 중입니다.</p>\n')
     sub = "개발 시즌 {}~{} ({}개) · {} KST 기준".format(seas[0], seas[-1], len(seas), data["asof"])
-    stamp = "정답 표는 개발 시즌만 씁니다 — 시험 시즌(잠근 시즌)은 열지 않았습니다."
+    stamp = "정답 표는 끝난 시즌을 모두 씁니다 — 이 시즌들로 방법을 고르고 다듬었으므로 개발 검증입니다. 독립 검증은 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다."
     foot = '  <footer class="muted" style="margin-top:28px">\n' + FOOTER + "  </footer>\n"
     tail = ("<script>\n"
             f'document.getElementById("sub").textContent = {js(sub)};\n'
@@ -360,7 +360,7 @@ def main():
     with open(os.path.join(a.out, ".nojekyll"), "w") as f:
         f.write("")
     n_live = sum(len(x["preds"]) for x in data["live"])
-    print(f"{a.out}: 기준 {data['asof']} (지문 {data['content']}) · 지난 시즌 {len(data['past'])}개 (잠김 {sum(r['locked'] for r in data['past'])}) · "
+    print(f"{a.out}: 기준 {data['asof']} (지문 {data['content']}) · 지난 시즌 {len(data['past'])}개 · "
           f"진행 중 예측 시즌 {len(data['live'])}개, 시점 {n_live}개 · 분석 {', '.join(vdata['season_list'])}")
 
 

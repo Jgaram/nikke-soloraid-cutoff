@@ -14,6 +14,8 @@ state가 있을 때 「받는 중」. 끝나지 않은 시즌은 다른 세션�
 collect_done.json은 수집(지난 시즌)·실시간 세션이 마지막 합치기와 후처리 뒤에 쓴다 ({"done": KST 시각, "by": 세션}).
 - 「전체」(full): 한섭 정답 점 A+A2 ≥ 8 이고 한섭 라벨 종료 전 기본 집합 사람 ≥ 5 → % 변환·곡선 모양·시즌 간 퍼짐 모두에 쓴다.
 - 「모양만」(shape_only): 한섭 정답 점 A+A2 ≥ 8 이지만 라벨 종료 전 사람 < 5 → 곡선 모양에만 쓴다 (% 변환은 라벨 미상 줄에 기대게 되어 뺀다).
+  또는 1~2일차 한섭 칸(정답 곡선에 붙은 사람·일차 칸, fit_prior.load_units) < 5 → % 변환 수준을 잴 수 없어 모양에만 (2026-10-17 분석 4.1 H4 —
+  자료 개수만 보고 정함. 해당 S19 하나: 1칸, 다른 시즌 6~63칸. 한 시즌 prior가 망가지고 여러 시즌 prior의 τ_P를 0.13 → 0.29로 부풀렸다).
 - 「집계표만」(table_only): 정답 점이 모자라지만 집계표(kr_cut_3·kr_cut_10)가 있다 → 10%/3% 비율(모양의 한 점)에만.
 - 「안 씀」(none): 나머지. 등록부에 이유를 남긴다.
 몫이 시험인 시즌은 학습·검증에 넣지 않는다 (조건 판정은 하지만 쓰지 않는다).
@@ -38,6 +40,7 @@ DATA = os.path.join(ROOT, "data", "solo-raid")
 OUT = os.path.join(DATA, "registry.json")
 FMT = "%Y-%m-%d %H:%M:%S"
 MIN_TRUTH_KR = 8
+MIN_EARLY_UNITS_KR = 5     # 1~2일차 한섭 칸 (2026-10-17, 분석 4.1 H4)
 MIN_LABEL_PERSONS = 5
 
 
@@ -136,7 +139,15 @@ def state_info(st):
         for r in jl(os.path.join(st, "truth_points.jsonl")):
             c[f"{r.get('server') or '?'}/{r.get('grade')}"] += 1      # 개수만 (값은 내보내지 않는다)
         info["truth_points"] = dict(sorted(c.items()))
+        info["early_units_kr"] = early_units_kr(st)
     return info
+
+
+def early_units_kr(st):
+    """1~2일차 한섭 칸 수 — fit_prior가 % 변환을 맞추는 사람·일차 칸(정답 곡선 A+A2, 값 칸 + 구간 칸)과 같은 셈 (개수만)."""
+    import fit_prior as FP
+    _, _, _, units = FP.load_units(st, ("A", "A2"), "all", None)
+    return sum(1 for u in units if u["server"] == "KR" and u["day"] in (1, 2))
 
 
 def tier(row):
@@ -155,10 +166,16 @@ def tier(row):
     tp = st.get("truth_points", {})
     kr = tp.get("KR/A", 0) + tp.get("KR/A2", 0)
     lp = st.get("label_persons_pre_end", {}).get("KR", 0)
-    if kr >= MIN_TRUTH_KR and lp >= MIN_LABEL_PERSONS:
-        return "full", [f"한섭 정답 점 {kr} · 라벨 종료 전 사람 {lp}"]
+    eu = st.get("early_units_kr", 0)
+    if kr >= MIN_TRUTH_KR and lp >= MIN_LABEL_PERSONS and eu >= MIN_EARLY_UNITS_KR:
+        return "full", [f"한섭 정답 점 {kr} · 라벨 종료 전 사람 {lp} · 1~2일차 한섭 칸 {eu}"]
     if kr >= MIN_TRUTH_KR:
-        return "shape_only", [f"라벨 종료 전 한섭 사람 {lp} < {MIN_LABEL_PERSONS}"]
+        why = []
+        if lp < MIN_LABEL_PERSONS:
+            why.append(f"라벨 종료 전 한섭 사람 {lp} < {MIN_LABEL_PERSONS}")
+        if eu < MIN_EARLY_UNITS_KR:
+            why.append(f"1~2일차 한섭 칸 {eu} < {MIN_EARLY_UNITS_KR} (% 변환 수준을 잴 수 없음)")
+        return "shape_only", why
     if row["table"]["kr_cut_3"] and row["table"]["kr_cut_10"]:
         return "table_only", [f"한섭 정답 점 {kr} < {MIN_TRUTH_KR}, 집계표 있음"]
     return "none", [f"한섭 정답 점 {kr} < {MIN_TRUTH_KR}, 집계표 없음"]
@@ -191,7 +208,7 @@ def build():
         row["train"] = row["role"] == "dev" and row["tier"] != "none"
         rows.append(row)
     return {"about": "솔로레이드 시즌 등록부 (tools/solo_raid/registry.py --write가 만든다, 손으로 고치지 않는다). 정답 값은 넣지 않는다 (개수·있음/없음만)",
-            "split_version": sp["version"], "min": {"truth_kr": MIN_TRUTH_KR, "label_persons": MIN_LABEL_PERSONS},
+            "split_version": sp["version"], "min": {"truth_kr": MIN_TRUTH_KR, "label_persons": MIN_LABEL_PERSONS, "early_units_kr": MIN_EARLY_UNITS_KR},
             "seasons": rows}
 
 
