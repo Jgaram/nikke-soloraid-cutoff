@@ -226,7 +226,7 @@ const NS = "http://www.w3.org/2000/svg";
 const GRADE = {A: "보통", B: "낮음", C: "매우 낮음", D: "참고용"};
 const GNOTE = {
   B: "근거가 넉넉하지 않습니다 — 80% 구간을 함께 보세요.",
-  C: "관측이 적거나 이른 시점이라 크게 흔들릴 수 있습니다 — 가운데 숫자보다 80% 구간을 보세요.",
+  C: "관측이 적거나 이른 시점이라 크게 흔들릴 수 있습니다.",
   D: "이 서버는 아직 관측이 없어, 다른 서버와 지난 시즌 곡선으로 채운 값입니다 — 숫자만 참고하세요."
 };
 const WD = "일월화수목금토";
@@ -346,7 +346,7 @@ function drawLive() {
   const head = document.createElement("p");
   head.innerHTML = ls.nodata
     ? `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤(${last.T_kst || ""})까지 올라온 자료 · 아직 관측 없음`
-    : `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤(${last.T_kst || ""})까지 올라온 자료 · 신뢰도 <span class="grade ${g}">${GRADE[g] || g}</span> · 근거 커뮤니티 ${ls.n_persons}명`;
+    : `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤(${last.T_kst || ""})까지 올라온 자료 · 신뢰도 <span class="grade ${g}">${GRADE[g] || g}</span> · 커뮤니티 데이터 ${ls.n_persons}개`;
   body.appendChild(head);
   const meta = document.createElement("p"); meta.className = "muted";
   meta.textContent = `예측 방법: ${last.method} · 아직 검증 중인 예측입니다.${done ? "" : " 6시간마다(한국 시간 05·11·17·23시까지 올라온 자료) 갱신합니다."}`;
@@ -583,7 +583,7 @@ function drawConv() {
   document.getElementById("cvChk").textContent = `선을 그리는 기준: 최종이 그 %의 ÷${ru.near}~×${ru.near} 안으로 끝난 지난 시즌 관측이 ${ru.n}개·시즌 ${ru.seasons}개 이상이고, `
     + `곡선과 견준 치우침이 ÷${ru.bias}~×${ru.bias} 안, 80% 구간이 덮은 몫이 ${ru.cov[0]}~${ru.cov[1]}이면 실선입니다. 관측은 있는데 못 미치면 흐린 점선, 관측이 없으면 그리지 않습니다 (곡선을 맞춘 자료로 대 본 표본 안 점검).`
     + (weak.length ? ` ${SRV[srv]} ${weak.map(t => `${t}%(관측 ${CV.check[srv][String(t)].n}개)`).join("·")}는 근거 부족이라 숫자만 참고하세요.` : "");
-  document.getElementById("calcIntro").textContent = `같은 점수라도 뒤에 들어오는 사람에게 밀려 %가 내려갑니다. 지난 개발 시즌 ${seas.length}개(${seas[0]}~${seas[seas.length - 1]})에서 잰 「최종 % ÷ 지금 %」 배율(여러 시즌 평균)로 바꿉니다. `
+  document.getElementById("calcIntro").textContent = `지난 개발 시즌 ${seas.length}개(${seas[0]}~${seas[seas.length - 1]})에서 잰 「최종 % ÷ 지금 %」 배율(여러 시즌 평균)로 바꿉니다. `
     + `시점은 챌린지 시작 기준 — 1일차는 05:00 KST에 시작해 다음 날 04:59까지입니다.`
     + (CS != null ? ` 지금 ${LAT.season} 챌린지가 진행 중이라 그 시즌 날짜로 보여 줍니다.` : "");
   const host = document.getElementById("cvA"); host.innerHTML = "";
