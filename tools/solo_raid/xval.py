@@ -119,11 +119,13 @@ def stamp_digest(name):
 
 def prior_for(train, work, boot, seed, popts, single=False):
     """겹의 prior (캐시). single이면 그 한 시즌의 fit_prior.fit (prev·pairs), 아니면 fit_multi.
-    캐시 열쇠에 학습 시즌의 후처리 도장 digest와 prior 도구 파일 sha1을 넣는다 (등록부가 아니라 state의 도장 — 2026-10-17)."""
+    캐시 열쇠에 학습 시즌의 후처리 도장 digest, prior 도구 파일·집계표 파일 sha1을 넣는다 (등록부가 아니라 state의 도장 — 2026-10-17)."""
     tools = [os.path.join(HERE, f) for f in ("fit_prior.py", "fit_prior_multi.py", "explore_pct_transform.py", "predict.py")]
     key = hashlib.sha1(json.dumps([train, boot, seed, {} if single else popts, "single" if single else "multi",
                                    [stamp_digest(s) for s in train],
-                                   [hashlib.sha1(open(t, "rb").read()).hexdigest() for t in tools if os.path.exists(t)]],
+                                   [hashlib.sha1(open(t, "rb").read()).hexdigest() for t in tools if os.path.exists(t)],
+                                   # 여러 시즌 prior는 집계표(seasons.json·server_cutoffs.csv)로 모양·서버 비를 잡는다 — 표를 고치면 다시 맞춘다 (2026-10-17)
+                                   [hashlib.sha1(SP._real_open(t, "rb").read()).hexdigest() for t in (SP.SEASONS, SP.SERVER_CUTOFFS)]],
                                   sort_keys=True).encode()).hexdigest()[:12]
     name = "+".join(train) if len(train) <= 6 else f"{train[0]}..{train[-1]}_{len(train)}"
     p = os.path.join(work, "priors", f"prior_{'1_' if single else ''}{name}_{key}.json")
