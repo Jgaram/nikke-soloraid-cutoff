@@ -6,10 +6,17 @@ S31 글 …·4196485가 S30 글 …_1(그것도 S29 3810211_0의 재업로드)�
 
 앞 시즌 = 같은 data/solo-raid 아래 번호가 작은 시즌 중 수집이 끝난(collect_done.json) 시즌. 받는 중인 시즌은 파일이 바뀌므로 뺀다.
 그 시즌 받기 끝(e_end)이 이번 시즌 받기 시작(e_start)보다 늦으면 구간이 겹쳐 뺀다.
-값(점수·%)은 읽지 않는다 — route.jsonl의 sha1만 본다 (시험 시즌 정답을 열지 않음).
+photo_sha는 값(점수·%)을 읽지 않는다 — route.jsonl의 sha1만 본다.
+
+score_seen (2026-10-17 분석 ③): 파일은 달라도(크기 바꿈·캡처·모음) 사진의 정확 점수(10자리 이상, 글자 판독과 맞는 것) 하나가
+앞 시즌의 시즌 안(season in) 관측에 이미 있으면 그 사진은 앞 시즌 화면이다 — 점수는 시즌마다 0부터 쌓이므로 10자리 정확 점수가 시즌을 건너 같을 수 없다.
+순위표 1~7위 줄(% 없음)도 쓴다. S26 3402860_1·3402833_0(S25 한섭 최종 순위표, 1위 22,679,377,987 — 시즌 세션은 「S26 초·중반 화면」으로 봄),
+S31 4175575·4182214(S23·S26·S28 기록 회상), S28 3695740(S25 결과 화면 4장) 등 (S23·S26 「다음 시즌에 바꿀 것」).
+앞 시즌 obs.jsonl의 원관측만 읽고 정답 파일(truth*)·집계표는 열지 않는다. 시험 시즌이 앞 시즌이어도 그 값은 맞대기에만 쓰고 어디에도 적지 않는다.
 """
 import json
 import os
+import re
 
 
 def _season_num(state):
@@ -56,6 +63,38 @@ def photo_sha(state):
     return seen
 
 
+def exact(o):
+    """정확 점수 (10자리 이상 정수, 글자 판독이 있으면 그것과 같을 때만. 코드 판독 줄은 글자 없이도). 아니면 None."""
+    s = o.get("score")
+    if not isinstance(s, (int, float)) or s != int(s) or s < 1e9:
+        return None
+    digits = re.sub(r"\D", "", o.get("score_txt") or "")
+    if digits:
+        return int(s) if int(digits) == int(s) else None
+    return int(s) if o.get("src") == "code" else None
+
+
+def score_seen(state):
+    """→ {정확 점수: "S{m}:{사진 id}"} 앞 시즌의 시즌 안 관측 (가장 앞 시즌)."""
+    seen = {}
+    for m, st in sorted(earlier(state), reverse=True):
+        p = os.path.join(st, "obs.jsonl")
+        if not os.path.exists(p):
+            continue
+        for l in open(p, encoding="utf-8"):
+            if l.strip():
+                o = json.loads(l)
+                e = exact(o)
+                if e and o.get("season") == "in":
+                    seen[e] = f"S{m}:{o['img']}"
+    return seen
+
+
 def stamp_paths(state):
     """도장(post_stamp)에 넣을 입력 파일 → [(이름, 경로)]."""
-    return [(f"S{m}/state/route.jsonl", os.path.join(st, "route.jsonl")) for m, st in earlier(state)]
+    out = []
+    for m, st in earlier(state):
+        out.append((f"S{m}/state/route.jsonl", os.path.join(st, "route.jsonl")))
+        if os.path.exists(os.path.join(st, "obs.jsonl")):
+            out.append((f"S{m}/state/obs.jsonl", os.path.join(st, "obs.jsonl")))
+    return out

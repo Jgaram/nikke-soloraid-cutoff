@@ -23,6 +23,9 @@ python3 -I tools/solo_raid/truth.py STATE [--table FILE] [--exclude FILE | --no-
   (핵심 관측 표 core.jsonl의 기본 집합 규칙과 같음). 나머지 flag는 점에 옮겨 적는다. 아래 시즌·문맥·메모 규칙은 쓰지 않는다.
   자체 거르기와 달라지는 것(S41): 문맥 mixed·prev인데 글·수동 근거로 이번 시즌이 된 4줄(oi 2513·2561·2701·2718)이 들어간다
   (모두 서버 미상이라 D 점, 곡선 영향 없음)
+- 종료 후 게시·촬영 시각 없음(A2·D 후보)인데 post_time.jsonl의 top7 시각 구간 끝(h_hi_top7)이 종료 --c-hours 시간 전보다 이르면 뺀다 (`final:top7_pre_end`).
+  같은 서버 1~7위 점수가 종료 전 A 사진보다 낮은 순위표 = 시즌 도중에 찍어 끝난 뒤 올린 화면 (2026-10-17 분석 ③, S26 「다음 시즌에 바꿀 것」 —
+  S26 3402830_0 1.69%·3402860_1 10.04%가 한섭 A2 정답 점이 되어 단조를 어겼다)
 - flag `best_record`(post_exclude: 메모에 「나의 최고 기록」)가 붙은 점은 그 %가 기록을 세운 때 값일 수 있어 곡선에 넣지 않고 표시만 한다
 - post_exclude.jsonl이 없거나 --no-exclude면 자체 거르기 (post_exclude가 생기기 전 규칙):
   - 판독 메모에 보상표·「선수 기록 아님」·명예의 전당이 있으면 뺀다. mock이면 뺀다
@@ -135,6 +138,17 @@ def main():
         if len(px) != len(obs) or any((o["img"], o["row"]) != (x["img"], x["row"]) for o, x in zip(obs, px)):
             raise SystemExit(f"{px_path}가 obs.jsonl과 줄이 맞지 않는다 — post_exclude.py를 다시 돌린다")
 
+    # top7 시각 구간의 끝 (post_time.jsonl h_hi_top7, h = c_start부터 시간). 없거나 줄이 안 맞으면 쓰지 않는다
+    H_END = (ts(END) - ts(C0)).total_seconds() / 3600
+    t7 = [None] * len(obs)
+    pt_path = os.path.join(st, "post_time.jsonl")
+    if os.path.exists(pt_path):
+        pt = jl(pt_path)
+        if len(pt) == len(obs) and all((o["img"], o["row"]) == (x["img"], x["row"]) for o, x in zip(obs, pt)):
+            t7 = [x.get("h_hi_top7") for x in pt]
+        else:
+            print("경고: post_time.jsonl이 obs.jsonl과 줄이 맞지 않아 top7_pre_end를 쓰지 않는다")
+
     # S41 묶음 이음: 챌린지 기간 안에 찍힌(첨부 시각) 문맥 cur·시즌 in 사진이 있는 묶음 → 그 글 번호 집합
     linked = collections.defaultdict(set)
     for o, s in zip(obs, srv):
@@ -237,6 +251,11 @@ def main():
              "cluster": s.get("cluster"), "pct": pct, "score": o["score"], "exact": exact(o),
              "rank": o.get("rank"), "screen": o["screen"], "src": o.get("src"), "t_basis": tb,
              "shot_t": shot, "post_t": post, "ctx": ctx, "self": o.get("self"), "flags": flags}
+        if tb == "post" and t7[oi] is not None and t7[oi] < H_END - a.c_hours:
+            # 끝난 뒤 올렸지만 같은 사진 1~7위 점수가 종료 전 A 사진보다 낮다 → 시즌 도중 화면 (2026-10-17 분석 ③, S26 3402830_0 등)
+            excl["final:top7_pre_end"] += 1
+            excl_oi["final:top7_pre_end"].append(oi)
+            continue
         if tb in ("shot", "screen", "post"):
             r["grade"] = ("A" if tb in ("shot", "screen") else "A2") if r["server"] else "D"
             final_rows.append(r)

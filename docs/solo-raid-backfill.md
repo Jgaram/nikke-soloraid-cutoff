@@ -106,7 +106,9 @@ export DCNET_UA="nikke-community-research/0.1 (+https://github.com/jgaram/nikke-
 ### 2. 확인 단계 (`check`가 있는 시즌만)
 
 - **`first_day_open` (S26·S19):** 재시작 첫날부터 챌린지가 열렸는지 본다.
-  1. `season.json`의 `c_start`·`e_start`를 잠시 `start`로 바꾸고, 구간 `[start, 기본 c_start)`를 아래 3·4단계처럼 한 번 돌린다 (받기 → 판독 → 합치기).
+  1. `season.json`의 `c_start`·`e_start`를 잠시 `start`로 바꾸고, 구간 `[start, start + 18시간)`(첫날 12:00 → 둘째 날 06:00)을 아래 3·4단계처럼 한 번 돌린다 (받기 → 판독 → 합치기).
+     첫날 오픈이면 남은 `[start + 18시간, 기본 c_start)`도 3단계 구간으로 받는다. 3일차 규칙이면 받지 않는다 — S26은 `[start, c_start)` 41시간을 다 받았는데(약 38분·글 725개) 시즌 밖이 되어 낭비였다 (S26 「다음 시즌에 바꿀 것」, 2026-10-17 분석 ③).
+     S26은 둘째 날 16:26 글에 처음 % 화면이 나왔고 사용자가 3일차 규칙으로 정했다 — 첫 18시간에 % 화면이 없으면 3일차 규칙으로 본다.
   2. 그 구간 관측(`obs.jsonl`의 그 run)에 **이번 시즌 랭킹의 % 또는 순위 화면**이 있는지 본다. 점수가 `seasons.json` `kr_cut_10`의 절반 이상인 줄이 서로 다른 글 2개 이상에 있으면 첫날 오픈으로 본다. 없으면 3일차 규칙이 맞다.
   3. 판단에 따라 `c_start`·`e_start`를 정하고 `seasons.json`의 자기 항목(`c_start`·`c_start_basis`·`check: null`)도 고친다. 3일차가 맞으면 그 구간 줄은 시즌 밖으로 다시 거른다 (`merge_obs.py`를 그 run에 다시 돌림, 요청 0).
   4. 근거가 애매하면 조율 세션에 `S{n} 확인 필요: {근거 요약}`을 보내고 답을 기다린다. 그동안 3일차 이후 구간 받기는 진행해도 된다.
@@ -116,7 +118,7 @@ export DCNET_UA="nikke-community-research/0.1 (+https://github.com/jgaram/nikke-
 
 `seasons.json`의 `windows` 구간(S31 이하는 네 구간)을 차례로 돈다. 구간마다:
 
-1. `bash tools/run_window.sh "$STATE" '{구간 시작}' '{구간 끝}'`를 **Bash `run_in_background`(timeout 7200000)로 하나만** 띄우고 완료 알림을 기다린다. 대기 루프를 짜지 않는다.
+1. `bash "$L/tools/run_window.sh" "$STATE" '{구간 시작}' '{구간 끝}'`를 (절대 경로 — 작업 디렉터리가 바뀌면 `tools/…`가 안 잡혀 조용히 127로 끝난다, S25 2026-10-17) **Bash `run_in_background`(timeout 7200000)로 하나만** 띄우고 완료 알림을 기다린다. 대기 루프를 짜지 않는다.
 2. `RUN/DONE`이 있으면 한 줄 요약을 `README.md`에 적는다. `RUN/FAILED`면 같은 인자로 한 번 다시 돌린다 (받은 것은 건너뛴다).
 3. `python3 -I tools/state_sync.py export "$STATE" "$DEST"` → `git add data/solo-raid/S$N` → 커밋(`S{n} 받기 {구간}`) → `git fetch origin main && git merge origin/main && git push origin HEAD:main`.
 4. 한 구간의 코드 단계가 100분을 넘었으면 다음 구간을 반으로 나눠 돈다.
@@ -242,6 +244,10 @@ export DCNET_UA="nikke-community-research/0.1 (+https://github.com/jgaram/nikke-
        S31 4196485·4183097(S25 회상), S28 3705507_0(S27 화면)을 시즌 세션이 「판독 맞음」으로 남겼다.
        같은 사진 파일이 앞 시즌 받기 구간에 이미 있으면 post_exclude가 `prev_season`(why 「xseason 앞 시즌에 같은 사진 S{m}:…」)으로 이미 뺀다 — 그 줄은 후보에 다시 나오지 않는다.
      - 서버: 순위표 1~7위 이름·길드·정확 점수가 어느 서버 라벨 글들과 같은지 본다 (예: S33 MIDNIGHT·BENGDA = 글섭).
+     - **순위표 1위 점수로 시즌·서버를 가린다 (2026-10-17, 분석 ③).** 순위표 1위가 그 서버의 이번 시즌 최종 1위보다 높으면 그 서버 화면이 아니고,
+       끝난 뒤 올린 순위표의 1위가 최종 1위보다 낮으면 시즌 도중 화면이다 (정답 점은 이제 truth.py가 `top7_pre_end`로 뺀다). 「다른 서버로 보인다」고 note에 적었으면 keep으로 두지 말고
+       서버 고침을 하거나(근거가 글·사진에 있으면) `later`로 둔다. S26 3402994_1(제목 「한섭 본캐 3.83 북미섭 부캐 1.65」, 1위가 한섭·일섭 최종 1위보다 높음)을 시즌 세션이 「일섭 순위표, 근거 모자람」 keep으로 두었다.
+       사진의 정확 점수가 앞 시즌에 이미 나왔으면 post_exclude가 `xseason`(why 「같은 정확 점수 S{m}:…」)으로 뺀다 — S26 3402860_1은 S25 한섭 최종 순위표였다 (시즌 세션은 「S26 초·중반 화면」으로 봄).
      - |z| 8 이상 곡면 이탈과 등급 A·A2 정답 점 플래그는 항목마다 원본을 본다.
      - **200 넘는 등수 (`rank_over_200`, 2026-10-16).** 게임 화면 등수는 200위까지다 (사용자 확인). 원본에서 그 숫자가 무엇인지(배지·레벨 등) 보고,
        같은 줄의 %·점수도 잘못 읽혔는지 본다. %·점수가 맞으면 `keep`(등수는 도구가 이미 비운다), 틀렸으면 줄 버림(`scope: row`, 바른 값은 `correct`에),
