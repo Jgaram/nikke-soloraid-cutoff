@@ -94,6 +94,12 @@ def fmt_kind(s):
         notes.append(f"길이 {H}시간 (120 아님)")
     if c0.hour != 5 or c0.minute != 0:
         notes.append(f"시작 {c0.strftime('%H:%M')} (05:00 아님)")
+    try:
+        if int(str(s.get("name", ""))[1:]) >= 41:
+            # 표시만 — 모수로 넣지 않는다 (사용자 관점 2026-10-17, 분석 3.5e). S42·S43이 끝나면 m_s가 S19~S40 범위 안인지 본다
+            notes.append("모의전 사전 개방 (S41부터 — 개발자 노트 2026-08-28 「첫날부터 도전 난이도 모의전」, 표시만)")
+    except ValueError:
+        pass
     return {"kind": kind, "H": H, "c_start": s["c_start"], "c_hour": c0.strftime("%H:%M"), "notes": notes}
 
 
