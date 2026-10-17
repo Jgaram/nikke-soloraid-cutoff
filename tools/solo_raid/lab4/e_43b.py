@@ -296,6 +296,21 @@ def stage_b(res, out, resA):
               "sv": {k: brief(v) for k, v in sv.items()}}
     if final:
         d["B"]["grades"] = grades(m1rows[final], rows_v[final])
+    sd = os.path.join(os.path.dirname(os.path.normpath(res)), "Bseed")
+    if final and final != "cur" and os.path.isdir(sd):   # 최종 설정의 시드 2·3 (보고만) — 지금 값은 A의 s2·s3
+        rep = {}
+        for s in ("s2", "s3"):
+            p = os.path.join(sd, f"{final}_{s}.json")
+            if not os.path.exists(p):
+                continue
+            x = jl(p)
+            _, s_new, _ = sv_of([r for r in x["rows"] if r["scheme"] == sch], final, m1on)
+            c_rows, _ = a_rows(resA, F, s)
+            _, s_cur, _ = sv_of(c_rows, "cur", m1on)
+            rep[s] = {"cur": brief(s_cur), final: brief(s_new), "tool_head": x["run"]["tool_head"]}
+            f = lambda v: f"포함 {v['main']['cov80']:.2f} |e| {v['main']['mean_med_abs_err']:.2%} late {v['late']['cov80']:.2f} {v['late']['mean_med_abs_err']:.2%} T12 {v['t12']['cov80']:.2f}"
+            print(f"(보고) {s}: 지금 {f(s_cur)} → {final} {f(s_new)}")
+        d["B"]["final_other_seeds"] = rep
     save_out(out, d)
 
 
@@ -397,17 +412,25 @@ def grades(rows, raw_rows):
     okc = [c for c in combos if c["ok"]]
     pick = min(okc, key=lambda c: (-c["AB_n"], -c["A_n"], c["dist"])) if okc else None
     cur = next(c for c in combos if c["g"] == CURRENT)
+    # 사전 규칙을 넘는 칸이 없으면 지금 문턱 그대로 (사전 고정에 없던 경우 — 계산 뒤 정한 처리, 문서에 적는다)
+    decision = "사전 규칙대로 고름" if pick else "사전 규칙 (1)을 넘는 칸 없음 → 지금 문턱 그대로 (계산 뒤 정한 처리)"
+    use = pick or cur
     by_T = {}
-    if pick:
-        for r in R:
-            r["_g"] = regrade(r, wm, pick["g"])
-        for T in sorted({r["T"] for r in R}):
-            by_T[f"T{T:g}"] = dict(collections.Counter(r["_g"] for r in R if r["T"] == T))
+    for r in R:
+        r["_g"] = regrade(r, wm, use["g"])
+    for T in sorted({r["T"] for r in R}):
+        L = [r for r in R if r["T"] == T]
+        by_T[f"T{T:g}"] = {lv: {"n": len(LL), "cov80": round(sum(r["in80"] for r in LL) / len(LL), 3),
+                                "mean_abs_err": round(statistics.mean(abs(r["err"]) for r in LL), 5)}
+                           for lv in "ABCD" for LL in [[r for r in L if r["_g"] == lv]] if LL}
+    top_a = sorted(combos, key=lambda c: -(c["stats"].get("A", {}).get("cov80") or 0))[:5]
     print(f"\n③ 등급: 지금 문턱 {CURRENT} → A·B {cur['AB_n']}줄 포함 {cur['stats']['AB']['cov80']} · A {cur['A_n']}줄 {cur['stats'].get('A', {}).get('cov80')} · 통과 {cur['ok']}")
     if pick:
         print(f"   고름 {pick['g']} → A·B {pick['AB_n']}줄 포함 {pick['stats']['AB']['cov80']} · A {pick['A_n']}줄 {pick['stats'].get('A', {}).get('cov80')} · 등급별 {pick['stats']}")
-        print("   T별 등급 수:", by_T)
-    return {"check_regrade_mismatch": [mism, len(R0)], "rule": "사전 고정 ③ — M1 뒤 한섭 1·3% T12~96: (1) A·B 포함 ≥ 0.70, A ≥ 0.75 (2) A·B 줄 수 최대 (3) A 줄 수 (4) 지금 문턱과 격자 거리",
+    print("   ", decision, "· A 포함이 가장 높은 칸:", [(c["g"], c["stats"].get("A", {}).get("cov80"), c["A_n"]) for c in top_a[:3]])
+    print("   T별 (쓴 문턱):", by_T)
+    return {"decision": decision, "use": use["g"], "top_A_cov": [{"g": c["g"], "A": c["stats"].get("A"), "AB": c["stats"]["AB"]} for c in top_a],
+            "check_regrade_mismatch": [mism, len(R0)], "rule": "사전 고정 ③ — M1 뒤 한섭 1·3% T12~96: (1) A·B 포함 ≥ 0.70, A ≥ 0.75 (2) A·B 줄 수 최대 (3) A 줄 수 (4) 지금 문턱과 격자 거리",
             "grid": GRID, "current": cur, "pick": pick, "n_ok": len(okc), "n_rows": len(R), "pick_by_T": by_T,
             "predict_grade_on_rows": grade_stats(R, "grade")}
 
