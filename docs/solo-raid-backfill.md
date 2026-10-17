@@ -290,6 +290,9 @@ export DCNET_UA="nikke-community-research/0.1 (+https://github.com/jgaram/nikke-
 사용자 결정 (2026-10-16): 분석 ④가 고정한 선택을 잠긴 시즌에 **한 번만** 돌린다. 결과를 보고 고치는 일을 구조로 막으려고 분석 세션과 나눴다 (분석 문서 3.0·3.7, 가이드 §4).
 
 1. 고정 커밋의 도구·설정으로 3.7을 돌린다 (tr, 3.6과 같은 T·지표). 도구·설정·정답 처리·시험 시즌 데이터를 고치지 않는다.
+   명령 (분석 ④가 만듦, 2026-10-17): `git checkout {고정 커밋}` 상태의 도구로 `python3 -I tools/solo_raid/test37.py --final` → `data/solo-raid/analysis/test37.json`.
+   고정 선택은 `data/solo-raid/analysis/freeze_37.json`이고, 도구가 prior·criteria sha1과 시험 시즌 후처리 도장(fresh)을 먼저 확인해 다르면 멈춘다. 몇십 분 걸린다 (시즌 6 × T 7, Bash 백그라운드로).
+   결과 커밋은 main 최신 위에 한다 (도구는 고정 커밋 것 — 고정 뒤 main의 tools/solo_raid가 바뀌었으면 `git worktree`로 고정 커밋을 따로 꺼내 돌린다).
    돌릴 수 없는 문제가 있으면 고치지 말고 멈춘 뒤 사용자에게 알린다 (고치면 3.0 규칙대로 그 시즌은 「미검증」이 된다).
 2. 3.8 보고 — 가이드 §5의 12항목 점검, §6 형식. 결과는 `data/solo-raid/analysis/`에 커밋하고 채팅으로도 요약한다 (AGENTS.md 「결과물」).
 3. 조율 세션에 `시험 끝: {한 줄 요약}`을 보낸다.
