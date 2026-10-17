@@ -471,6 +471,9 @@ python3 -I tools/solo_raid/xval.py --scheme pairs --jobs 4 --slim --tag m0pairs 
   - `--slim`: 한섭 줄만·요약 열만·들여쓰기 없이 (pairs 23시즌 약 10MB). pairs면 `pairs_v2`(기준 × 맞힐 시즌의 T_main 1·3% 평균 e·|e|·포함)를 낸다.
   - `--level-update '{}'`: M4 자체 일관성 수준 갱신([`m_update.py`](../tools/solo_raid/m_update.py), 4.1 lab4 `mupd`를 옮김) — 결과를 predict의 `_lvl`로 넣어 **한 시즌 prior 위에서도** 돈다
     (`early_level`(3.5e)은 여러 시즌 prior의 `season_levels`·학습 5시즌 이상이 있어야 켜진다). `--unknown-opt k=v`: 서버 미상 줄 설정 일부만 바꾼다 (`--predict-opt unknown=…`은 dict 전체를 바꿔 빌릴 시즌이 빠진다).
+  - (2026-10-18, 분석 4.3) `--level-update '{"unknown": false}'`: 수준 갱신을 한섭 라벨 줄만으로 (M4l — 라벨 사람 3명 미만이면 갱신 없음).
+    `--level-knn '{}'`: 유사 시즌 수준 (M2s, [`level_knn.py`](../tools/solo_raid/level_knn.py)) — 여러 시즌 prior 위에서, 같은 T의 학습 시즌 절단 사본과 맞힐 시즌 사본으로 m̂·ln 관측 사람 수를 내
+    가까운 3시즌의 ln m_s 평균을 수준으로 넣는다. 수준 덧붙임(`--level-update`·`--level-knn`·`early_level`)은 같은 자리라 하나만 준다. 줄에 `lvl_knn`·`lvl_early`(쓴 수준)가 붙는다.
   - 요약: `summary`(판 1, 웹이 검사)는 그대로, `criteria_v2.json`이 있으면 `summary_v2`(T_main 18~48·T_late·T12·10% 따로, 낮게 예측한 비율·시즌별 포함 최저·자료량 셋 구간·95%)와
     `select_v2`(고르기 규칙 (1)~(3)·late_guard, 순서 prev → recent{k} → forward, 덧붙임은 이름에 `+`)도 낸다. 여러 결과 파일을 견줄 때는 `xval.select_v2([(이름, summary_v2[scheme]), …], crit2)`.
   - 예측이 가장자리에서 실패하면(서버 관측이 모두 걸러짐 등) 멈추지 않고 `failures`에 적는다. state 도장 digest는 등록부가 아니라 state의 `post_all_stamp.json`에서 읽는다.
@@ -539,6 +542,16 @@ python3 -I tools/solo_raid/xval.py --scheme pairs --jobs 4 --slim --tag m0pairs 
 - **특징마다 값이 있는 시즌이 다르다.** 설명 몫을 견줄 때는 같은 시즌 집합으로 맞춘다. T24 m̂는 초반 자료가 적은 옛 시즌(침수 큰 S20·S24·S29·S30 등)에서 없어 그대로 견주면 쉬운 시즌만 남는다.
 - **시대 흐름과 섞인다.** 3% 컷 규모·10%/3%·1%/3%는 시즌 순서를 따라 꾸준히 바뀌고, 관측 사람 수·1–3% 간격 같은 초반 특징도 순서와 ρ 0.5~0.6이다.
   「비슷한 시즌」을 고르면 「가까운 시대」가 함께 골라진다 — 최근 시즌 규칙과 견줘야 새 정보인지 안다.
+
+### 모델 후보 고르기 (4.3, 2026-10-18)
+
+[분석 할 일 4.3](solo-raid-analysis.md#43-결과) 결과에서 방법·주의점만 옮긴다. 코드 [`lab4/e_43.py`](../tools/solo_raid/lab4/e_43.py), 숫자 `analysis/diag43.json`.
+- **기준선 값이 수준 덧붙임에 오염된다.** predict는 기준선 b0·b1 중앙 계산에도 `_lvl` 수준 배수를 곱한다 (`Predictor.run`). `--level-update`·`--level-knn`·`early_level`을 켠 xval 결과의 `err_b0`·`err_b1`과
+  `summary_v2`의 기준선 1은 그대로 쓰지 않고, 같은 기준의 덧붙임 없는 실행 값과 견준다. predict.py를 고칠 수 있게 되면(시즌 경계) 기준선은 `_lvl` 없이 내게 고친다.
+- **수준 갱신(M4u)은 한 시즌 prior 위에서와 여러 시즌 prior 위에서 다르게 움직인다.** 한 시즌 prior 위에서는 낮게·높게가 고르지만(0.54), 앞 시즌 전체 prior 위에서는 거의 모든 시즌을 낮게 잡는다(0.76). 원인은 확인하지 않았다 — 여러 시즌 prior에 얹을 때는 치우침부터 본다.
+- **라벨 줄만으로 수준을 갱신하면 초반에 거의 켜지지 않는다.** T18~48에 한섭 라벨 사람 3명 이상인 시즌이 21개 중 8~11개다 (4.2 「초반 사본에는 서버 라벨이 거의 없다」와 같은 원인).
+- **끝난 뒤 값으로 고른 「비슷한 시즌」의 상한이 커도 초반 특징으로는 그만큼 얻지 못한다** (M0′ 상한 5.23 → 2.73%, 유사 시즌 규칙 M2b 2.79 → 2.65%). 상한은 고를 근거가 아니라 접을 근거로만 쓴다.
+- **xval 결과를 같은 쌍끼리 대 볼 수 있다.** `prev`의 줄은 `pairs`의 (직전 시즌, 맞힐 시즌) 줄과 같아야 한다 (도구 커밋이 달라도 예측 코드가 같으면 — 4.3에서 1,176줄 같음). 실행 하나를 검산할 때 쓴다.
 
 ### 자료를 모은 뒤 검토할 질문
 
