@@ -18,6 +18,8 @@ python3 -I tools/solo_raid/review.py data/solo-raid/S{n}/state [--write]
 - cross_season: 이 시즌 기본 집합 줄(season in·core use, 2026-10-16부터)의 정확 점수가 주로 다른 시즌 obs.jsonl에 나옴 → 지난 시즌 기록·화면일 수 있음 (3.2 S40 6069623 같은 경우).
   점수의 「주인」은 그 점수가 가장 많이 나온 시즌이다. 주인이 다른 시즌이고 그 시즌 횟수가 이 시즌의 2배 이상일 때만 고른다
   (순위표 상위권 점수는 그 시즌에 수십~수백 번 나온다).
+- rank1_low: 기본 집합 줄이 있는 사진의 순위표 1위 점수가 그보다 먼저 올라온 같은 서버 순위표 7위(글 2개 이상에 나온 점수) 최댓값의 0.95배보다 낮음
+  → 그 시각 화면일 수 없다 — 지난 시즌·다른 서버·오래전 화면 (k위 점수는 시즌 안에서 줄지 않는다. 1위는 핵 점수가 지워져 쓰지 않는다. S21 2544611 「솔레 성장」 글, 2026-10-17 분석 ④). 사진마다 하나.
 - outlier: post_outlier가 곡면에서 크게 벗어났다고 본 줄 (surface_high·surface_low).
 - rank_over_200: 시즌 안(season in)·빼지 않은 줄인데 게임 화면 등수가 200을 넘음 (post_exclude flag rank_over_200). 사진마다 하나.
   게임은 200위까지만 등수다 (2026-10-16) — 원본에서 그 숫자가 무엇인지(배지 등), 같은 줄의 %·점수도 잘못 읽혔는지 본다.
@@ -42,6 +44,7 @@ import split as SP  # noqa: E402
 
 DATA = os.path.join(ROOT, "data", "solo-raid")
 MULTI_SRV = re.compile(r"[2-9]\s*서버|[2-9]\s*섭|[이삼사오]\s*서버|전\s?서버|전섭|모든\s?서버|타\s?서버|타섭|다른\s?서버|서버\s?별|서버마다")
+RANK1_LOW = 0.95   # rank1_low 문턱 (2026-10-17)
 KEEP = ("decision", "note", "by", "decided", "seen")   # seen: 이 항목을 판단하며 원본으로 본 사진 id 목록 (2026-10-16)
 
 
@@ -198,6 +201,32 @@ def collect(state):
     for (no, site), (homes, n) in sorted(hit.items()):
         add("cross_season", no, f"정확 점수 {n}개의 주인이 다른 시즌 {dict(homes)}", site=site, no=no,
             title=(posts.get(no) or {}).get("title"))
+
+    # rank1_low: 순위표 1위 점수가 그보다 먼저 올라온 같은 서버 순위표 7위(글 2개 이상에 나온 점수)의 최댓값 × RANK1_LOW보다 낮은 사진 —
+    # k위 점수는 시즌 안에서 줄지 않으므로 그 시각 화면일 수 없다. 지난 시즌·다른 서버·오래전에 찍은 화면이다
+    # (S21 2544611 「솔레 성장」 글의 S19보다 앞 시즌 사진, 2026-10-17 분석 ④). 1위가 아니라 7위와 견주는 것은 핵 점수 1위가 나중에 지워지기 때문 (S27 일섭 580억).
+    # 기본 집합(core use)에 든 줄이 있는 사진만. 서버는 server.jsonl의 서버(붙은 것만)
+    px_ = jl(os.path.join(state, "post_exclude.jsonl"))
+    ok_row = {(o["img"], o["row"]) for o, x in zip(obs, px_) if not x["exclude"]} if len(px_) == len(obs) else set()
+    use_img = {obs[c["oi"]]["img"] for c in jl(os.path.join(state, "core.jsonl")) if c.get("src") == "photo" and c.get("use")}
+    ev = []
+    for r in obs:
+        sv = srv.get((r["img"], r["row"]), {}).get("server")
+        if (r.get("rank") in (1, 7) and r.get("score") and r.get("pct") is None and not r.get("self") and sv and r.get("season") == "in"
+                and (r["img"], r["row"]) in ok_row):   # % 없는 순위표 줄만 (내 줄의 「Q1」을 1위로 읽은 S31 4188371_0)
+            ev.append((r["post_t"] or "", r["rank"], r["score"], r["img"], sv, str(r["no"]), r["site"]))
+    ev.sort()
+    best, seen7 = {}, collections.defaultdict(set)
+    for t, rk, sc, img, sv, no, site in ev:
+        if rk == 7:
+            seen7[(sv, sc)].add(no)
+            if len(seen7[(sv, sc)]) >= 2 and (sv not in best or sc > best[sv][0]):
+                best[sv] = (sc, img)
+            continue
+        b = best.get(sv)
+        if b and sc < RANK1_LOW * b[0] and img in use_img:
+            add("rank1_low", img, f"{sv} 순위표 1위가 먼저 올라온 같은 서버 7위({b[1]})의 {sc / b[0]:.0%} — 지난 시즌·다른 서버·오래전 화면인지 본다",
+                site=site, no=no, img=img, title=(posts.get(no) or {}).get("title"))
 
     # outlier
     for o in jl(os.path.join(state, "post_outlier.jsonl")):

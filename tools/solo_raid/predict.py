@@ -96,6 +96,11 @@ LN10 = math.log(10)
 EPS_WRONG = 0.20
 SD_WRONG = 0.22
 N_SCREEN = 4
+# 모양 갱신 (--shape-update, 할 일 3.5b, 2026-10-17 분석 ④ — 기본 끔): 시즌 간 모양 기울임 Z를 그 시즌 자료로 추정한다.
+# 점마다 c_i = ln s_i − ln r(y_i) = 규모 + Z·τ_shape·D(y_i) + 잡음을 가중 최소제곱으로 풀고 Z의 prior N(0, 1)로 당긴다.
+# 잡음 = 변환 오차가 점수로 옮겨진 크기 + 바닥 SHAPE_PT_SD (다른 서버 섞임·판독), 사람마다 무게 합 1. |Z| ≤ Z_CAP.
+SHAPE_PT_SD = 0.03
+Z_CAP = 3.0
 N_FEW = 3                # 쓴 사람(유효)이 이보다 적으면 「관측 적음 — 예측 보류 수준」 (결과는 낸다)
 # 등급 C 문턱 (2026-10-16 재검토 r2 뒤): S41 tr 모의에서 6h −38.7% · 9h −17.0% · 12h −8.1% · 15h −3.2% · 18~48h ±0.5%였다.
 # 18시간 문턱은 S41 한 시즌에서 본 값이라 낙관적이다 (15h → 18h가 가파르다. 다른 시즌 초반 진행이 몇 시간 다르면 18h도 −3% 쪽일 수 있다).
@@ -696,6 +701,48 @@ class Predictor:
                     break
         return est
 
+    def z_update(self, srv, O, trs, m_season, counts, zs, xi):
+        """그 서버 점들로 모양 기울임 Z를 추정 → (Ẑ, 사후 sd) 또는 None (3.5b, --shape-update)."""
+        sh = self.shapes[srv]
+        tau = self.tau_shape
+        if tau <= 0:
+            return None
+        npr = collections.Counter(o["person"] for o, c in zip(O, counts) if c)
+        Sw = SD = SDD = Sc = ScD = 0.0
+        for i, ob in enumerate(O):
+            c = counts[i]
+            if not c:
+                continue
+            tr = trs[ob.get("fold", 0)]
+            P = p_full(tr, srv, ob["h"], ob["x"], self.H, m_season)
+            if xi:
+                P += xi * tr["m"].get(srv, 1.0) * sigma_form(self.priors[ob.get("fold", 0)]["transform"], ob["h"], self.H)
+            if zs is not None:
+                P += math.sqrt(tr["s0"] ** 2 + (tr["rho"] * P) ** 2) * zs[i]
+            P = max(P, 0.0)
+            uy = math.log(ob["x"]) + P * LN10
+            if not sh.inside(uy):
+                continue
+            k = sh.k_at(uy)
+            sp = math.sqrt(tr["s0"] ** 2 + (tr["rho"] * P) ** 2)
+            sf = sigma_form(self.priors[ob.get("fold", 0)]["transform"], ob["h"], self.H)
+            v = (k * LN10) ** 2 * (sp ** 2 + sf ** 2) + V0 + SHAPE_PT_SD ** 2
+            w = c / (v * npr[ob["person"]])
+            d = tau * sh.D_at(uy)
+            ci = math.log(ob["s"]) - sh.lr_at(uy)
+            Sw += w
+            SD += w * d
+            SDD += w * d * d
+            Sc += w * ci
+            ScD += w * ci * d
+        if Sw <= 0:
+            return None
+        var = max(SDD - SD * SD / Sw, 0.0)
+        cov = ScD - Sc * SD / Sw
+        prec = var + 1.0
+        z = max(-Z_CAP, min(Z_CAP, cov / prec))
+        return z, 1.0 / math.sqrt(prec)
+
     def weights(self, srv, O, tr):
         sh = self.shapes[srv]
         W, ys = [], []
@@ -861,7 +908,14 @@ class Predictor:
                     counts, zs, shift = act, None, None
                 if not any(counts):
                     counts = act
-                cur = self.est_curve(s, O, trs, m_season, Z, counts, zs, pp["W"], xi, shift)
+                Zs = Z
+                if self.o.get("shape_update"):
+                    zu = self.z_update(s, O, trs, m_season, counts, zs, xi)
+                    if zu is not None:
+                        Zs = zu[0] + zu[1] * Z
+                        if central:
+                            info[s]["z_shape"] = [round(zu[0], 3), round(zu[1], 3)]
+                cur = self.est_curve(s, O, trs, m_season, Zs, counts, zs, pp["W"], xi, shift)
                 if cur is not None:
                     res[s].append(cur)
             # 관측 없는 서버
@@ -1348,6 +1402,8 @@ def main():
     ap.add_argument("--tau-scale0", type=float)
     ap.add_argument("--no-season-diff", action="store_true")
     ap.add_argument("--p-update", action="store_true", help="같은 점수 쌍으로 시즌 P 수준 배수를 갱신 (기본 끔 — S41 점검에서 해로웠다)")
+    ap.add_argument("--shape-update", action="store_true",
+                    help="시즌 간 모양 기울임 Z를 그 시즌 자료로 추정 (3.5b, 기본 끔 — 2026-10-17 분석 ④에서 검증)")
     ap.add_argument("--c-delay", type=float, default=0.0)
     ap.add_argument("--json", action="store_true", help="표준 출력에 JSON도")
     ap.add_argument("--allow-cstart-fallback", action="store_true",
@@ -1365,7 +1421,7 @@ def main():
         borrow = DEFAULT_BORROW if os.path.isdir(DEFAULT_BORROW) else ""
         if not borrow and a.unknown != "none":
             notes.append(f"경고: --borrow-state 기본값({DEFAULT_BORROW})이 없어 비율을 빌리지 않는다 — predict_run.sh 결과와 다를 수 있다")
-    opts = {"grades": a.grades, "c_delay": a.c_delay, "server_mix": a.server_mix, "p_update": a.p_update,
+    opts = {"grades": a.grades, "c_delay": a.c_delay, "server_mix": a.server_mix, "p_update": a.p_update, "shape_update": a.shape_update,
             "no_season_diff": a.no_season_diff, "robust": a.robust, "top_cut": a.top_cut, "eps_wrong": a.eps_wrong,
             "allow_cstart_fallback": a.allow_cstart_fallback, "notes": notes,
             "contam": tuple(float(x) for x in a.contam.split(",") if x.strip()),
