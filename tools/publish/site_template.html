@@ -342,12 +342,15 @@ function drawLive() {
   const last = P[P.length - 1], ls = last.srv[srv], g = ls.grade || "–", truth = S.truth[srv] || {};
   const weak = g === "C" || g === "D";
   const head = document.createElement("p");
-  head.innerHTML = `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤(${last.T_kst || ""})까지 올라온 자료 · 등급 <span class="grade ${g}">${GRADE[g] || g}</span> · 근거 커뮤니티 ${ls.n_persons}명`;
+  head.innerHTML = ls.nodata
+    ? `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤(${last.T_kst || ""})까지 올라온 자료 · 아직 관측 없음`
+    : `<b>최근 예측</b> — 챌린지 시작 ${last.T}시간 뒤(${last.T_kst || ""})까지 올라온 자료 · 등급 <span class="grade ${g}">${GRADE[g] || g}</span> · 근거 커뮤니티 ${ls.n_persons}명`;
   body.appendChild(head);
   const meta = document.createElement("p"); meta.className = "muted";
   meta.textContent = `예측 방법: ${last.method} · 아직 검증 중인 예측입니다.${done ? "" : " 6시간마다(한국 시간 05·11·17·23시까지 올라온 자료) 갱신합니다."}`;
   body.appendChild(meta);
-  if (GNOTE[g]) { const n = document.createElement("p"); n.className = "gnote"; n.textContent = `${SRV[srv]} ${GRADE[g]}: ${GNOTE[g]}`; body.appendChild(n); }
+  if (ls.nodata) { const n = document.createElement("p"); n.className = "gnote"; n.textContent = "아직 이번 시즌 순위 화면(% 표시)이 하나도 모이지 않아 숫자를 내지 않습니다. 관측이 1개 이상 들어오면 다음 갱신부터 표시합니다."; body.appendChild(n); }
+  else if (GNOTE[g]) { const n = document.createElement("p"); n.className = "gnote"; n.textContent = `${SRV[srv]} ${GRADE[g]}: ${GNOTE[g]}`; body.appendChild(n); }
   if (done && S.locked) { const n = document.createElement("p"); n.className = "muted"; n.textContent = "이 시즌은 시험 시즌이라 실제 컷과의 비교는 최종 검증 뒤 공개합니다."; body.appendChild(n); }
   else if (done && !Object.keys(truth).length) { const n = document.createElement("p"); n.className = "muted"; n.textContent = "실제 컷과의 비교는 시즌 자료를 채점한 뒤 나옵니다."; body.appendChild(n); }
 
@@ -358,7 +361,7 @@ function drawLive() {
     d.innerHTML = `<div class="k"><i class="sw" style="background:${COL(p)}"></i>최종 ${p}% 컷</div>`
       + (q ? (weak ? `<div class="r range">80% 구간 ${fmt(q.lo)} ~ ${fmt(q.hi)}억</div><div class="v">${fmt(q.m)}<small>억</small></div><div class="r">가운데 값 (등급 ${g})</div>`
                    : `<div class="v">${fmt(q.m)}<small>억</small></div><div class="r">80% 구간 ${fmt(q.lo)} ~ ${fmt(q.hi)}</div>`)
-           : `<div class="v">–</div><div class="r">이 서버는 예측하지 않음</div>`)
+           : `<div class="v">–</div><div class="r">${ls.nodata ? "관측 대기" : "이 서버는 예측하지 않음"}</div>`)
       + (t != null ? `<div class="r">실제 ${fmt(t)}억${q ? ` (예측 ${(q.m / t - 1 >= 0 ? "+" : "−") + Math.abs((q.m / t - 1) * 100).toFixed(1)}%)` : ""}</div>` : "");
     tiles.appendChild(d);
   }
@@ -369,9 +372,10 @@ function drawLive() {
   lg.innerHTML = PCTS.map(p => `<span><i class="sw" style="background:${COL(p)}"></i>${p}% 가운데 값</span>`).join("")
     + `<span><i class="sw band" style="background:var(--t3)"></i>80% 구간</span>`
     + (Object.keys(truth).length ? `<span><i class="sw dash"></i>실제 컷</span>` : "");
-  const host = document.createElement("div"); host.className = "chart"; body.appendChild(host);
   const vals = [];
   for (const r of P) for (const p of PCTS) { const q = r.srv[srv].pts[p]; if (q) vals.push(q.lo, q.hi); }
+  if (vals.length) {   // 관측 없는 시점만 있으면 그래프를 건너뛰고 표만 둔다
+  const host = document.createElement("div"); host.className = "chart"; body.appendChild(host);
   for (const p of PCTS) if (truth[p] != null) vals.push(truth[p]);
   const nt = niceTicks(Math.min(...vals), Math.max(...vals));
   const xt = []; for (let h = 0; h <= S.H; h += 24) xt.push(h);
@@ -396,8 +400,9 @@ function drawLive() {
     const s = r.srv[srv];
     tip.show(`<b>${r.T}시간 뒤</b> · ${r.T_kst || ""}<br>` + PCTS.filter(p => s.pts[p]).map(p =>
       `<div class="r"><i class="sw" style="background:${COL(p)}"></i>${p}% ${fmt(s.pts[p].m)}억 <span class="muted">(${fmt(s.pts[p].lo)}~${fmt(s.pts[p].hi)})</span></div>`).join("")
-      + `<span class="muted">등급 ${GRADE[s.grade] || s.grade || "–"} · 근거 ${s.n_persons}명</span>`, ...hostXY(host, ev));
+      + (s.nodata ? `<span class="muted">관측 없음</span>` : `<span class="muted">등급 ${GRADE[s.grade] || s.grade || "–"} · 근거 ${s.n_persons}명</span>`), ...hostXY(host, ev));
   }, () => { tip.hide(); cur.setAttribute("visibility", "hidden"); });
+  } else lg.remove();
 
   // 표
   const wrap = document.createElement("div"); wrap.className = "tbl-wrap"; body.appendChild(wrap);
@@ -405,7 +410,8 @@ function drawLive() {
     const s = r.srv[srv];
     return `<tr><td>${r.T}시간</td><td class="l hide-sm">${r.T_kst || ""}</td>` + PCTS.map(p => s.pts[p]
       ? `<td><b>${fmt(s.pts[p].m)}</b> <span class="muted rng-sm">${fmt(s.pts[p].lo)}~${fmt(s.pts[p].hi)}</span></td>` : "<td>–</td>").join("")
-      + `<td class="l">${s.grade || "–"} <span class="hide-sm">${GWORD[s.grade] || ""}</span></td><td class="hide-sm">${s.n_persons}명</td></tr>`;
+      + (s.nodata ? `<td class="l">–</td><td class="hide-sm">관측 없음</td></tr>`
+                  : `<td class="l">${s.grade || "–"} <span class="hide-sm">${GWORD[s.grade] || ""}</span></td><td class="hide-sm">${s.n_persons}명</td></tr>`);
   });
   wrap.innerHTML = `<table><thead><tr><th>시점</th><th class="l hide-sm">KST</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}<th class="l">등급</th><th class="hide-sm">근거</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }

@@ -159,7 +159,12 @@ def one_pred(path):
             if q and q.get("median") is not None and q.get("i80") and None not in q["i80"]:
                 pts[p_] = {"m": r2(q["median"]), "lo": r2(q["i80"][0]), "hi": r2(q["i80"][1])}
         w = x.get("warning") or {}
-        srv[sv] = {"grade": w.get("level"), "n_persons": round(x.get("n_persons") or 0), "pts": pts}
+        # 어느 서버에도 관측이 없어 S41 곡선을 그대로 쓴 값은 싣지 않는다 (2026-10-17 사용자 결정 — 관측 1개 이상부터 표시).
+        # 다른 서버 관측을 빌린 값(donor가 서버 이름)은 그대로 싣는다.
+        nodata = x.get("donor") == "S41"
+        if nodata:
+            pts = {}
+        srv[sv] = {"grade": w.get("level"), "n_persons": round(x.get("n_persons") or 0), "nodata": nodata, "pts": pts}
     return {"T": round(T, 2), "T_kst": o.get("T_kst"), "method": method_label(o), "srv": srv}
 
 
