@@ -8,6 +8,8 @@ python3 -I tools/solo_raid/review.py data/solo-raid/S{n}/state [--write]
 
 고르는 것 (kind)
 - truth_flag: 서버가 붙은 정답 점(truth_points, 등급 A·A2·C)에 강한 플래그(mono_viol·verify_unresolved·curve_outlier)가 있음. 점마다 하나.
+- truth_flag_same_score: truth_flag 중 플래그가 mono_viol뿐이고 같은 서버·같은 정확 점수가 다른 사진에도 정답 점으로 있는 것은 한 항목으로 묶는다
+  (같은 사람이 시각이 다른 화면을 올려 %만 다른 꼴, S19 「다음 시즌에 바꿀 것」 2026-10-17). 묶음의 사진 몇 장을 보고 판단한다.
 - truth_flag_group: 약한 플래그(ctx_overridden·season_conflict·verify_differ 등, best_record·rank_over_200·rank_with_pct 빼고)는 플래그마다 한 항목으로 묶는다 (사진 목록).
   묶음은 표본 몇 장을 보고 판단해도 된다 (S38 season_conflict처럼 수가 많을 때).
 - rank_server: 순위표 1~3위 정확 점수가 같은데 그 사진들 글의 텍스트 서버(text·fix)가 다름 → 소수 쪽 글 (3.2b S39 5881317 같은 경우).
@@ -82,20 +84,41 @@ def collect(state):
     # truth_flag (강한 플래그는 점마다, 약한 플래그는 묶음)
     STRONG = {"mono_viol", "verify_unresolved", "curve_outlier"}
     group = collections.defaultdict(list)
+    oxs = {(r["img"], r["row"]): exact(r) for r in obs}
+    strong_pts = []
     for t in jl(os.path.join(state, "truth_points.jsonl")):
         if not (t.get("server") and t.get("flags") and t.get("grade") in ("A", "A2", "C")):
             continue
         for d in t.get("src_detail", []):
             strong = sorted(STRONG & set(t["flags"]))
             if strong:
-                add("truth_flag", f"{d['img']}#{d['row']}", f"{t['server']} {t['grade']} {','.join(t['flags'])}",
-                    site=d["site"], img=d["img"], row=d["row"], pct=val(t["pct"]), score=val(t["score"]))
+                strong_pts.append((t, d))
             else:
                 for f in t["flags"]:
                     if f not in ("best_record", "rank_over_200", "rank_with_pct"):   # rank_over_200은 아래 사진별 항목으로, rank_with_pct는 후보 아님
                         group[f].append(f"{d['img']}#{d['row']}")
     for f, lst in sorted(group.items()):
         add("truth_flag_group", f, f"정답 점 {len(lst)}개에 {f}", imgs=sorted(set(lst)))
+    # 단조 위반만 있는 점 중 같은 서버·같은 정확 점수가 다른 사진에도 있으면(같은 사람이 시각이 다른 화면을 올려 %만 다름) 한 항목으로 묶는다
+    # (S19 「다음 시즌에 바꿀 것」 — 후보 107개 중 90개 안팎이 이 꼴, 2026-10-17 분석 ④). 묶음 id는 첫 줄 열쇠라 값이 드러나지 않는다
+    same = collections.defaultdict(list)
+    for t, d in strong_pts:
+        e = oxs.get((d["img"], d["row"]))
+        if e and set(t["flags"]) & STRONG == {"mono_viol"}:
+            same[(t["server"], e)].append((t, d))
+    for k, lst in list(same.items()):
+        if len({d["img"] for _, d in lst}) < 2:
+            del same[k]
+    grouped = {(d["img"], d["row"]) for lst in same.values() for _, d in lst}
+    for (sv, _), lst in sorted(same.items(), key=lambda kv: min(f"{d['img']}#{d['row']}" for _, d in kv[1])):
+        keys = sorted({f"{d['img']}#{d['row']}" for _, d in lst})
+        add("truth_flag_same_score", keys[0], f"{sv} 단조 위반 — 같은 정확 점수 사진 {len(keys)}개가 다른 %로 (시각 차인지, 지난 화면 재게시인지 본다)",
+            site=lst[0][1]["site"], imgs=keys, pcts=val(sorted({t["pct"] for t, _ in lst})))
+    for t, d in strong_pts:
+        if (d["img"], d["row"]) in grouped:
+            continue
+        add("truth_flag", f"{d['img']}#{d['row']}", f"{t['server']} {t['grade']} {','.join(t['flags'])}",
+            site=d["site"], img=d["img"], row=d["row"], pct=val(t["pct"]), score=val(t["score"]))
 
     # rank_server: 순위표 1~3위 정확 점수별 글 서버
     by_score = collections.defaultdict(list)
