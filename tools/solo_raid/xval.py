@@ -2,7 +2,7 @@
 
 python3 -I tools/solo_raid/xval.py [--seasons S38,S39,S40,S41] [--scheme forward,loso] [--T 12,18,...] [--draws 600]
         [--work DIR] [--out F.json] [--tag dev] [--prior-opt key=value ...] [--predict-opt key=value ...]
-        [--targets S21-S41] [--jobs 4] [--slim] [--unknown-opt key=value ...] [--level-update '{}'] [--boot-single 200]
+        [--targets S21-S41] [--jobs 4] [--slim] [--unknown-opt key=value ...] [--level-update '{}'] [--level-knn '{}'] [--boot-single 200]
 
 - 겹(fold). forward(기본): 시즌 번호 순으로, 앞 시즌들(학습 가능한 개발 시즌 2개 이상) → 다음 시즌. loso(비교): 그 시즌만 빼고 나머지 전부.
   4절 기준 시즌 규칙 (2026-10-17, 분석 4.0a·4.3 — criteria_v2.json simple_order):
@@ -21,7 +21,8 @@ python3 -I tools/solo_raid/xval.py [--seasons S38,S39,S40,S41] [--scheme forward
   criteria_v2.json(4절 고르기 기준)이 있으면 summary_v2도 낸다: T_main 18~48·T_late 72·96·T12 따로, 보고 지표(낮게 예측한 비율, 시즌별 80% 포함 최저·분포,
   자료량 셋 구간, 95% 포함, 10%), 그리고 select_v2(scheme끼리 고르기 규칙 — 결과 보기 전에 정한 순서 prev → recent{k} → forward).
   **시험 시즌은 넣지 않는다** (split 감시 — 판 2에는 잠긴 시즌이 없다).
-- 덧붙임 (기본 끔): --level-update는 자체 일관성 수준 갱신(M4, m_update.py — 한 시즌 prior 위에서도 된다), --unknown-opt는 서버 미상 줄 설정의 일부만 바꾼다
+- 덧붙임 (기본 끔): --level-update는 자체 일관성 수준 갱신(M4, m_update.py — 한 시즌 prior 위에서도 된다, '{"unknown": false}'면 라벨 줄만 — 4.3 M4l),
+  --level-knn은 유사 시즌 수준(4.3 M2s, level_knn.py — 여러 시즌 prior의 season_levels와 학습 시즌의 같은 T 절단 사본이 있어야 한다), --unknown-opt는 서버 미상 줄 설정의 일부만 바꾼다
   (--predict-opt unknown=…은 dict 전체를 바꿔 빌릴 시즌이 빠진다). contam(H2)은 4.1에서 「아님」이라 넣지 않았다.
 - --jobs N: T 절단 사본·prior를 먼저 만들고 예측을 N 프로세스로 (결과 줄 순서는 1 프로세스와 같다).
   --slim: 한섭 줄만·요약에 쓰는 열만 남기고 들여쓰기 없이 쓴다 (M0′처럼 겹이 많을 때 — 23시즌 pairs가 수십 MB에서 몇 MB로).
@@ -53,7 +54,7 @@ AN = os.path.join(DATA, "analysis")
 MIN_TRAIN = 2
 CRIT2 = os.path.join(AN, "criteria_v2.json")
 SLIM_KEYS = ("scheme", "train", "season", "T", "server", "pct", "tol", "pred", "i80", "grade", "n_persons", "n_persons_label",
-             "truth", "err", "ok", "in50", "in80", "in95", "w80", "err_b0", "err_b1", "m_upd", "tool_note")
+             "truth", "err", "ok", "in50", "in80", "in95", "w80", "err_b0", "err_b1", "m_upd", "lvl_knn", "lvl_early", "tool_note")
 
 
 def jload(p):
@@ -463,9 +464,10 @@ def run_job(job):
     opts.update(g["pdopts"])
     if g["uopts"]:
         opts["unknown"] = dict(opts["unknown"], **g["uopts"])
-    if opts.get("early_level") is True:   # 3.5e: 학습 시즌의 같은 T 절단 사본 (정답 없음, 수준 보정용)
-        opts["early_level"] = {"train": [[s, BT.trunc_state(FM.state_of(s), T, os.path.join(g["work"], "trunc", s), extra_of(FM.state_of(s)))]
-                                         for s in train]}
+    if opts.get("early_level") is True or g.get("lvlk") is not None:   # 3.5e·4.3 M2s: 학습 시즌의 같은 T 절단 사본 (정답 없음, 수준 보정용)
+        tr_st = [[s, BT.trunc_state(FM.state_of(s), T, os.path.join(g["work"], "trunc", s), extra_of(FM.state_of(s)))] for s in train]
+    if opts.get("early_level") is True:
+        opts["early_level"] = {"train": tr_st}
     rws, cnt = PR.load_obs(st, Tc, H, c0, opts["grades"], opts["c_delay"], None, opts["unknown"])
     mu = None
     if g["lvl"] is not None:   # M4 자체 일관성 수준 갱신 (m_update.py) — predict의 _lvl 자리
@@ -475,6 +477,12 @@ def run_job(job):
         mu = MU.m_posterior(prior, rws, H, tau, **cfg)
         if mu:
             opts["_lvl"] = (mu["mu"], mu["sd"])
+    lk = None
+    if g.get("lvlk") is not None:   # 4.3 M2s 유사 시즌 수준 (level_knn.py) — 같은 _lvl 자리
+        import level_knn as LK
+        lk = LK.knn_level(prior, st, Tc, tr_st, **g["lvlk"])
+        if lk:
+            opts["_lvl"] = (lk["mu"], lk["sd"])
     try:
         out = PR.predict(st, prior, Tc, opts, g["draws"], g["seed"], comps_split=False, rows=rws)
     except ValueError as e:   # predict 가장자리 (서버 관측이 모두 걸러짐 등) — 실패로 적고 계속한다
@@ -487,6 +495,13 @@ def run_job(job):
     if mu:
         for r in rs:
             r["m_upd"] = [mu["mu"], mu["sd"], mu.get("persons"), mu.get("phi")]
+    if lk:
+        for r in rs:
+            r["lvl_knn"] = [lk["mu"], lk["sd"], lk["n_train"], lk["near"]]
+    el = out.get("early_level")
+    if el and el.get("mu") is not None:
+        for r in rs:
+            r["lvl_early"] = [el["mu"], el["sd"], el.get("n_train")]
     if g["slim"]:   # 한섭 줄만, 요약에 쓰는 열만
         rs = [{k: r[k] for k in SLIM_KEYS if k in r} for r in rs if r["server"] == g["crit"]["server_main"]]
     k3 = next((r for r in rs if r["server"] == "KR" and r["pct"] == 3.0), None)
@@ -534,6 +549,8 @@ def main():
     ap.add_argument("--unknown-opt", action="append", default=[], help="서버 미상 줄 설정 중 일부만 (mode=none, borrow_kind=em …)")
     ap.add_argument("--level-update", default=None, metavar="JSON",
                     help="M4 자체 일관성 수준 갱신 (m_update.m_posterior 설정, 예: '{}' 또는 '{\"tau\": 0.1}') — 기본 끔")
+    ap.add_argument("--level-knn", default=None, metavar="JSON",
+                    help="4.3 M2s 유사 시즌 수준 (level_knn.knn_level 설정, 예: '{}' 또는 '{\"k\": 3}') — 기본 끔, 여러 시즌 prior에서만")
     SP.add_final_arg(ap)
     a = ap.parse_args()
     if a.final:
@@ -542,7 +559,7 @@ def main():
     # 커밋된 xval_dev.json은 analyze_all의 forward·loso 결과이고 웹 빌드(viz.py)가 loso 요약을 검사한다 (2026-10-17 레포 정리).
     # --tag 없이 다른 방식으로 돌려 덮어쓰면 push 뒤 공개 웹 빌드가 멈춘다.
     if os.path.abspath(a.out or os.path.join(AN, f"xval_{a.tag}.json")) == os.path.abspath(os.path.join(AN, "xval_dev.json")) \
-            and (a.fixed_prior or "loso" not in a.scheme.split(",") or a.slim or a.level_update or a.unknown_opt or a.targets):
+            and (a.fixed_prior or "loso" not in a.scheme.split(",") or a.slim or a.level_update or a.level_knn or a.unknown_opt or a.targets):
         raise SystemExit("xval_dev.json 자리는 analyze_all의 forward·loso 결과만 쓴다 — --tag나 --out을 따로 준다")
     reg = FM.registry()
     crit = jload(os.path.join(AN, "criteria.json"))
@@ -559,8 +576,11 @@ def main():
         popts["tiers"] = tuple(popts["tiers"].split(","))
     pdopts = parse_kv(a.predict_opt)
     lvl = None if a.level_update is None else (json.loads(a.level_update) or {})
+    lvlk = None if a.level_knn is None else (json.loads(a.level_knn) or {})
+    if sum(x is not None for x in (lvl, lvlk)) + bool(pdopts.get("early_level")) > 1:
+        raise SystemExit("수준 덧붙임(--level-update·--level-knn·early_level)은 같은 자리(_lvl)라 하나만 준다")
     _G.update(akey=akey, crit=crit, work=work, draws=a.draws, seed=a.seed, boot=a.boot, boot_single=a.boot_single,
-              popts=popts, pdopts=pdopts, uopts=parse_kv(a.unknown_opt), lvl=lvl, slim=a.slim)
+              popts=popts, pdopts=pdopts, uopts=parse_kv(a.unknown_opt), lvl=lvl, lvlk=lvlk, slim=a.slim)
     plan = []   # (scheme, train, tgt, single)
     if a.fixed_prior:
         fp = jload(a.fixed_prior)
@@ -579,7 +599,7 @@ def main():
     if not plan:
         raise SystemExit("돌릴 겹이 없다 (시즌·scheme·--targets)")
     # 1) T 절단 사본 (시즌마다 따로 — 같은 폴더를 두 프로세스가 만들지 않게)
-    need = sorted({x[2] for x in plan} | ({s for x in plan for s in x[1]} if pdopts.get("early_level") is True else set()), key=SP.snum)
+    need = sorted({x[2] for x in plan} | ({s for x in plan for s in x[1]} if pdopts.get("early_level") is True or lvlk is not None else set()), key=SP.snum)
     for name in _each(_trunc_all, [(n, Ts) for n in need], a.jobs):
         pass
     # 2) prior (겹마다, 같은 학습 시즌이면 한 번)

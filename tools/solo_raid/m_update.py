@@ -8,6 +8,7 @@ xval.py --level-update '{}' 가 이것을 불러 결과를 predict의 _lvl(early
 수준이 맞으면 c_i는 시각과 무관하게 ln S3(규모) 근처다. 틀리면 c_i가 z_i = k(y_i)·LN10·P_i 쪽으로 기운다.
 목적 J(a, δ) = Σ w_i (c_i(δ) − a)² / φ + (δ − μ0)² / τ²  (w_i = 사람마다 합 1이 되게 나눈 1/분산, φ = 과분산)
 Gauss–Newton 몇 번. 반환 {mu, sd, persons, phi, …} 또는 None (사람 < min_persons).
+unknown=False면 서버 미상 줄을 빼고 라벨 줄만 쓴다 (분석 4.3 M4l — `xval.py --level-update '{"unknown": false}'`).
 4.1 단서: 직전 시즌 하나(M0) 위 T18~48 |e| 3.56 → 2.12%, 포함 0.76 → 0.73 (고르기 아님 — criteria_v2로 다시 잰다).
 """
 import math
@@ -17,7 +18,7 @@ LN10 = math.log(10)
 
 
 def m_posterior(prior, rows, H, tau, mu0=0.0, srv="KR", pt_sd=0.03, iters=4, cap=0.8, min_persons=3, phi_floor=1.0,
-                use_sf=True):
+                use_sf=True, unknown=True):
     import predict as PR
     t = prior["transform"]
     tr = {"form": t["form"], "theta": t["theta"], "bx": t.get("bx", 0.0), "m": t["m"], "s0": t["sigma"]["s0"], "rho": t["sigma"]["rho"]}
@@ -29,6 +30,8 @@ def m_posterior(prior, rows, H, tau, mu0=0.0, srv="KR", pt_sd=0.03, iters=4, cap
         if o["server"] == srv:
             p = 1.0
         elif not o["server"] and o.get("mix"):
+            if not unknown:   # 라벨 줄만 (분석 4.3 M4l, 2026-10-18 — 4.2 「라벨 줄과 미상 줄을 나눠 본다」)
+                continue
             p = o["mix"].get(srv, 0.0)
         else:
             continue
