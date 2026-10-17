@@ -124,6 +124,72 @@
     "S30": "test",
     "S37": "test"
    }
+  },
+  {
+   "when": "2026-10-17 18:41 KST",
+   "seasons": [
+    "S19"
+   ],
+   "what": "분석 ④: 새 도구로 post_all·review 다시 (종료 코드·후보 개수만 봄, 값·정답 안 봄)",
+   "who": "session_01VejSgPng2GZ3g6LvUQaDeN",
+   "roles": {
+    "S19": "test"
+   }
+  },
+  {
+   "when": "2026-10-17 18:41 KST",
+   "seasons": [
+    "S24"
+   ],
+   "what": "분석 ④: 새 도구로 post_all·review 다시 (종료 코드·후보 개수만 봄, 값·정답 안 봄)",
+   "who": "session_01VejSgPng2GZ3g6LvUQaDeN",
+   "roles": {
+    "S24": "test"
+   }
+  },
+  {
+   "when": "2026-10-17 18:41 KST",
+   "seasons": [
+    "S29"
+   ],
+   "what": "분석 ④: 새 도구로 post_all·review 다시 (종료 코드·후보 개수만 봄, 값·정답 안 봄)",
+   "who": "session_01VejSgPng2GZ3g6LvUQaDeN",
+   "roles": {
+    "S29": "test"
+   }
+  },
+  {
+   "when": "2026-10-17 18:41 KST",
+   "seasons": [
+    "S30"
+   ],
+   "what": "분석 ④: 새 도구로 post_all·review 다시 (종료 코드·후보 개수만 봄, 값·정답 안 봄)",
+   "who": "session_01VejSgPng2GZ3g6LvUQaDeN",
+   "roles": {
+    "S30": "test"
+   }
+  },
+  {
+   "when": "2026-10-17 18:41 KST",
+   "seasons": [
+    "S34"
+   ],
+   "what": "분석 ④: 새 도구로 post_all·review 다시 (종료 코드·후보 개수만 봄, 값·정답 안 봄)",
+   "who": "session_01VejSgPng2GZ3g6LvUQaDeN",
+   "roles": {
+    "S34": "test"
+   }
+  },
+  {
+   "when": "2026-10-17 18:41 KST",
+   "seasons": [
+    "S37"
+   ],
+   "what": "분석 ④: 새 도구로 post_all·review 다시 (종료 코드·후보 개수만 봄, 값·정답 안 봄)",
+   "who": "session_01VejSgPng2GZ3g6LvUQaDeN",
+   "roles": {
+    "S37": "test"
+   }
   }
  ]
 }
