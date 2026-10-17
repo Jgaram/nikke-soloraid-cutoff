@@ -190,6 +190,27 @@
    "roles": {
     "S37": "test"
    }
+  },
+  {
+   "when": "2026-10-17 18:49 KST",
+   "seasons": [
+    "S19",
+    "S24",
+    "S29",
+    "S30",
+    "S34",
+    "S37"
+   ],
+   "what": "3.7 시험 (test37.py --final, 고정 96be48c1): 정답 표·예측 오차·포함 전부 봄 — 이제 이 시즌들은 독립 시험셋이 아니다 (고치면 「미검증」)",
+   "who": "session_01NxjLMW1hvZ7YNoFNFpYBiR",
+   "roles": {
+    "S19": "test",
+    "S24": "test",
+    "S29": "test",
+    "S30": "test",
+    "S34": "test",
+    "S37": "test"
+   }
   }
  ]
 }
