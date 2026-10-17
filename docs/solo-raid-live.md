@@ -145,11 +145,12 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
    수집 끝 표시가 있어야 등록부·정답 표·검증이 그 시즌을 쓰므로, 표시를 먼저 하면 채점 전에 분석 도구가 그 시즌 정답을 연다 ([분석 4.5](solo-raid-analysis.md#45-고정과-미래-시험)).
 3. **데이터 점검:** [일괄 수집 「7. 데이터 점검」](solo-raid-backfill.md#7-데이터-점검-s34-이하실시간)과 같다. 원본 기준 예외 처리(`discard.json`)만 한다 —
    점검에서 나온 「다음 시즌에 바꿀 것」(도구 고침)은 4의 채점 뒤에 한다.
-4. **자기 예측 채점 (먼저):** `python3 -I tools/solo_raid/score_live.py S{n}` (시험 몫은 `--final`) → `predict/score.json` 커밋, 표를 채팅에 옮긴다.
+4. **자기 예측 채점 (먼저):** `python3 -I tools/solo_raid/score_live.py S{n}` → `predict/score.json` 커밋, 표를 채팅에 옮긴다 (판 2에는 잠긴 시즌이 없어 `--final`은 쓰지 않는다).
    끝나기 전에 커밋된 예측을 고치기 전에 한 번 채점한 결과라 독립 시험 기록이다 (모든 새 시즌, split 판 2 — 2026-10-17 사용자 결정).
-   T마다 도구 커밋이 다를 수 있으니 `predict/T*/`의 `run.tool_head`별로 적는다.
+   T마다 도구 커밋이 다를 수 있으니 `run.tool_head`별로 적는다 — `score.json`의 `runs`(T마다 도구 커밋·prior·core sha1)·`tool_heads`에 있고, 표준 출력 표에도 T마다 나온다 (2026-10-17).
+   채점 기준은 `criteria.json` 판 1(sha1 `80c63e2f`, `score.json`의 `criteria_sha1`)이다 — S42 채점용으로 고정 (분석 4.0a).
 5. **수집 끝 표시:** `$DEST/collect_done.json` (`{"done": "KST 시각", "by": "세션 id"}`) → 커밋. 이 표시가 있어야 분석 도구가 이 시즌을 쓴다.
-6. **개발 시즌만 — 분석 갱신:** [일괄 수집 「8. 분석 갱신」](solo-raid-backfill.md#8-분석-갱신)의 3~5와 같다.
+6. **분석 갱신:** [일괄 수집 「8. 분석 갱신」](solo-raid-backfill.md#8-분석-갱신)의 3~5와 같다.
    채점(4)이 먼저다 — 채점 뒤에는 어느 시즌이든 개발에 넣는다 (split 판 2).
    (전에는 「시험 시즌은 채점·분석을 하지 않고 정답 수치를 쓰지 않는다」였다 — 공개 결정 A로 끝난 시즌 정답은 공개한다.)
 7. README 「시즌 요약」을 채우고 (일괄 수집 형식 + 「예측」 칸: 시점마다 커밋 시각과 등급 — 「자동 실행」 표에 있다 — + 4의 채점 한 줄) 사용자에게 끝을 알린다.

@@ -27,6 +27,8 @@ python3 -I tools/solo_raid/review.py data/solo-raid/S{n}/state [--write]
 
 시험 시즌(split.json test): 집계표(seasons.json 컷·server_cutoffs.csv)와 견주지 않는다 (shaky를 고르지 않음). review.json에 % ·점수 값을 쓰지 않는다
 (이음 열쇠·종류만). 정답 점 내부 일관성(truth_flag)은 데이터 문제라 같은 규칙으로 고른다.
+판 2(2026-10-17)부터 잠근 시험 시즌이 없어 이 분기는 쓰이지 않는다 — 모든 시즌을 개발 시즌 규칙으로 고른다. 새 시즌의 미래 시험도
+점검(예외 처리)은 같고, 도구 고침만 자기 예측 채점 뒤로 미룬다 (docs/solo-raid-live.md 「3. 끝난 뒤」). 판 1 시험 6시즌의 옛 review.json은 값 칸이 비어 있다.
 """
 import argparse
 import collections

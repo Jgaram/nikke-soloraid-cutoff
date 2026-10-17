@@ -169,7 +169,7 @@ export DCNET_UA="nikke-community-research/0.1 (+https://github.com/jgaram/nikke-
 분석(3~5)은 개발 시즌만 한다.
 
 1. `$DEST/collect_done.json`을 쓴다 (`{"done": "KST 시각", "by": "세션 id"}`) — **시험 시즌도 쓴다** (수집이 끝났다는 표시. 이것이 있어야 분석 도구가 이 시즌을 끝난 시즌으로 본다).
-2. 시험 시즌이면 여기서 9로 간다.
+2. 시험 시즌이면 여기서 9로 간다. (일괄 수집 당시 — 판 2부터 잠긴 시즌이 없어 모든 시즌이 3~5를 한다, 2026-10-17)
 3. `git fetch origin main && git merge origin/main` 뒤 `python3 -I $REPO/tools/solo_raid/analyze_all.py` (후처리 최신 확인 → 등록부 → 정답 표 → 여러 시즌 prior → 검증, 시즌 수에 따라 10~30분).
    Bash `run_in_background`로 띄우고 끝 알림을 기다린다.
    끝나지 않은 다른 시즌은 건드리지 않는다. push 때 생성 파일(`registry.json`·`analysis/*.json`, 끝난 시즌 state의 후처리 파일)이 부딪히면
@@ -181,7 +181,7 @@ export DCNET_UA="nikke-community-research/0.1 (+https://github.com/jgaram/nikke-
 ### 9. 보고 (S34 이하)
 
 조율 세션에 `S{n} 완료: 관측 {in}줄 (dc {a}·naver {b}·blabla {c}), out {o}, unsure {u}, 요청 {r}번, 후처리 use {k}줄·서버 붙음 {s}줄, 점검 후보 {c}개·고침 {f}개, 학습 등급 {tier}`을 보낸다
-(시험 시즌은 학습 등급 대신 「시험 시즌 — 분석 안 함」).
+(시험 시즌은 학습 등급 대신 「시험 시즌 — 분석 안 함」 — 일괄 수집 당시, 판 2부터는 없음).
 
 ### 멈출 때
 
@@ -264,9 +264,11 @@ export DCNET_UA="nikke-community-research/0.1 (+https://github.com/jgaram/nikke-
    원자료(obs.jsonl 등)는 고치지 않는다.
 5. **다시 돌리기.** `post_all.sh` → `review.py` 다시. 고친 후보가 사라졌는지, 새 엇갈림이 생기지 않았는지 본다.
 6. **도구 코드는 고치지 않는다** (병렬 세션끼리 도구가 어긋나지 않게, 사용자 결정). 규칙으로 잡을 만한 것은 README 「다음 시즌에 바꿀 것」에 적고, 분석 세션이 모아 고친다.
-7. **시험 시즌.** 같은 규칙으로 점검·예외 처리를 하되 집계표(seasons.json 컷·server_cutoffs.csv)·예측과 견주지 않고,
-   README·보고·review note에 정답 점·컷 수치를 쓰지 않는다 (`review.py`는 시험 시즌이면 값 칸을 비우고 정답 흔들림을 고르지 않는다). 정답 표·검증·채점은 3.7에서 한 번.
-   (2026-10-17: 3.7은 끝났다. 옛 시험 6시즌은 분석 4.0 「split 판 2」에서 개발로 옮기고, 4.1 H4 점검은 그 뒤 개발 시즌 규칙으로 한다. 앞으로 시험 몫의 처리는 4.0 사용자 확인 대기 — [4.0a](solo-raid-analysis.md#40a-레포-정리-검토-2026-10-17))
+7. **시험 시즌 — 지금은 없다 (split 판 2, 2026-10-17 사용자 결정).** 모든 시즌을 위 1~6 그대로(개발 시즌 규칙) 점검한다.
+   새 시즌은 모두 「미래 시험」이라, 끝난 뒤 점검(예외 처리·`discard.json`)까지는 같고 도구 고침은 자기 예측 채점 뒤에 한다 —
+   순서는 [진행 중 시즌 「3. 끝난 뒤」](solo-raid-live.md#3-끝난-뒤-e_end-이후), 규칙의 정본은 [split 판 2](solo-raid-analysis.md#40-먼저-정할-운영-규칙-분석-전에)와 `split.json` `v2.future_protocol`.
+   - (판 1 기록, 2026-10-16~17) 시험 시즌 S19·S24·S29·S30·S34·S37은 같은 규칙으로 점검하되 집계표·예측과 견주지 않고 README·보고·review note에 정답 점·컷 수치를 쓰지 않았다
+     (`review.py`가 값 칸을 비우고 정답 흔들림을 고르지 않음). 3.7(2026-10-17)에서 채점해 판 2에서 개발로 옮겼고, 공개 결정 A로 정답도 공개한다.
 
 ## 분석 세션 지시문
 
@@ -279,7 +281,7 @@ export DCNET_UA="nikke-community-research/0.1 (+https://github.com/jgaram/nikke-
 4. 늘어난 개발 시즌으로 3.3 기준 판정·3.5 후보·3.6 검증 가운데 할 수 있는 것을 한다.
 5. 지킬 것:
    - 수집 중인 시즌(`collect_done.json` 없음)의 data 폴더는 건드리지 않는다. 수집 도구(저비용 실험 `tools/`, `run_window.sh` 등)는 받는 세션이 돌고 있어 고치지 않는다 — 고쳐야 하면 사용자에게 묻는다.
-   - 시험 시즌(`split.json`의 `test`) 정답·컷 수치를 보거나 쓰지 않는다. 3.7은 시험 세션이 한다.
+   - 시험 시즌(`split.json`의 `test`) 정답·컷 수치를 보거나 쓰지 않는다. 3.7은 시험 세션이 한다. (일괄 수집 당시 — 판 2부터 잠긴 시즌 없음, 2026-10-17)
    - Opus·Sonnet 위주 Workflow는 사용자 허락이 필요하다 (AGENTS.md). 사용자 결정이 필요한 것은 사용자에게 묻는다.
    - main에 바로 push한다. `PROGRESS.md`는 고치지 않는다.
 6. 큰 단계가 끝날 때마다 조율 세션에 `분석 {ⓝ}: {한두 줄}`을 보낸다 (시즌 세션에 알릴 도구 변경이 있으면 적는다).
@@ -290,6 +292,9 @@ export DCNET_UA="nikke-community-research/0.1 (+https://github.com/jgaram/nikke-
 ## 시험 세션 지시문
 
 사용자 결정 (2026-10-16): 분석 ④가 고정한 선택을 잠긴 시즌에 **한 번만** 돌린다. 결과를 보고 고치는 일을 구조로 막으려고 분석 세션과 나눴다 (분석 문서 3.0·3.7, 가이드 §4).
+
+> **끝났다** (3.7, 2026-10-17 — report38). 판 2부터 잠근 시즌이 없어 이 지시문은 다시 쓰지 않는다 (기록으로 둔다).
+> 앞으로의 독립 시험은 새 시즌마다 끝나기 전에 커밋된 예측을 끝난 뒤 먼저 채점하는 것이다 — [진행 중 시즌 「3. 끝난 뒤」](solo-raid-live.md#3-끝난-뒤-e_end-이후).
 
 1. 고정 커밋의 도구·설정으로 3.7을 돌린다 (tr, 3.6과 같은 T·지표). 도구·설정·정답 처리·시험 시즌 데이터를 고치지 않는다.
    명령 (분석 ④가 만듦, 2026-10-17): `git checkout {고정 커밋}` 상태의 도구로 `python3 -I tools/solo_raid/test37.py --final` → `data/solo-raid/analysis/test37.json`.

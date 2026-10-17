@@ -451,7 +451,7 @@ season.json에 `c_start`(챌린지 시작)가 없으면 멈춘다 (2026-10-16 �
 [할 일 3](solo-raid-analysis.md#3-여러-시즌-예측-도구-지난-시즌-일괄-수집-s40s19부터-시즌이-늘-때마다-다시)의 도구다. 모두 `tools/solo_raid/`, 모델 0, 요청 0. 한 명령은 `python3 -I tools/solo_raid/analyze_all.py` (몇 분, 결과는 `data/solo-raid/analysis/`).
 
 ```bash
-python3 -I tools/solo_raid/split.py check                     # 시험 시즌 규칙 다시 계산
+python3 -I tools/solo_raid/split.py check                     # 판 1 시험 시즌 규칙 다시 계산·판 2 확인
 python3 -I tools/solo_raid/registry.py --write                # 시즌 등록부
 python3 -I tools/solo_raid/truth_grade.py                     # 정답 표 (개발 시즌)
 python3 -I tools/solo_raid/fit_prior_multi.py S38,S40,S41 --out PRIOR.json
@@ -462,9 +462,13 @@ python3 -I tools/solo_raid/xval.py [--scheme forward,loso] [--fixed-prior P --fi
   공개 웹 빌드(`viz.py`)가 그 loso 요약을 다시 계산해 견준다 — 다르면 빌드가 멈춰 진행 중 시즌 웹 갱신도 멈춘다. 그래서 다른 방식(`--fixed-prior`, loso 없는 scheme)은 `--tag`·`--out` 없이 돌지 않는다.
   `xval.summarize`를 바꾸면 같은 커밋에 `xval_dev.json`도 다시 만든다. 분석 도구를 고친 push 전에는 `python3 -I tools/publish/build_public.py --out DIR --site DIR2`로 빌드를 확인한다.
 
-- **학습·검증·시험 분리** (`split.py`, `data/solo-raid/split.json`). 시험 S19·S24·S29·S30·S34·S37 (정답 보기 전, 시드 고정 구간별 무작위). S42부터는 sha256 규칙.
-  분석 도구는 `split.install_guard()`로 시험 시즌의 `truth*` 읽기를 막고, seasons.json·server_cutoffs.csv는 `load_seasons()`·`load_server_cutoffs()`로만 읽는다 (시험 시즌 컷 뺌).
-  `--final`은 정답을 보는 시험 채점에서만 — 3.7, 그리고 공개 결정 A(2026-10-17) 뒤 시험 몫 시즌이 끝난 뒤 한 번 하는 `score_live` 채점. 본 기록은 `split.py seen`. 감시는 읽기만 막는다 — 분석 결과 파일 이름은 `truth*`로 짓지 않는다 (정답 표가 `answer_key.json`인 까닭).
+- **학습·검증·시험 분리** (`split.py`, `data/solo-raid/split.json`).
+  - **판 2 (2026-10-17, 사용자 「모든 새 시즌 통일」): 잠근 시험 시즌이 없다.** S19~S41 23시즌 모두 개발이고, S42부터 모든 새 시즌은 「미래 시험」 —
+    끝나면 도구·설정을 고치기 전에, 끝나기 전에 커밋된 예측을 `score_live.py`로 먼저 채점 → 수집 끝 표시 → 개발 (`v2.future_protocol`, [분석 4.0](solo-raid-analysis.md#40-먼저-정할-운영-규칙-분석-전에)).
+    채점 전 시즌이 분석에 들어가지 않게 막는 것은 몫이 아니라 등록부 `collect` 완료다 (정답 표·xval은 수집 끝난 시즌만).
+  - 판 1 (2026-10-16): 시험 S19·S24·S29·S30·S34·S37 (정답 보기 전, 시드 고정 구간별 무작위, 지금 `test_v1`), S42부터 sha256 규칙(S44·S46·S48 …) — 3.7에서 봐 판 2에서 접음.
+  - 감시 장치는 남아 있다: `split.install_guard()`가 `test` 시즌의 `truth*` 읽기를 막고, seasons.json·server_cutoffs.csv는 `load_seasons()`·`load_server_cutoffs()`로만 읽는다.
+    판 2는 `test`가 비어 막는 것이 없다. `--final`도 쓸 일이 없다 (3.7 기록용). 본 기록은 `split.py seen`. 감시는 읽기만 막는다 — 분석 결과 파일 이름은 `truth*`로 짓지 않는다 (정답 표가 `answer_key.json`인 까닭).
 - **버릴 것·고칠 것** (`data/solo-raid/S{n}/discard.json`, `discard.py`, 2026-10-16 시즌별 파일로 옮김 — 여러 세션이 한 파일을 함께 고치면 충돌). 원자료는 그대로다. 항목마다 사유·날짜·결정자.
   - 글 버림(scope post, action `discard`): server_classify는 그 글 텍스트를 서버 근거로 쓰지 않고, post_exclude는 그 글의 줄과 같은 사진(sha1·dup_of) 사본에 exclude `discard`를 붙인다.
   - 서버 고침(scope post, action `server`): 판독은 맞고 서버만 틀린 글. server_classify가 글 텍스트 대신 `server`를 근거 `fix`로 쓴다 (앵커로도 세고, 묶음 이름보다 앞선다).
@@ -479,8 +483,8 @@ python3 -I tools/solo_raid/xval.py [--scheme forward,loso] [--fixed-prior P --fi
   - 처음에는 다른 시즌과 겹치는 점수를 모두 골라 시즌마다 수백 개였다 — 그 시즌 상위권 점수가 다음 시즌 초반 「지난 시즌 결과」 화면에도 나오기 때문이다. 그래서 「주인」(가장 많이 나온 시즌)을 따진다.
   - 위 괄호의 후보 종류는 첫 판이다. 뒤에 더한 것(`rank_over_200`·`truth_flag_same_score`·`rank1_low` 등)까지 지금 목록의 정본은 `review.py`와 [일괄 수집 「7. 데이터 점검」](solo-raid-backfill.md#7-데이터-점검-s34-이하실시간)이다 (2026-10-17).
 - **진행 중 예측 채점** ([`score_live.py`](../tools/solo_raid/score_live.py), 2026-10-16). 진행 중 시즌 세션이 커밋한 `S{n}/predict/T*/`를 끝난 뒤 정답 표 규칙으로 채점한다 (xval.score와 같다).
-  시험 몫 시즌은 `--final`로 (공개 결정 A 전에는 3.7에서만). 끝난 시즌은 도구·설정을 고치기 전에, `collect_done.json`을 쓰기 전에 먼저 채점한다
-  ([진행 중 시즌 「3. 끝난 뒤」](solo-raid-live.md#3-끝난-뒤-e_end-이후), 2026-10-17).
+  모든 새 시즌이 미래 시험이라 `--final` 없이 돌린다 (split 판 2). 끝난 시즌은 도구·설정을 고치기 전에, `collect_done.json`을 쓰기 전에 먼저 채점한다
+  ([진행 중 시즌 「3. 끝난 뒤」](solo-raid-live.md#3-끝난-뒤-e_end-이후), 2026-10-17). T마다 예측을 낸 도구 커밋을 `score.json` `runs`·`tool_heads`에 남긴다 (2026-10-17, 분석 4.0).
 - **수집 끝 표시** (`S{n}/collect_done.json`, 2026-10-16). 등록부의 수집 상태는 이 파일 → PROGRESS.md 순으로 본다. 끝나지 않은 시즌은 analyze_all이 후처리를 다시 돌리지 않고 학습에서 뺀다
   (여러 시즌 세션이 함께 돌 때 다른 세션의 시즌 폴더를 건드리지 않게). 정답 표(`truth_grade.py`)와 검증(`xval.py`)도 수집이 끝난 시즌만 쓴다 —
   전에는 진행 중인 S42가 정답 표 목록에 들어가 있었다 (2026-10-17 고침, 종료 뒤 채점 전에 xval이 그 시즌을 맞혀 보지 않게).
@@ -562,8 +566,9 @@ python3 -I tools/solo_raid/xval.py [--scheme forward,loso] [--fixed-prior P --fi
 - 2026-10-15 시즌41 Sonnet 판독 재수집: 기준점을 보지 않고 니마갤을 다시 모은 실험. 도구·지시문·관측 표·판독 원문(원본 재판독 494장은 정답 세트로 쓸 수 있음)·사진 목록과 기준점 비교를 보관했다. 컷 추정은 하지 않았다.
 - 2026-10-15 시즌41 관측 수집 기준점: 사용자 요청으로 수집 절차·도구·입력 스냅숏·Opus 판독 결과와 비용을 보관했다. 판독하지 않은 홀드아웃 글도 함께 있다. 컷 추정은 하지 않았다.
 - 2026-10-16 역대 컷 정리표 교차검증: 디시·에펨·아카·네이버 라운지·웹(일본 블로그·JP 위키·기사)의 컷 정리 1,345줄을 정리자 계열(노키엘·노박사·솔린 등)로 묶어 맞춰 봤다.
-  정리표 2곳 이상 일치한 빈칸만 `seasons.json`(S30·S32 한섭 10%)과 `server_cutoffs.csv`(38줄, source `X`)에 넣었다. 시험 시즌 값은 `truth_test_*`에 봉인.
-  기존 값과 어긋난 칸(S39 일섭 10% 140억이 10.8% 근처 점수로 보임, S39·S36·S35 한섭 30%, 시험 시즌 S29 한섭 10%)은 고치지 않고 사용자 결정을 기다린다.
+  정리표 2곳 이상 일치한 빈칸만 `seasons.json`(S30·S32 한섭 10%)과 `server_cutoffs.csv`(38줄, source `X`, 옛 시험 시즌 8줄 포함)에 넣었다. 옛 시험 시즌 값은 `truth_test_*`에 봉인했다가
+  2026-10-17 풀었다 (split 판 2·공개 결정 A — 같은 규칙으로 이미 표에 들어가 있었고, 정답 표도 그 값을 쓴다).
+  기존 값과 어긋난 칸(S39 일섭 10% 140억이 10.8% 근처 점수로 보임, S39·S36·S35 한섭 30%, 옛 시험 시즌 S29 한섭 10% 기존 103 대 합의 101)은 고치지 않고 사용자 결정을 기다린다.
 - 2026-10-14 역대 일정과 커트라인 조사: 사용자의 기록·푸시 요청에 따라 시즌 1~41 일정, 서버별 사용자 집계값, 개인 인증 관측, 출처와 미확인 항목을 보관했다. 예측 모델 검증 전의 탐색적 자료이며, 사용자 집계값과 정확한 최종 컷을 구분한다.
 
 ## 수집 방법 실험에서 확인한 점
