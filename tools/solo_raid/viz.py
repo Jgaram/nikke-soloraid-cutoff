@@ -224,7 +224,7 @@ def notes(sv, data, crit, pending):
         early = [r for r in rows if r["pct"] == p and r["T"] in Tm and r["T"] <= 36]
         cd = sum(1 for r in early if r["grade"] in ("C", "D"))
         if early and cd / len(early) >= 0.5:
-            s_txt += f" 다만 18~36시간 예측의 {cd}/{len(early)}개가 등급 C·D(관측이 적어 prior에 기댐)입니다."
+            s_txt += f" 다만 18~36시간 예측의 {cd}/{len(early)}개가 신뢰도 「매우 낮음」·「참고용」(관측이 적어 prior에 기댐)입니다."
         N.append(s_txt)
     cov = J.get("cov80_main")
     if cov is not None and len(J["seasons"]) >= 2:
