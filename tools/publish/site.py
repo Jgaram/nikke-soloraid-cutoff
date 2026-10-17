@@ -157,14 +157,19 @@ def one_pred(path):
         for p_ in PCTS:
             q = (x.get("points") or {}).get(f"{float(p_):.1f}")
             if q and q.get("median") is not None and q.get("i80") and None not in q["i80"]:
-                pts[p_] = {"m": r2(q["median"]), "lo": r2(q["i80"][0]), "hi": r2(q["i80"][1])}
+                pts[p_] = {"m": r2(q["median"]), "lo": r2(q["i80"][0]), "hi": r2(q["i80"][1]), "near": q.get("near_obs")}
+        # 계산기용 곡선: 예측 JSON의 모든 지점 (% 오름차순) [%, 가운데, 80% 아래, 80% 위, 근처(×½~×2) 옮긴 관측 수] (2026-10-17)
+        curve = []
+        for k_, q in sorted((x.get("points") or {}).items(), key=lambda kv: float(kv[0])):
+            if q and q.get("median") and q.get("i80") and None not in q["i80"] and min(q["i80"]) > 0:
+                curve.append([float(k_), r2(q["median"]), r2(q["i80"][0]), r2(q["i80"][1]), q.get("near_obs")])
         w = x.get("warning") or {}
         # 어느 서버에도 관측이 없어 S41 곡선을 그대로 쓴 값은 싣지 않는다 (2026-10-17 사용자 결정 — 관측 1개 이상부터 표시).
         # 다른 서버 관측을 빌린 값(donor가 서버 이름)은 그대로 싣는다.
         nodata = x.get("donor") == "S41"
         if nodata:
-            pts = {}
-        srv[sv] = {"grade": w.get("level"), "n_persons": round(x.get("n_persons") or 0), "nodata": nodata, "pts": pts}
+            pts, curve = {}, []
+        srv[sv] = {"grade": w.get("level"), "n_persons": round(x.get("n_persons") or 0), "nodata": nodata, "pts": pts, "curve": curve}
     return {"T": round(T, 2), "T_kst": o.get("T_kst"), "method": method_label(o), "srv": srv}
 
 

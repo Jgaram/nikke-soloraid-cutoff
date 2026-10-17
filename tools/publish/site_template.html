@@ -128,6 +128,8 @@ sup.cv { color: var(--text-muted); font-size: 11px; margin-left: 1px; }
 .calcbox { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
 .calcbox .big { display: block; font-size: 30px; font-weight: 700; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
 .calcbox .rng { color: var(--text-secondary); font-size: 13px; }
+.calcbox input[type=number] { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
+.calcgrid.weak .big { color: var(--text-muted); }
 .boss-sm { display: none; }
 ul { margin: 6px 0; padding-left: 20px; }
 li { margin: 3px 0; }
@@ -358,14 +360,16 @@ function drawLive() {
   for (const p of PCTS) {
     const q = ls.pts[p], t = truth[p];
     const d = document.createElement("div"); d.className = "tile" + (weak ? " weak" : "");
-    d.innerHTML = `<div class="k"><i class="sw" style="background:${COL(p)}"></i>최종 ${p}% 컷</div>`
+    d.innerHTML = `<div class="k"><i class="sw" style="background:${COL(p)}"></i>최종 ${p}% 컷${q && isRef(q.near) ? " · 참고값" : ""}</div>`
       + (q ? (weak ? `<div class="r range">80% 구간 ${fmt(q.lo)} ~ ${fmt(q.hi)}억</div><div class="v">${fmt(q.m)}<small>억</small></div><div class="r">가운데 값 (신뢰도 ${GRADE[g] || g})</div>`
                    : `<div class="v">${fmt(q.m)}<small>억</small></div><div class="r">80% 구간 ${fmt(q.lo)} ~ ${fmt(q.hi)}</div>`)
            : `<div class="v">–</div><div class="r">${ls.nodata ? "관측 대기" : "이 서버는 예측하지 않음"}</div>`)
       + (t != null ? `<div class="r">실제 ${fmt(t)}억${q ? ` (예측 ${(q.m / t - 1 >= 0 ? "+" : "−") + Math.abs((q.m / t - 1) * 100).toFixed(1)}%)` : ""}</div>` : "");
     tiles.appendChild(d);
   }
-  if (ls.pts["10"]) { const n = document.createElement("p"); n.className = "muted"; n.textContent = "10% 컷은 지난 시즌의 곡선 모양을 빌려 오는 참고값이라 1·3%보다 덜 정확합니다."; body.appendChild(n); }
+  const refP = PCTS.filter(p => isRef(ls.pts[p] && ls.pts[p].near));
+  if (refP.length) { const n = document.createElement("p"); n.className = "muted"; n.textContent = `${refP.join("·")}% 컷은 그 근처에 모인 자료가 적어(${REF_NEAR}개 미만) 지난 시즌 곡선 모양에 기대는 참고값입니다. 자료가 쌓이면 이 표시는 사라집니다.`; body.appendChild(n); }
+  if (!done && ls.curve && ls.curve.length >= 2) drawKcalc(body, ls.curve, weak);
 
   // 시점별 예측 그래프
   const lg = document.createElement("div"); lg.className = "legend"; body.appendChild(lg);
@@ -414,6 +418,69 @@ function drawLive() {
                   : `<td class="l">${GRADE[s.grade] || s.grade || "–"}</td><td class="hide-sm">${s.n_persons}명</td></tr>`);
   });
   wrap.innerHTML = `<table><thead><tr><th>시점</th><th class="l hide-sm">KST</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}<th class="l">신뢰도</th><th class="hide-sm">근거</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+}
+
+// ---------- ① 아래 계산기: 최종 % ↔ 점수 (진행 중 시즌의 최근 예측 곡선, 2026-10-17 사용자 요청) ----------
+// 곡선 C = [[%, 가운데, 80% 아래, 80% 위, 근처 관측 수], ...] (% 오름차순, 점수는 내림). 지점 사이는 log-log 직선으로 잇는다.
+const REF_NEAR = 5;   // 그 % 근처(×½~×2)에 옮긴 관측이 이보다 적으면 「참고값」 (사용자 결정 — % 고정 기준 대신 자료 양으로)
+const isRef = n => n != null && n < REF_NEAR;
+let kTgtV = 3, kScV = null;
+const qf = q => (q < 1 ? +q.toFixed(2) : q < 10 ? +q.toFixed(1) : Math.round(q)) + "%";
+function kAtQ(C, q, i) {
+  for (let k = 0; k < C.length - 1; k++) if (q <= C[k + 1][0]) {
+    const a = C[k], b = C[k + 1], t = (Math.log(q) - Math.log(a[0])) / (Math.log(b[0]) - Math.log(a[0]));
+    return Math.exp(Math.log(a[i]) + t * (Math.log(b[i]) - Math.log(a[i])));
+  }
+  return C[C.length - 1][i];
+}
+function kNear(C, q) {   // q를 끼는 두 지점 중 적은 쪽
+  for (let k = 0; k < C.length - 1; k++) if (q <= C[k + 1][0]) return q === C[k + 1][0] ? C[k + 1][4] : Math.min(C[k][4] ?? 0, C[k + 1][4] ?? 0);
+  return C[C.length - 1][4];
+}
+function kQAt(C, s, i) {   // 점수 s가 곡선 i에서 몇 %인가. side −1 = 맨 위 지점보다 높음, +1 = 맨 아래 지점보다 낮음
+  const n = C.length;
+  if (s >= C[0][i]) return {q: C[0][0], side: -1};
+  if (s <= C[n - 1][i]) return {q: C[n - 1][0], side: 1};
+  for (let k = 0; k < n - 1; k++) if (s <= C[k][i] && s >= C[k + 1][i]) {
+    const a = C[k], b = C[k + 1], d = Math.log(b[i]) - Math.log(a[i]);
+    const t = d ? (Math.log(s) - Math.log(a[i])) / d : 0;
+    return {q: Math.exp(Math.log(a[0]) + t * (Math.log(b[0]) - Math.log(a[0]))), side: 0};
+  }
+  return {q: C[n - 1][0], side: 1};
+}
+function drawKcalc(body, C, weak) {
+  const qlo = C[0][0], qhi = C[C.length - 1][0];
+  if (kScV == null) kScV = Math.round(kAtQ(C, 3, 1) * 10) / 10;
+  const h = document.createElement("h3"); h.textContent = "최종 % ↔ 점수 계산기"; body.appendChild(h);
+  const box = document.createElement("div"); box.className = "calcgrid" + (weak ? " weak" : ""); body.appendChild(box);
+  box.innerHTML = `<div class="calcbox">최종 <input type="number" id="kTgt" value="${kTgtV}" min="${qlo}" max="${qhi}" step="0.5">% 안에 들려면 → 최종 점수
+      <span class="big" id="kS"></span><span class="rng" id="kSR"></span><div class="rng" id="kSN"></div></div>
+    <div class="calcbox">최종 점수가 <input type="number" id="kSc" value="${kScV}" min="1" step="0.1">억이면 → 최종
+      <span class="big" id="kQ"></span><span class="rng" id="kQR"></span><div class="rng" id="kQN"></div></div>`;
+  const note = document.createElement("p"); note.className = "muted";
+  note.textContent = `최근 예측 곡선으로 계산합니다 (${qf(qlo)}~${qf(qhi)} 사이만). 점수는 기록을 갱신하기 전까지 그대로이므로, 지금 점수를 넣으면 더 올리지 않았을 때의 최종 %입니다. 작은 글씨는 80% 구간입니다.`;
+  body.appendChild(note);
+  const $ = id => box.querySelector("#" + id);
+  const refTxt = n => isRef(n) ? "참고값 — 이 % 근처에 모인 자료가 적어 지난 시즌 곡선 모양에 기댑니다." : "";
+  const side = r => r.side < 0 ? `${qf(qlo)} 안` : r.side > 0 ? `${qf(qhi)} 밖` : qf(r.q);
+  const upd = () => {
+    const q = parseFloat($("kTgt").value);
+    if (!(q >= qlo && q <= qhi)) { $("kS").textContent = "–"; $("kSR").textContent = `${qf(qlo)}~${qf(qhi)} 사이로 넣어 주세요.`; $("kSN").textContent = ""; }
+    else {
+      kTgtV = q;
+      $("kS").innerHTML = `${fmt(kAtQ(C, q, 1))}<small>억</small>`;
+      $("kSR").textContent = `80% 구간 ${fmt(kAtQ(C, q, 2))} ~ ${fmt(kAtQ(C, q, 3))}억`;
+      $("kSN").textContent = refTxt(kNear(C, q));
+    }
+    const s = parseFloat($("kSc").value);
+    if (!(s > 0)) { $("kQ").textContent = "–"; $("kQR").textContent = "점수를 억 단위로 넣어 주세요."; $("kQN").textContent = ""; return; }
+    kScV = s;
+    const m = kQAt(C, s, 1), best = kQAt(C, s, 2), worst = kQAt(C, s, 3);
+    $("kQ").textContent = side(m);
+    $("kQR").textContent = side(best) === side(worst) ? `80% 구간도 ${side(best)}` : `80% 구간 ${side(best)} ~ ${side(worst)}`;
+    $("kQN").textContent = m.side ? "" : refTxt(kNear(C, m.q));
+  };
+  $("kTgt").oninput = upd; $("kSc").oninput = upd; upd();
 }
 
 // ---------- ② 지금 몇 %면 최종 몇 % ----------
