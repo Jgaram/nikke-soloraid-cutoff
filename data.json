@@ -1,6 +1,6 @@
 {
- "asof": "2026-10-17 13:46",
- "content": "129d7b18eea64118",
+ "asof": "2026-10-17 13:51",
+ "content": "233644df2e0641ca",
  "past": [
   {
    "season": "S19",
@@ -705,19 +705,22 @@
        "grade": "D",
        "n_persons": 0,
        "nodata": true,
-       "pts": {}
+       "pts": {},
+       "curve": []
       },
       "JP": {
        "grade": "D",
        "n_persons": 0,
        "nodata": true,
-       "pts": {}
+       "pts": {},
+       "curve": []
       },
       "GL": {
        "grade": "D",
        "n_persons": 0,
        "nodata": true,
-       "pts": {}
+       "pts": {},
+       "curve": []
       }
      }
     }
