@@ -356,7 +356,7 @@ def select_v2(cands, crit2):
     """cands: [(이름, summarize_v2의 한 scheme 값)]. criteria_v2 selection 규칙 (1)~(3)과 late_guard를 그대로 적용한다.
     이름은 scheme(prev·recent5·forward), 덧붙임은 「+」로 (예: prev+m1). 순서를 모르는 이름(loso·pairs·fixed)은 후보가 아니다."""
     C = [(n, simple_rank(n), v) for n, v in cands if simple_rank(n) is not None and v.get("main")]
-    if not C:
+    if len(C) < 2:   # 후보가 하나면 고르기가 아니다 (analyze_all의 forward·loso — loso는 후보 아님)
         return None
     note = []
     tg = {n: tuple(v["targets"]) for n, _, v in C}
