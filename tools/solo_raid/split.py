@@ -6,6 +6,8 @@ python3 -I tools/solo_raid/split.py seen S35 "무엇을 봤는지" [--who 세션
 
 분석 도구에서 쓰는 것
 - role(name) · is_test(name) · test_seasons() — 규칙: data/solo-raid/split.json
+  판 2(2026-10-17): 잠근 시험 시즌 없음(판 1 시험 6시즌은 test_v1, 3.7에서 봐 개발). 새 시즌은 모두 「미래 시험」 — 끝나면 고치기 전에
+  커밋된 진행 중 예측을 먼저 채점한 뒤 개발 (split.json v2.future_protocol). 그래서 role()은 dev만 낸다
 - install_guard(final=False) — 이 프로세스의 open()이 시험 시즌 정답을 못 열게 한다 (3.0b).
   · 시험 시즌 state의 truth* 파일 (state 사본도 같은 폴더의 season.json 이름으로 가린다)
   · data/solo-raid/seasons.json · server_cutoffs.csv는 통째로 막고, load_seasons()·load_server_cutoffs()로만 읽는다
@@ -66,6 +68,8 @@ def role(name, sp=None):
     sp = sp or load_split()
     n = snum(name)
     r = sp["rule"]
+    if sp.get("version", 1) >= 2:   # 판 2 (2026-10-17 사용자 결정): 잠근 시험 시즌 없음, 새 시즌은 모두 미래 시험 → 몫은 dev (v2.role_rule)
+        return "test" if n in sp["test"] else "dev"
     if n in sp["test"]:
         return "test"
     if n in sp["dev_seen"] or r["candidates"][0] <= n <= r["candidates"][1]:
@@ -178,13 +182,20 @@ def load_server_cutoffs(final=False, sp=None):
 def cmd_check(_):
     sp = load_split()
     again = compute(sp["rule"])
-    ok = again == sorted(sp["test"])
-    print(f"규칙으로 다시 계산한 시험 시즌: {', '.join(f'S{n}' for n in again)} — split.json과 {'같다' if ok else '다르다!'}")
+    v2 = sp.get("version", 1) >= 2
+    locked = sorted(sp["test_v1"] if v2 else sp["test"])
+    ok = again == locked
+    print(f"규칙으로 다시 계산한 시험 시즌: {', '.join(f'S{n}' for n in again)} — split.json {'test_v1' if v2 else 'test'}과 {'같다' if ok else '다르다!'}")
+    if v2:
+        if sp["test"]:
+            print(f"!! 판 2인데 test가 비어 있지 않다: {sp['test']}")
+            ok = False
+        print("판 2: 판 1 시험 6시즌은 3.7에서 봐 개발로 옮김. 새 시즌은 모두 미래 시험 (v2.future_protocol)")
     overlap = set(sp["test"]) & set(sp["dev_seen"])
     if overlap:
         print(f"!! 이미 본 시즌이 시험에 있다: {sorted(overlap)}")
         ok = False
-    fut = [f"S{n}:{future_role(n, sp['rule'])}" for n in range(sp["rule"]["future_from"], sp["rule"]["future_from"] + 12)]
+    fut = [f"S{n}:{role(n, sp)}" for n in range(sp["rule"]["future_from"], sp["rule"]["future_from"] + 12)]
     print("앞으로 들어올 시즌 몫 (규칙):", " ".join(fut))
     return 0 if ok else 1
 
