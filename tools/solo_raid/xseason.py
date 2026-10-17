@@ -18,6 +18,8 @@ import json
 import os
 import re
 
+REPO_DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "solo-raid")
+
 
 def _season_num(state):
     try:
@@ -33,6 +35,9 @@ def earlier(state):
     if n is None:
         return []
     base = os.path.dirname(os.path.dirname(os.path.abspath(state)))
+    if not any(d.startswith("S") and d[1:].isdigit() for d in os.listdir(base)):
+        # 검증의 T 절단 사본(작업 폴더)처럼 시즌 폴더 밖이면 레포의 data/solo-raid를 본다 (2026-10-17 분석 ④ — 전에는 사본에서 xseason이 꺼졌다)
+        base = REPO_DATA
     me = json.load(open(os.path.join(state, "season.json"), encoding="utf-8"))
     out = []
     for d in sorted(os.listdir(base)):
