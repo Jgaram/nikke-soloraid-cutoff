@@ -602,6 +602,9 @@ class Predictor:
         self.tau_scale0 = opts.get("tau_scale0", sd["tau_scale0"]["value"])
         if opts.get("no_season_diff"):
             self.tau_p = self.tau_shape = self.tau_ratio = 0.0
+        self.lvl = opts.get("_lvl")   # (ln 시즌 수준 평균, sd) — early_level (3.5e)
+        if self.lvl:
+            self.tau_p = self.lvl[1]
 
     def tr_central(self, fold=0):
         t = self.priors[fold]["transform"]
@@ -864,9 +867,11 @@ class Predictor:
                 xi = rng.gauss(0, 1)
             else:
                 trs = trc
-            m_season, Z, rnoise = 1.0, 0.0, {}
+            m_season, Z, rnoise = (math.exp(self.lvl[0]) if self.lvl else 1.0), 0.0, {}
             if not central and "iii" in comps:
-                if post:
+                if self.lvl:
+                    m_season = math.exp(self.lvl[0] + rng.gauss(0, self.lvl[1]))
+                elif post:
                     m_season = draw_post(post, rng)
                 elif self.tau_p > 0:
                     m_season = math.exp(rng.gauss(0, self.tau_p))
@@ -1044,6 +1049,46 @@ def contam_sensitivity(pr, rows, s, fracs, cen_curve, seed):
     return res
 
 
+EARLY_MIN_TRAIN = 5
+
+
+def early_level_prior(prior, state, T, H, cfg):
+    """초반 단면 침수로 시즌 수준을 정한다 (3.5e, 2026-10-17 분석 ④ — 기본 끔).
+    cfg = {"train": [[시즌, 그 시즌의 T 절단 state]...]}. 학습 시즌마다 같은 T까지 자료로 m̂(explore_early_level.early_m, 라벨+미상 줄, 정답 없음)를 내고
+    prior의 season_levels(m_s)와 ln m_s = α + β ln m̂로 맞춘다. 맞힐 시즌 m̂를 넣어 ln 수준의 평균·예측 sd(바닥 0.05)를 낸다.
+    학습 시즌이 EARLY_MIN_TRAIN 미만이거나 m̂가 없으면 None (τ_P 그대로)."""
+    import explore_early_level as EL
+    t = prior["transform"]
+    lv = t.get("season_levels") or {}
+    th, form = t["theta"], t["form"]
+
+    def mhat(st):
+        _, c0_, H_ = season_info(st)
+        r = EL.early_m(st, min(T, H_), th, form, H_, False, 0, 1)
+        return r.get("m")
+    pts = []
+    for name, st in cfg.get("train", []):
+        if name in lv:
+            m = mhat(st)
+            if m and m > 0:
+                pts.append((math.log(m), math.log(lv[name])))
+    m0 = mhat(state)
+    info = {"n_train": len(pts), "m_hat": m0, "mu": None, "sd": None}
+    if len(pts) < EARLY_MIN_TRAIN or not m0 or m0 <= 0:
+        return info
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    sxx = sum((x - mx) ** 2 for x in xs)
+    b = sum((x - mx) * (y - my) for x, y in pts) / sxx if sxx > 0 else 0.0
+    a = my - b * mx
+    n = len(pts)
+    s2 = sum((y - a - b * x) ** 2 for x, y in pts) / max(n - 2, 1)
+    x0 = math.log(m0)
+    sd = math.sqrt(s2 * (1 + 1 / n + ((x0 - mx) ** 2 / sxx if sxx > 0 else 0.0)))
+    info.update(mu=round(a + b * x0, 5), sd=round(max(sd, 0.05), 5), alpha=round(a, 4), beta=round(b, 4))
+    return info
+
+
 def predict(state, prior, T, opts, draws=2000, seed=1, comps_split=True, priors=None, rows=None):
     """predict.py의 본체. backtest.py도 이 함수를 쓴다. truth* 파일은 safe_open이 막는다."""
     season, c0, H = season_info(state, allow_fallback=opts.get("allow_cstart_fallback", False))
@@ -1055,6 +1100,11 @@ def predict(state, prior, T, opts, draws=2000, seed=1, comps_split=True, priors=
                              opts.get("server_mix"), opts.get("unknown"))
     else:
         cnt = collections.Counter({"moments": len(rows)})
+    lvl_info = None
+    if opts.get("early_level"):
+        lvl_info = early_level_prior(prior, state, T, H, opts["early_level"])
+        if lvl_info.get("mu") is not None:
+            opts = dict(opts, _lvl=(lvl_info["mu"], lvl_info["sd"]))
     pr = Predictor(prior, H, opts, priors)
     full = pr.run(rows, ("i", "ii", "iii"), draws, seed)
     comp = {}
@@ -1077,7 +1127,7 @@ def predict(state, prior, T, opts, draws=2000, seed=1, comps_split=True, priors=
                         "tau_scale0": pr.tau_scale0, "prior_season": prior["season"],
                         "prior_form": prior["transform"]["form"]},
            "counts": {k: v for k, v in cnt.items() if k != "unknown"}, "unknown": cnt.get("unknown"),
-           "p_update": None, "servers": {}}
+           "p_update": None, "early_level": lvl_info, "servers": {}}
     if full["post"]:
         p = full["post"]
         out["p_update"] = {"n_pairs": p["n_pairs"], "m_mean": math.exp(p["mean_lnm"]), "sd_lnm": p["sd_lnm"],

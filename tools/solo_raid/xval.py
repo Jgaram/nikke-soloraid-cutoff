@@ -258,6 +258,9 @@ def main():
                     "unknown": {"mode": "site", "servers": ["KR"], "borrow_state": borrow, "borrow_kind": "label",
                                 "mix_file": None, "no_gate": False, "fallback": "site"}}
             opts.update(pdopts)
+            if opts.get("early_level") is True:   # 3.5e: 학습 시즌의 같은 T 절단 사본 (정답 없음, 수준 보정용)
+                opts["early_level"] = {"train": [[s, BT.trunc_state(FM.state_of(s), T, os.path.join(work, "trunc", s), extra_of(FM.state_of(s)))]
+                                                 for s in train]}
             rws, cnt = PR.load_obs(st, Tc, H, c0, opts["grades"], opts["c_delay"], None, opts["unknown"])
             out = PR.predict(st, prior, Tc, opts, a.draws, a.seed, comps_split=False, rows=rws)
             out["unknown"] = cnt.get("unknown")
