@@ -84,6 +84,11 @@ def season_json(s):
     return jload(p) if os.path.exists(p) else {}
 
 
+# 관측 곡선 값을 잠시 숨기는 시즌 (2026-10-18 사용자 결정): S19는 실제 마지막 진행이 11-13 12:00 ~ 11-17 05:00인데
+# 11-08 ~ 11-15로 잡아 정답 점이 시즌 도중 화면에서 나왔다. 다시 수집·처리하면 지운다. 집계표 값은 그대로 싣는다.
+HOLD_CURVE = {"S19"}
+
+
 def past(viz_seasons, reg):
     """시즌마다 최종 컷과 출처 (지점은 CAND). 분석된 개발 시즌은 정답 표, 그 밖 개발 시즌은 seasons.json 한섭 3·10%와
     server_cutoffs.csv(서버 셋, 글섭 GLOBAL은 split이 GL로 바꿔 줌). 공개 결정 A(2026-10-17): 끝난 시즌은 몫과 상관없이 싣는다 (잠김 없음).
@@ -104,7 +109,7 @@ def past(viz_seasons, reg):
         if s in viz_seasons:
             key = viz_seasons[s]["key"]
             for sv in SERVERS:
-                c = {p: c for p, c in key.get(sv, {}).items() if p in CAND}
+                c = {p: c for p, c in key.get(sv, {}).items() if p in CAND and not (s in HOLD_CURVE and c.get("basis") == "curve")}
                 if c:
                     row["cuts"][sv] = {p: r2(v["v"]) for p, v in c.items()}
                     row["basis"][sv] = {p: v["basis"] for p, v in c.items()}
