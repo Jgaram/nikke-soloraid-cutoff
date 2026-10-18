@@ -275,16 +275,8 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
   </section>
   </div>
 
-  <!-- 「지난 시즌」 (#past): 끝난 시즌의 컷·예측 기록·되돌려 보기·침수 비교 (2026-10-18 사용자 결정) -->
+  <!-- 「지난 시즌」 (#past): 끝난 시즌의 예측 기록·되돌려 보기·침수 비교·컷 (2026-10-18 사용자 결정 — 커트라인은 같은 날 맨 아래로) -->
   <div id="tab-past" role="tabpanel" aria-labelledby="tabBtn-past" hidden>
-  <section class="card" id="pastCard">
-    <div class="ch"><h2>지난 시즌 커트라인 <span class="muted">(억 점)</span></h2><a class="how" href="#method-cut">설명</a></div>
-    <div class="legend" id="pastLegend"></div>
-    <div class="chart" id="pastChart"></div>
-    <div class="tbl-wrap"><table id="pastTable"></table></div>
-    <p class="short" id="pastNote"></p>
-  </section>
-
   <section class="card" id="recCard" hidden>
     <div class="hero"><img class="hero-img" id="recBoss" alt="" hidden>
       <div class="hero-txt"><div class="ch"><h2>실제로 낸 예측<span class="tag">독립 검증</span></h2><a class="how" href="#method-rec">설명</a></div>
@@ -321,6 +313,14 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
       <summary>표로 보기</summary>
       <div class="tbl-wrap"><table id="skTbl"></table></div>
     </details>
+  </section>
+
+  <section class="card" id="pastCard">
+    <div class="ch"><h2>지난 시즌 커트라인 <span class="muted">(억 점)</span></h2><a class="how" href="#method-cut">설명</a></div>
+    <div class="legend" id="pastLegend"></div>
+    <div class="chart" id="pastChart"></div>
+    <div class="tbl-wrap"><table id="pastTable"></table></div>
+    <p class="short" id="pastNote"></p>
   </section>
   </div>
 
@@ -419,9 +419,6 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
 
   <section class="card prose" id="m-past">
     <h2>지난 시즌 탭</h2>
-    <h3 id="m-cut">지난 시즌 커트라인</h3>
-    <p>표시 없는 값은 커뮤니티 집계표(공식 확정값 아님), *는 끝난 뒤 올라온 점수·%로 그린 곡선에서 읽은 값입니다.
-      1·3·10·30% 가운데 값이 있는 시즌이 둘 이상인 지점만 그립니다. 30%는 시즌마다 크게 오르내려 참고값입니다.</p>
     <h3 id="m-rec">실제로 낸 예측 · 독립 검증</h3>
     <p>진행 중에 6시간마다 낸 예측을 그대로 두고, 시즌이 끝난 뒤 실제 컷과 견줍니다. 시즌이 끝나기 전에 커밋된 예측만 채점하므로 결과를 보고 고칠 수 없습니다.
       끝난 시즌의 예측은 이벤트가 끝날 때(챌린지 끝 + 4일)까지 「이번 시즌」 탭에도 남습니다. 끝난 시즌이 생기면 이 카드가 보입니다.</p>
@@ -433,6 +430,9 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
       그때 %가 입력한 %의 ÷1.3~×1.3 안인 것만 골라, 배율(최종 ÷ 그때)은 그대로 두고 「그때 딱 입력한 %였다면」으로 옮겨 찍었습니다. 같은 사람의 같은 날 화면은 하나로 셉니다.
       점이 선보다 위에 많으면 그 시점에는 선보다 더 밀렸던 것입니다.</p>
     <p>진행 중 시즌은 컷 예측이 세기를 고친 뒤부터 「(추정)」을 붙여 함께 보이고, 세로 선이 80% 구간입니다. 선은 시작 6시간 뒤부터 그립니다(그 앞은 관측이 거의 없음).</p>
+    <h3 id="m-cut">지난 시즌 커트라인</h3>
+    <p>표시 없는 값은 커뮤니티 집계표(공식 확정값 아님), *는 끝난 뒤 올라온 점수·%로 그린 곡선에서 읽은 값입니다.
+      1·3·10·30% 가운데 값이 있는 시즌이 둘 이상인 지점만 그립니다. 30%는 시즌마다 크게 오르내려 참고값입니다.</p>
   </section>
 
   <section class="card prose" id="m-limit">

@@ -489,7 +489,7 @@ def analysis_html(vdata, data):
         tpl = f.read()
     seas = vdata["season_list"]
     m = data["analysis"]["live_method"]
-    head = ('<p class="muted"><a href="./">← 이번 시즌 (컷 예측 · 계산기)</a> · <a href="./#past">지난 시즌 (커트라인 · 되돌려 보기 · 침수 비교)</a>'
+    head = ('<p class="muted"><a href="./">← 이번 시즌 (컷 예측 · 계산기)</a> · <a href="./#past">지난 시즌 (되돌려 보기 · 침수 비교 · 커트라인)</a>'
             ' · <a href="./#method">방법 (작업 흐름 · 로직)</a></p>\n'
             '<p class="note">이 페이지는 예측 방법을 고르기 전의 분석 화면입니다. '
             f'아래 ①은 끝난 시즌 {len(seas)}개의 평균 「% 변환」이고, ②의 정확도는 <b>여러 시즌 prior</b>(맞힐 시즌 하나만 빼고 나머지 전부)로 잰 것입니다. '
