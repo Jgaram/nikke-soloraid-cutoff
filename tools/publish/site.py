@@ -2,7 +2,9 @@
 
 python3 -I tools/publish/site.py --out DIR [--prev 이전_data.json]     # DIR/index.html · DIR/analysis.html · DIR/data.json
 
-- index.html: ① 최종 1·3·10% 컷 예측(진행 중 시즌) ② 지금 몇 %면 최종 몇 % 계산기 ③ 지난 시즌 컷.
+- index.html: 탭 둘 (2026-10-18 사용자 결정 — 이번 시즌 것과 지난 시즌 것을 나눔).
+  「이번 시즌」 = 최종 1·3·10% 컷 예측 · 계산기(최종 점수 ↔ 최종 %, 지금 % ↔ 최종 %).
+  「지난 시즌」(#past) = 지난 시즌 커트라인 · 실제로 낸 예측(끝난 시즌 채점) · 되돌려 보기 · 시즌별 침수 비교(실제 관측 점).
   tools/publish/site_template.html에 data.json을 넣은 것.
 - analysis.html: tools/solo_raid/viz.py와 같은 화면(예측 방법·정확도). 공개용으로 위에 안내를 더하고 비공개 경로·수집 상태를 뺀다.
 
@@ -197,6 +199,8 @@ def live(reg):
             sj = season_json(s)
             c0 = dt.datetime.strptime(sj["c_start"][:16], "%Y-%m-%d %H:%M")
             end = dt.datetime.strptime(sj["end"][:16], "%Y-%m-%d %H:%M")
+            # 이벤트 종료(e_end, 챌린지 끝 +4일). 끝난 시즌 예측은 이때까지 「이번 시즌」 탭에 남는다 (2026-10-18 사용자 결정)
+            e_end = sj.get("e_end") or (end + dt.timedelta(days=4)).strftime("%Y-%m-%d %H:%M")
         except (KeyError, ValueError, TypeError, OSError, json.JSONDecodeError) as e:
             warn(f"{s}/state/season.json을 읽지 못해 진행 중 예측에서 뺐다 ({type(e).__name__}: {e})")
             continue
@@ -219,7 +223,7 @@ def live(reg):
                 warn(f"{s}/predict/score.json을 읽지 못해 실제 컷 비교를 뺐다 ({type(e).__name__}: {e})")
                 truth = {}
         out.append({"season": s, "boss": sj.get("boss") or (reg.get(s) or {}).get("boss"),
-                    "c_start": iso(sj["c_start"]), "end": iso(sj["end"]), "H": round((end - c0).total_seconds() / 3600),
+                    "c_start": iso(sj["c_start"]), "end": iso(sj["end"]), "e_end": iso(e_end), "H": round((end - c0).total_seconds() / 3600),
                     "preds": preds, "truth": truth})
     return out
 
@@ -282,7 +286,7 @@ def conv_row(PR, tr, sv, h, H, m_s, s_lvl):
 def conv(vdata, src, lat_H=None):
     """계산기용 % 변환, 0.5시간 간격. 행 = [시작 후 시간, log10(최종 % ÷ 지금 %), 80% 구간용 sd].
     곡선은 컷 예측과 같은 고정 모델(최근 5시즌 main prior × 이번 시즌 침수 세기, 2026-10-18 사용자 결정 — 전에는 viz의 23시즌 평균).
-    지난 시즌 겹쳐 보기의 「그 시즌처럼」 선은 시즌마다의 곡선이라 23시즌 곡선(dev) × 그 시즌 세기(prior_dev season_levels)로 그린다."""
+    이번 시즌 것만 싣는다. 지난 시즌 관측 점과 시즌마다의 곡선(23시즌 곡선 × 그 시즌 세기)은 「지난 시즌」 탭의 침수 비교(sink)로 옮겼다 (2026-10-18 사용자 결정)."""
     import predict as PR
     cv = vdata["conv"]
     seas = vdata["season_list"]   # 관측 점·시즌 세기는 viz 정답 표의 끝난 시즌 모두
@@ -303,20 +307,18 @@ def conv(vdata, src, lat_H=None):
         rowsF = {sv: [[r[0], r[1], r[2]] for i, r in enumerate(cv["srv"][sv]) if i % 2 == 0] for sv in SERVERS}
         at_base = lambda sv, h: min(cv["srv"][sv], key=lambda r: abs(r[0] - h))[1:3]  # noqa: E731
         m_src = cv["m_src"]
-    # 관측 점 (지난 시즌 겹쳐 보기, 2026-10-16 사용자 요청): 최종 1·3·10·30% 근처(÷1.3~×1.3)로 끝난 칸 — [시즌, 시작 후 시간, 그때 %, 최종 %], 숫자만
-    # 지점마다 곡선 점검 (CONV_RULE): 그 곡선을 맞춘 학습 시즌의 관측 칸을 이번 시즌 세기 없는 곡선과 견준다 (표본 안 점검)
-    obs = {sv: [] for sv in SERVERS}
+    # 지점마다 곡선 점검 (CONV_RULE): 최종 1·3·10·30% 근처(÷1.3~×1.3)로 끝난 칸 중 그 곡선을 맞춘 학습 시즌의 것을
+    # 이번 시즌 세기 없는 곡선과 견준다 (표본 안 점검)
     res = {(sv, p): [] for sv in SERVERS for p in CAND}
     for s in seas:
+        if s not in train:
+            continue
         for u in cv["units"][s]:
-            if u["sv"] not in obs or u["P"] is None:
+            if u["sv"] not in SERVERS or u["P"] is None:
                 continue
             f = u["x"] * 10 ** u["P"]
             hit = [p for p in CAND if float(p) / near <= f <= float(p) * near]
             if not hit:
-                continue
-            obs[u["sv"]].append([s, round(u["h"], 1), round(u["x"], 3), round(f, 3)])
-            if s not in train:
                 continue
             P, sd = at_base(u["sv"], u["h"])
             for p in hit:
@@ -336,21 +338,27 @@ def conv(vdata, src, lat_H=None):
         live = {**src["pred"], "level": round(math.exp(lv["mu"]), 4) if lv else None, "sd": round(lv["sd"], 4) if lv else None,
                 "persons": lv.get("persons") if lv else None, "tau": round(tau, 4)}
     return {"H": H, "seasons": seas, "rule": CONV_RULE, "check": check, "check_seasons": train, "base": base, "live": live,
-            "borrow": {sv: (m_src.get(sv) or "").startswith("borrow") for sv in SERVERS},
-            "levels": {s: cv["levels"][s] for s in seas if s in cv["levels"]},
-            "start": {s: iso(vdata["seasons"][s]["c_start"]) for s in seas},
-            "obs": obs, "srv": rowsF,
-            "dev": {sv: [[r[0], r[1]] for i, r in enumerate(cv["srv"][sv]) if i % 2 == 0] for sv in SERVERS}}
+            "borrow": {sv: (m_src.get(sv) or "").startswith("borrow") for sv in SERVERS}, "srv": rowsF}
 
 
 def sink(vdata, cvd, reg, src):
     """시즌별 침수 세기 비교 (2026-10-18 사용자 요청). 세기 = 여러 시즌 % 변환에서 그 시즌의 수준 배수(prior_dev season_levels —
     모든 시즌이 같은 모양이고 log 배율이 이만큼 크거나 작다고 본 값, 1 = 23시즌 평균). 이번 시즌은 컷 예측이 고친 세기가 있을 때만,
-    같은 잣대(23시즌 곡선)로 옮겨 싣는다: 한섭 12시간~끝 곡선 비 log10 P_F·m ÷ P_dev의 기하 평균."""
+    같은 잣대(23시즌 곡선)로 옮겨 싣는다: 한섭 12시간~끝 곡선 비 log10 P_F·m ÷ P_dev의 기하 평균.
+    계산기에 있던 지난 시즌 겹쳐 보기를 여기로 합쳤다 (2026-10-18 사용자 결정): dev = 23시즌 곡선(0.5시간 간격 [시간, log10 배율]),
+    obs = 끝난 시즌 진행 중 관측 칸 모두 [시즌, 시작 후 시간, 그때 %, 최종 %] (숫자만 — 화면이 「지금 X%」 근처만 골라 찍는다)."""
     import predict as PR
+    cv = vdata["conv"]
     pd = jload(os.path.join(D, "analysis", "prior_dev.json"))
     se = pd["transform"].get("season_level_se_ln", {})
-    rows = [{"season": s, "boss": (reg.get(s) or {}).get("boss"), "lev": v, "se": se.get(s)} for s, v in cvd["levels"].items()]
+    seas = vdata["season_list"]
+    levels = {s: cv["levels"][s] for s in seas if s in cv["levels"]}
+    rows = [{"season": s, "boss": (reg.get(s) or {}).get("boss"), "lev": v, "se": se.get(s)} for s, v in levels.items()]
+    obs = {sv: [] for sv in SERVERS}
+    for s in seas:
+        for u in cv["units"][s]:
+            if u["sv"] in obs and u["P"] is not None:
+                obs[u["sv"]].append([s, round(u["h"], 1), round(u["x"], 3), round(u["x"] * 10 ** u["P"], 3)])
     live = None
     if src and src["level"] and src["pred"]:
         tr, trd = src["prior"]["transform"], pd["transform"]
@@ -360,7 +368,10 @@ def sink(vdata, cvd, reg, src):
         live = {"season": src["pred"]["season"], "T": src["pred"]["T"], "T_kst": src["pred"].get("T_kst"),
                 "lev": round(math.exp(sum(L) / len(L)), 4), "sd": round(src["level"]["sd"], 4), "persons": src["level"].get("persons")}
     ps = (pd.get("season") or "").split("+")
-    return {"seasons": rows, "live": live, "prior": f"{ps[0]}~{ps[-1]} ({len(ps)}시즌)" if len(ps) > 1 else pd.get("season")}
+    return {"seasons": rows, "live": live, "prior": f"{ps[0]}~{ps[-1]} ({len(ps)}시즌)" if len(ps) > 1 else pd.get("season"),
+            "dev": {sv: [[r[0], r[1]] for i, r in enumerate(cv["srv"][sv]) if i % 2 == 0] for sv in SERVERS},
+            "borrow": {sv: (cv["m_src"].get(sv) or "").startswith("borrow") for sv in SERVERS},
+            "start": {s: iso(vdata["seasons"][s]["c_start"]) for s in seas}, "obs": obs}
 
 
 def back(reg):
@@ -374,7 +385,7 @@ def back(reg):
                    for s, x in sorted(b["seasons"].items(), key=lambda kv: split.snum(kv[0]))]
         return {"model": b.get("model"), "T": b["T"], "seasons": seasons}
     except (KeyError, ValueError, TypeError, OSError) as e:
-        warn(f"analysis/backtest_F.json을 읽지 못해 「지난 시즌 살펴보기」의 되돌려 보기를 뺐다 ({type(e).__name__}: {e})")
+        warn(f"analysis/backtest_F.json을 읽지 못해 「지난 시즌」 탭의 되돌려 보기를 뺐다 ({type(e).__name__}: {e})")
         return None
 
 
@@ -446,11 +457,11 @@ def analysis_html(vdata, data):
         tpl = f.read()
     seas = vdata["season_list"]
     m = data["analysis"]["live_method"]
-    head = ('<p class="muted"><a href="./">← 첫 화면 (컷 예측 · 지금 몇 %면 최종 몇 % · 지난 시즌 컷)</a> · <a href="./#past">지난 시즌 살펴보기</a></p>\n'
+    head = ('<p class="muted"><a href="./">← 이번 시즌 (컷 예측 · 계산기)</a> · <a href="./#past">지난 시즌 (커트라인 · 되돌려 보기 · 침수 비교)</a></p>\n'
             '<p class="note">이 페이지는 예측 방법을 고르기 전의 분석 화면입니다. '
             f'아래 ①은 끝난 시즌 {len(seas)}개의 평균 「% 변환」이고, ②의 정확도는 <b>여러 시즌 prior</b>(맞힐 시즌 하나만 빼고 나머지 전부)로 잰 것입니다. '
-            f'첫 화면의 컷 예측과 「지금 몇 %면 최종 몇 %」 계산기는 <b>{m}</b>로 냅니다 (지난 시즌 검증으로 고른 방법 — 아래 ①·②와는 설정이 다릅니다). '
-            '이 방법으로 지난 시즌을 그 앞 시즌 자료만으로 되돌려 본 결과는 첫 화면의 「지난 시즌 살펴보기」 탭에 있습니다. '
+            f'첫 화면 「이번 시즌」 탭의 컷 예측과 계산기는 <b>{m}</b>로 냅니다 (지난 시즌 검증으로 고른 방법 — 아래 ①·②와는 설정이 다릅니다). '
+            '이 방법으로 지난 시즌을 그 앞 시즌 자료만으로 되돌려 본 결과는 첫 화면의 「지난 시즌」 탭에 있습니다. '
             '독립 정확도는 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다.</p>\n')
     sub = "개발 시즌 {}~{} ({}개) · {} KST 기준".format(seas[0], seas[-1], len(seas), data["asof"])
     stamp = "정답 표는 끝난 시즌을 모두 씁니다 — 이 시즌들로 방법을 고르고 다듬었으므로 개발 검증입니다. 독립 검증은 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다."
