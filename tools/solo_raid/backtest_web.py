@@ -1,6 +1,6 @@
 """지난 시즌을 고정 모델 F로 되돌려 본 결과를 웹용으로 줄인다 (2026-10-18 사용자 요청 — 「S35를 S34 이하 자료만으로 예측했다면」, 모델 0, 요청 0).
 
-python3 -I tools/solo_raid/backtest_web.py --main MAIN.json --ref REF.json [--out data/solo-raid/analysis/backtest_F.json]
+python3 -I tools/solo_raid/backtest_web.py --main MAIN.json --ref REF.json [--out data/solo-raid/analysis/backtest_F.json] [--m1-known-diff WHY]
 
 입력은 xval 결과 둘 (레포에 커밋하지 않는 큰 파일 — 세션 임시에 둔다. 출력에 sha1을 남긴다):
 - MAIN: F의 1·3% 설정 (docs/solo-raid-analysis.md 「4.5」 근거 실행과 같고 T만 6시간마다)
@@ -63,6 +63,8 @@ def main():
     ap.add_argument("--main", required=True)
     ap.add_argument("--ref", required=True)
     ap.add_argument("--out", default=os.path.join(D, "analysis", "backtest_F.json"))
+    ap.add_argument("--m1-known-diff", metavar="WHY", help="운영 모델 파일과 M1 표가 다른 까닭을 알 때 (예: 그 모델을 고정한 뒤 앞 시즌 자료를 고침). "
+                    "멈추지 않고 대조 결과에 까닭을 적는다. 운영 모델 파일은 바꾸지 않는다")
     a = ap.parse_args()
     xm, xr = jload(a.main), jload(a.ref)
     rm = [r for r in xm["rows"] if r.get("scheme") == "recent5"]
@@ -85,9 +87,9 @@ def main():
             continue
         mine = m1_for([r for r in rm if r["season"] in md["m1"]["source"]["seasons"]], md["season"])
         same = all(abs(mine.get(k, 1.0) - v) < 1e-3 for k, v in md["m1"]["T"].items())
-        checks.append({"model": mp, "same": same})
+        checks.append({"model": mp, "same": same, **({"why": a.m1_known_diff} if not same and a.m1_known_diff else {})})
         print(f"M1 대조 {mp}: {'같음' if same else '다름 — ' + json.dumps(mine)}")
-        if not same:
+        if not same and not a.m1_known_diff:
             raise SystemExit("M1 표가 운영 모델 파일과 다르다 — 입력 xval 설정을 확인한다")
 
     out_seasons = {}
