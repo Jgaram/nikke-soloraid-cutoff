@@ -126,8 +126,12 @@ sup.cv { color: var(--text-muted); font-size: 11px; margin-left: 1px; }
 @media (max-width: 600px) { .tl-days .wd { display: none; } }
 .calc .when { font-weight: 650; font-variant-numeric: tabular-nums; }
 /* 계산기 세 칸 한 줄 (2026-10-18 사용자 결정 — 점수 묶음과 지금 % 묶음을 나누지 않음). 좁으면 한 줄에 하나 */
-.calcgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-@media (max-width: 860px) { .calcgrid { grid-template-columns: 1fr; } }
+.calcgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; }
+/* ②·③은 결과 시점을 함께 쓰므로 한 묶음 상자에, 결과 시점 줄은 그 묶음 맨 위에 (2026-10-18 사용자 요청) */
+.rtgroup { border: 1px solid var(--border); border-radius: 12px; background: var(--band); padding: 10px 12px 12px; }
+.rtpair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 860px) { .calcgrid, .rtpair { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .rtgroup { padding: 8px 8px 8px; } .calcbox .q { white-space: nowrap; } .calcbox .q input[type=number] { width: 72px; } }
 .calcbox { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
 .calcbox .q { line-height: 2.2; }
 .calcbox .res { margin-top: 6px; }
@@ -139,7 +143,7 @@ sup.cv { color: var(--text-muted); font-size: 11px; margin-left: 1px; }
 .calcbox input[type=number] { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
 .calcbox .res.weak .big { color: var(--text-muted); }
 /* ②·③ 결과 시점 (2026-10-18 사용자 요청 — 기본은 최종, 원하면 시점을 직접 입력) */
-.rt { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 14px; margin: 12px 0 10px; }
+.rt { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 14px; margin: 0 0 10px; }
 .rt .rt-lab { font-weight: 600; }
 .rt input[type=number] { width: 58px; text-align: right; font-variant-numeric: tabular-nums; }
 .rt input[type=time] { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; }
@@ -260,25 +264,30 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
         </div>
       </div>
       <!-- 최종 % → 지금 %·최종 점수 / 지금 % → 최종 % / 최종 점수 → 최종 %. 시점은 지금 %에만, 점수는 최근 컷 예측 곡선 (2026-10-18 사용자 결정) -->
-      <!-- ②·③의 결과 시점: 기본 최종, 「시점 입력」이면 그 시점의 % (2026-10-18 사용자 요청 — 드롭다운 말고 직접 입력) -->
-      <div class="rt">
-        <span class="rt-lab">②·③ 결과 시점</span>
-        <span class="seg sm" id="rtMode"><button data-v="final" aria-pressed="true">최종</button><button data-v="at" aria-pressed="false">시점 입력</button></span>
-        <span class="rt-in" id="rtIn" hidden>
-          <span><input type="number" id="rtDay" min="1" max="5" step="1" value="3" aria-label="결과 시점 일차">일차</span>
-          <input type="time" id="rtClock" step="1800" value="05:00" aria-label="결과 시점 시각">
-          <button class="btn" id="rtSame">위 시점과 같게</button>
-          <span class="muted" id="rtLab"></span>
-        </span>
-      </div>
+
       <div class="calcgrid">
         <div class="calcbox"><div class="q">① 최종 <input type="number" id="cTgt" value="3" min="0.01" max="100" step="0.5">% 안에 들려면</div>
           <div class="res"><span class="lab">→ 지금</span><span class="big" id="oNow"></span><span class="rng" id="oNowR"></span></div>
           <div class="res kpart"><span class="lab">→ 최종 점수</span><span class="big" id="kS"></span><span class="rng" id="kSR"></span></div></div>
-        <div class="calcbox"><div class="q">② 지금 <input type="number" id="cNow" value="1" min="0.01" max="100" step="0.1">% 이면</div>
-          <div class="res"><span class="lab" id="oFinalL">→ 최종</span><span class="big" id="oFinal"></span><span class="rng" id="oFinalR"></span></div></div>
-        <div class="calcbox"><div class="q">③ <span id="kScPre">최종 점수가</span> <input type="number" id="kSc" min="1" step="0.1">억이면</div>
-          <div class="res kpart"><span class="lab" id="kQL">→ 최종</span><span class="big" id="kQ"></span><span class="rng" id="kQR"></span></div></div>
+        <div class="rtgroup">
+          <!-- ②·③의 결과 시점: 기본 최종, 「시점 입력」이면 그 시점의 % (2026-10-18 사용자 요청 — 드롭다운 말고 직접 입력) -->
+          <div class="rt">
+            <span class="rt-lab">결과 시점</span>
+            <span class="seg sm" id="rtMode"><button data-v="final" aria-pressed="true">최종</button><button data-v="at" aria-pressed="false">시점 입력</button></span>
+            <span class="rt-in" id="rtIn" hidden>
+              <span><input type="number" id="rtDay" min="1" max="5" step="1" value="3" aria-label="결과 시점 일차">일차</span>
+              <input type="time" id="rtClock" step="1800" value="05:00" aria-label="결과 시점 시각">
+              <button class="btn" id="rtSame">위 시점과 같게</button>
+              <span class="muted" id="rtLab"></span>
+            </span>
+          </div>
+          <div class="rtpair">
+            <div class="calcbox"><div class="q">② 지금 <input type="number" id="cNow" value="1" min="0.01" max="100" step="0.1">% 이면</div>
+              <div class="res"><span class="lab" id="oFinalL">→ 최종</span><span class="big" id="oFinal"></span><span class="rng" id="oFinalR"></span></div></div>
+            <div class="calcbox"><div class="q">③ <span id="kScPre">최종 점수가</span> <input type="number" id="kSc" min="1" step="0.1">억이면</div>
+              <div class="res kpart"><span class="lab" id="kQL">→ 최종</span><span class="big" id="kQ"></span><span class="rng" id="kQR"></span></div></div>
+          </div>
+        </div>
       </div>
       <p class="muted" id="cNote" style="margin-top:10px"></p>
     </div>
@@ -754,7 +763,7 @@ function renderK() {
     $("kSR").textContent = `80% 구간 ${fmt(kAtQ(C, q, 2))} ~ ${fmt(kAtQ(C, q, 3))}억${ref(kNear(C, q))}`;
   }
   const s = parseFloat($("kSc").value), R = rtPoint();
-  $("kScPre").textContent = R ? "그 시점 점수가" : "최종 점수가";
+  $("kScPre").textContent = R ? "그때 점수가" : "최종 점수가";
   $("kQL").textContent = R ? `→ ${whenLab(R.h)}` : "→ 최종";
   if (!(s > 0)) { $("kQ").textContent = "–"; $("kQR").textContent = "점수를 억 단위로 넣어 주세요."; return; }
   const m = kQAt(C, s, 1), best = kQAt(C, s, 2), worst = kQAt(C, s, 3);
