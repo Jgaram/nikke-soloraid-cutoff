@@ -512,6 +512,11 @@ API 기본 주소: `https://api.blablalink.com/api/ugc/direct/standalonesite/Dyn
 - `www.gamemeca.com`은 robots.txt `Crawl-delay: 30`. 30초 간격을 지킨다 (`trees.gamemeca.com`은 지연 요구 없음).
 - note.com(일본 블로그)·`wiki3.jp/nikke`(JP 위키)·티스토리·다모앙은 `Claude-User`로 받아졌다. 연결 끊김은 재시도로 풀렸다.
 - WebSearch 도구는 reddit.com·naver.com(블로그·카페) 도메인을 거부했다.
+- 2026-10-18 [참가자 수 조사](solo-raid-cutoff.md#참가자-수인구수-출처-2026-10-18-조사)에서 더 확인한 것 (모두 `Claude-User`):
+  - 받아진 곳: `ikken-border.jp`(robots는 `/admin`·`/api/`만 막음, 정적 HTML에 값), `search.yahoo.co.jp/realtime`(X 글을 볼 수 있는 길, `__NEXT_DATA__` JSON에 글·시각·이미지 주소, 색인은 최근 몇 주), ameblo.jp, Game8·GameWith·gamerch.
+  - 막힌 곳 (우회하지 않음): reddit.com(robots 전체 차단), `forum.gamer.com.tw` 바하무트(robots.txt부터 403), wikiwiki.jp·nikke.gg·dotgg.gg(403), altema.jp(robots.txt부터 403), Fandom 위키(402), 디스코드(로그인).
+  - enikk.app(서버별 상위 50위 기록)은 HTML은 허용이지만 값이 JS로 그려지고, 데이터 API `/api/graphql`은 robots가 막는다.
+  - 블라블라링크 ShiftyPad(플레이어 기록)는 남의 프로필도 로그인과 게임 계정 연동이 있어야 보인다. 공개 JS 번들의 경로 이름만 봤다.
 
 ## 재검토 (2026-10-07)
 
