@@ -2,9 +2,10 @@
 
 python3 -I tools/publish/site.py --out DIR [--prev 이전_data.json]     # DIR/index.html · DIR/analysis.html · DIR/data.json
 
-- index.html: 탭 둘 (2026-10-18 사용자 결정 — 이번 시즌 것과 지난 시즌 것을 나눔).
+- index.html: 탭 셋 (2026-10-18 사용자 결정 — 이번 시즌 것과 지난 시즌 것을 나누고, 긴 설명은 「방법」 탭에 모음).
   「이번 시즌」 = 최종 1·3·10% 컷 예측 · 계산기(최종 점수 ↔ 최종 %, 지금 % ↔ 최종 %).
   「지난 시즌」(#past) = 지난 시즌 커트라인 · 실제로 낸 예측(끝난 시즌 채점) · 되돌려 보기 · 시즌별 침수 비교(실제 관측 점).
+  「방법」(#method) = 작업 흐름(단계별 코드 위치·공개 범위) · 컷 예측 · 계산기 · 지난 시즌 탭 · 검증과 한계. 데이터 탭에는 꼬리표만 둔다.
   tools/publish/site_template.html에 data.json을 넣은 것.
 - analysis.html: tools/solo_raid/viz.py와 같은 화면(예측 방법·정확도). 공개용으로 위에 안내를 더하고 비공개 경로·수집 상태를 뺀다.
 
@@ -139,9 +140,9 @@ def method_label(o):
     p = ((o.get("run") or {}).get("prior_path") or "").replace("\\", "/")
     m = re.search(r"/(S\d+)/state/prior\.json$", p)
     if m:
-        return f"{m.group(1)} 한 시즌 prior"
+        return f"{m.group(1)} 한 시즌 곡선"
     if p.endswith("prior_dev.json"):
-        return "여러 시즌 prior"
+        return "여러 시즌 곡선"
     return "예측 도구 기본값"
 
 
@@ -457,7 +458,8 @@ def analysis_html(vdata, data):
         tpl = f.read()
     seas = vdata["season_list"]
     m = data["analysis"]["live_method"]
-    head = ('<p class="muted"><a href="./">← 이번 시즌 (컷 예측 · 계산기)</a> · <a href="./#past">지난 시즌 (커트라인 · 되돌려 보기 · 침수 비교)</a></p>\n'
+    head = ('<p class="muted"><a href="./">← 이번 시즌 (컷 예측 · 계산기)</a> · <a href="./#past">지난 시즌 (커트라인 · 되돌려 보기 · 침수 비교)</a>'
+            ' · <a href="./#method">방법 (작업 흐름 · 로직)</a></p>\n'
             '<p class="note">이 페이지는 예측 방법을 고르기 전의 분석 화면입니다. '
             f'아래 ①은 끝난 시즌 {len(seas)}개의 평균 「% 변환」이고, ②의 정확도는 <b>여러 시즌 prior</b>(맞힐 시즌 하나만 빼고 나머지 전부)로 잰 것입니다. '
             f'첫 화면 「이번 시즌」 탭의 컷 예측과 계산기는 <b>{m}</b>로 냅니다 (지난 시즌 검증으로 고른 방법 — 아래 ①·②와는 설정이 다릅니다). '

@@ -149,6 +149,32 @@ table.sum tfoot td { color: var(--text-secondary); font-size: 12.5px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; background: var(--surface-1);
   color: var(--text-primary); font: inherit; font-size: 13px; cursor: pointer; }
 .chip .x { color: var(--text-muted); }
+[hidden] { display: none !important; }
+/* 카드 머리: 제목 + 오른쪽 「설명」 링크(방법 탭으로) — 2026-10-18 사용자 결정, 화면의 긴 설명은 방법 탭으로 옮김 */
+.ch { display: flex; align-items: baseline; justify-content: space-between; gap: 2px 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.ch h2 { margin: 0; }
+a.how { font-size: 13px; color: var(--text-muted); white-space: nowrap; }
+a.how:hover { color: var(--t3); }
+.tag { display: inline-block; font-size: 12px; font-weight: 500; line-height: 1.5; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); vertical-align: 3px; margin-left: 6px; }
+.short { color: var(--text-muted); font-size: 13px; margin: 6px 0; }
+/* 방법 탭 */
+.toc { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 14px 0 0; }
+.toc a { font-size: 13.5px; text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; color: var(--text-primary); background: var(--surface-1); }
+.prose > p, .prose > ul { max-width: 76ch; }
+.prose h3 { color: var(--text-primary); font-size: 15.5px; margin: 20px 0 6px; scroll-margin-top: 12px; }
+.prose p, .prose li { font-size: 14.5px; }
+.card { scroll-margin-top: 12px; }
+code { font-size: 12.5px; background: var(--band); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+.flow { list-style: none; padding: 0; margin: 14px 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; counter-reset: st; }
+.flow li { position: relative; margin: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-0); padding: 12px; font-size: 13.5px; counter-increment: st; }
+.flow li b { display: block; font-size: 15px; margin-bottom: 4px; }
+.flow li b::before { content: counter(st) " "; color: var(--text-muted); font-weight: 600; margin-right: 2px; }
+.flow li + li::before { content: "→"; position: absolute; left: -7px; top: 50%; transform: translate(-50%, -50%); color: var(--text-muted); font-size: 14px; line-height: 1; }
+.flow .who { display: inline-block; font-size: 11.5px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; margin-bottom: 6px; }
+.flow .who.ai { color: var(--t3); border-color: var(--t3); }
+.flow .code { display: block; margin-top: 8px; font-size: 12.5px; color: var(--text-muted); }
+table.m th, table.m td { white-space: normal; text-align: left; vertical-align: top; }
+table.m td.n { text-align: right; white-space: nowrap; }
 ul { margin: 6px 0; padding-left: 20px; }
 li { margin: 3px 0; }
 footer { color: var(--text-muted); font-size: 13px; margin-top: 28px; }
@@ -163,6 +189,10 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
   .seg.sm button { padding: 5px 7px; font-size: 12.5px; }
   .tabs button { padding: 9px 9px 8px; font-size: 14.5px; }
 }
+@media (max-width: 860px) {
+  .flow { grid-template-columns: 1fr; }
+  .flow li + li::before { content: "↓"; left: 50%; top: -7px; }
+}
 </style>
 </head>
 <body>
@@ -172,10 +202,10 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
   <nav class="tabs" role="tablist" aria-label="화면">
     <button role="tab" id="tabBtn-now" data-tab="now" aria-controls="tab-now">이번 시즌</button>
     <button role="tab" id="tabBtn-past" data-tab="past" aria-controls="tab-past">지난 시즌</button>
-    <a href="analysis.html">분석 페이지</a>
+    <button role="tab" id="tabBtn-method" data-tab="method" aria-controls="tab-method">방법</button>
   </nav>
 
-  <div class="srvbar">
+  <div class="srvbar" id="srvbar">
     <span class="srvlab">서버</span>
     <span class="seg" id="selSrv"></span>
   </div>
@@ -183,18 +213,16 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
   <!-- 「이번 시즌」: 진행 중(끝났으면 이벤트 종료까지) 시즌의 컷 예측과 계산기 (2026-10-18 사용자 결정) -->
   <div id="tab-now" role="tabpanel" aria-labelledby="tabBtn-now">
   <section class="card" id="liveCard">
-    <h2 id="liveTitle">최종 컷 예측</h2>
-    <p class="muted">챌린지가 진행되는 동안 커뮤니티에 올라온 순위·점수를 모아, 시즌이 끝났을 때의 1·3·10% 컷 점수를 예측합니다. 단위는 억 점, 구간은 80% 예측 구간입니다. 아직 검증 중인 예측이며, 같은 방법으로 지난 시즌을 되돌려 본 정확도는 <a href="#past">지난 시즌</a> 탭에 있습니다.</p>
+    <div class="ch"><h2 id="liveTitle">최종 컷 예측</h2><a class="how" href="#method-pred">설명</a></div>
     <div class="controls" id="liveCtl"></div>
     <div id="liveBody"></div>
   </section>
 
   <section class="card" id="calcCard">
-    <h2>계산기</h2>
+    <div class="ch"><h2>계산기</h2><a class="how" href="#method-calc">설명</a></div>
     <h3 class="sec">최종 점수 ↔ 최종 %</h3>
     <div id="kBody"></div>
     <h3 class="sec split">지금 % ↔ 최종 %</h3>
-    <p class="muted" id="calcIntro"></p>
     <div class="calc">
       <div class="tl">
         <div class="tl-head"><span>시점</span> <span class="when" id="cWhen"></span>
@@ -220,16 +248,9 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
     <h3 id="cvH">최종 컷이 되는 「지금 %」</h3>
     <div class="legend" id="lgA"></div>
     <div class="chart" id="cvA"></div>
-    <p class="muted">선 = 중앙값, 띠 = 80% 구간(이번 시즌 침수 세기를 모를수록 넓고, 관측으로 세기를 고치면 좁아집니다). 시작 3시간 안은 관측이 없어 그리지 않았습니다. 세로축은 로그 눈금이고 위로 갈수록 상위입니다.</p>
-    <p class="muted" id="cvChk"></p>
-    <details>
-      <summary>선을 그리는 기준</summary>
-      <p class="muted" id="cvRule"></p>
-    </details>
     <details>
       <summary>시점별 표 보기</summary>
       <div class="tbl-wrap"><table id="tvT"></table></div>
-      <p class="muted">값 = 그 시각에 이 % 안이면 최종 그 % 안에 든다는 중앙값, 작은 글씨 = 80% 구간.</p>
     </details>
   </section>
   </div>
@@ -237,50 +258,44 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
   <!-- 「지난 시즌」 (#past): 끝난 시즌의 컷·예측 기록·되돌려 보기·침수 비교 (2026-10-18 사용자 결정) -->
   <div id="tab-past" role="tabpanel" aria-labelledby="tabBtn-past" hidden>
   <section class="card" id="pastCard">
-    <h2>지난 시즌 커트라인</h2>
-    <p class="muted">시즌이 끝났을 때의 컷 (억 점). 1·3·10·30% 중 값이 있는 시즌이 둘 이상인 지점만 보여 줍니다.</p>
+    <div class="ch"><h2>지난 시즌 커트라인 <span class="muted">(억 점)</span></h2><a class="how" href="#method-cut">설명</a></div>
     <div class="legend" id="pastLegend"></div>
     <div class="chart" id="pastChart"></div>
     <div class="tbl-wrap"><table id="pastTable"></table></div>
-    <p class="muted" id="pastNote"></p>
+    <p class="short" id="pastNote"></p>
   </section>
 
   <section class="card" id="recCard" hidden>
-    <h2>실제로 낸 예측</h2>
-    <p class="muted">시즌이 진행되는 동안 6시간마다 실제로 낸 컷 예측을 그대로 두고, 끝난 뒤 실제 컷과 견줍니다. 시즌이 끝나기 전에 낸 예측만 채점하므로, 아래 되돌려 보기와 달리 독립 검증입니다.</p>
+    <div class="ch"><h2>실제로 낸 예측<span class="tag">독립 검증</span></h2><a class="how" href="#method-rec">설명</a></div>
     <div class="controls" id="recCtl"></div>
     <div id="recBody"></div>
   </section>
 
   <section class="card" id="backCard">
-    <h2>지난 시즌 되돌려 보기</h2>
-    <p class="muted" id="backIntro"></p>
+    <div class="ch"><h2>지난 시즌 되돌려 보기<span class="tag">개발 검증</span></h2><a class="how" href="#method-back">설명</a></div>
     <div class="controls"><label>시즌 <select id="bSea"></select></label><span>지점 <span class="seg sm" id="bPct"></span></span></div>
     <p id="bHead"></p>
     <div class="legend" id="bLg"></div>
     <div class="chart" id="bChart"></div>
-    <p class="muted" id="bNote"></p>
+    <p class="short" id="bNote"></p>
     <details>
       <summary>시점별 표 보기</summary>
       <div class="tbl-wrap"><table id="bTbl"></table></div>
     </details>
     <h3>시즌별 오차 한눈에</h3>
-    <p class="muted" id="bSumIntro"></p>
+    <p class="short" id="bSumIntro"></p>
     <div class="tbl-wrap"><table class="sum" id="bSum"></table></div>
   </section>
 
   <section class="card" id="sinkCard">
-    <h2>시즌별 침수 비교</h2>
-    <p class="muted" id="skIntro"></p>
-    <h3>시즌마다 얼마나 밀렸나 (침수 세기, 1 = 평균)</h3>
+    <div class="ch"><h2>시즌별 침수 비교</h2><a class="how" href="#method-sink">설명</a></div>
+    <h3>침수 세기 <span class="muted">(1 = 평균, 점을 누르면 아래 그래프에 넣고 뺌)</span></h3>
     <div class="chart" id="skBar"></div>
-    <p class="muted" id="skBarNote"></p>
     <h3>지금 <input type="number" id="skNow" value="1" min="0.01" max="30" step="0.5" style="width:70px;text-align:right">%였던 사람의 최종 %</h3>
     <div class="chips" id="skChips"></div>
     <div class="legend" id="skLg"></div>
     <div class="chart" id="skLine"></div>
-    <p class="muted" id="skLineNote"></p>
-    <p class="muted" id="skObsNote"></p>
+    <p class="short" id="skObsNote"></p>
     <details>
       <summary>표로 보기</summary>
       <div class="tbl-wrap"><table id="skTbl"></table></div>
@@ -288,8 +303,126 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
   </section>
   </div>
 
+  <!-- 「방법」 (#method): 로직·작업 흐름·검증 설명. 다른 탭의 긴 설명을 여기로 모음 (2026-10-18 사용자 결정) -->
+  <div id="tab-method" role="tabpanel" aria-labelledby="tabBtn-method" hidden>
+  <nav class="toc" aria-label="방법 목차">
+    <a href="#method-flow">작업 흐름</a><a href="#method-pred">컷 예측</a><a href="#method-calc">계산기</a><a href="#method-past">지난 시즌 탭</a><a href="#method-limit">검증과 한계</a>
+  </nav>
+
+  <section class="card prose" id="m-flow">
+    <h2>작업 흐름</h2>
+    <p>챌린지 동안 6시간마다(한국 시간 05·11·17·23시) 아래 다섯 단계를 자동으로 돌립니다. 결과는 30~50분 뒤 이 웹에 반영됩니다.</p>
+    <ol class="flow">
+      <li><b>모으기</b><span class="who">코드</span><br>커뮤니티 세 곳(디시인사이드 니케 마이너 갤러리, 네이버 게임 라운지, 블라블라링크)에 올라온 솔로레이드 인증 글의 제목·본문·사진을 받습니다.
+        <a class="code" href="https://github.com/jgaram/nikke-soloraid-cutoff/tree/main/experiments/2026-10-15-solo-raid-low-cost/tools">수집 도구</a></li>
+      <li><b>읽기</b><span class="who ai">Claude Haiku</span><br>OCR로 순위 화면만 고른 뒤 Claude 에이전트가 사진에서 점수·순위 %·서버를 읽습니다. 글 본문의 숫자도 나눕니다.
+        <a class="code" href="https://github.com/jgaram/nikke-soloraid-cutoff/tree/main/.claude">판독 에이전트·워크플로</a></li>
+      <li><b>정리</b><span class="who">코드</span><br>같은 사람의 같은 날 화면은 하나로 세고, 찍은 시각과 서버를 붙여 관측(점수 · 그때 % · 시각)을 만듭니다.
+        <a class="code" href="https://github.com/jgaram/nikke-soloraid-cutoff/tree/main/tools/solo_raid">후처리</a></li>
+      <li><b>예측</b><span class="who">코드</span><br>관측으로 서버별 최종 1·3·10% 컷을 냅니다(아래 「컷 예측」).
+        <a class="code" href="https://github.com/jgaram/nikke-soloraid-cutoff/blob/main/tools/solo_raid/predict.py">예측 코드</a></li>
+      <li><b>공개</b><span class="who">GitHub Actions</span><br>결과를 비공개 레포에 커밋하면 숫자만 골라 공개 레포와 이 웹으로 옮깁니다.
+        <a class="code" href="https://github.com/jgaram/nikke-soloraid-cutoff/tree/main/tools/publish">공개 도구</a></li>
+    </ol>
+    <ul>
+      <li>여섯 시간마다 Claude 예약 작업이 시즌 전용 Claude Code 세션(Sonnet)을 깨우고, 그 세션이 위 단계를 차례로 돌립니다. 사진 판독만 Claude Haiku가 하고, 계산은 모두 정해진 코드가 합니다.</li>
+      <li>시즌이 끝나면 4일 뒤까지 올라온 최종 인증을 한 번 더 모아, 실제로 낸 예측을 채점하고 다음 시즌 곡선을 만드는 데 씁니다.</li>
+    </ul>
+    <h3>공개 범위</h3>
+    <p>코드·문서, 판독에 쓰는 Claude 에이전트·워크플로·지시문, 6시간 자동 실행 절차는 <a href="https://github.com/jgaram/nikke-soloraid-cutoff">공개 레포</a>에 있습니다(CC0 1.0).
+      글 원문·사진·닉네임·원글 주소·OCR 결과는 공개하지 않습니다. 글과 사진은 올린 분들의 것이고, 순위 화면에는 다른 플레이어의 닉네임이 찍혀 있기 때문입니다. 이 웹에는 숫자와 개수만 싣습니다.</p>
+    <p class="muted">수집할 때는 robots.txt가 막은 주소를 요청하지 않고, 수집기 이름을 밝히고, 요청을 드물게 합니다. 코드를 직접 돌릴 때도 이 원칙을 지켜 주세요.</p>
+  </section>
+
+  <section class="card prose" id="m-pred">
+    <h2>컷 예측</h2>
+    <p>지금 방법: <b id="mMethod"></b><span id="mOlder"></span></p>
+    <h3>1. 지금 %를 최종 %로 옮기기</h3>
+    <p>같은 점수라도 늦게 들어오거나 기록을 올리는 사람에게 밀려 %가 계속 내려갑니다. 이 웹에서는 이것을 「침수」라고 부릅니다.
+      그래서 진행 중 순위 화면의 %를 그대로 쓰지 않고, 지난 시즌에서 잰 「최종 % ÷ 그때 %」 배율로 최종 %를 어림합니다.
+      배율은 시점에만 달려 있고, 시즌마다 전체 크기(침수 세기)만 다르다고 봅니다.</p>
+    <h3>2. 최종 %에서 컷 점수로</h3>
+    <p>옮긴 관측 하나하나에서 지난 시즌 「점수 ↔ 최종 %」 곡선의 모양을 따라 1·3·10% 점수를 내고, 목표 % 근처 관측에 무게를 더 실어 평균합니다.
+      곡선의 모양은 지난 시즌에서, 높이는 이번 시즌 관측에서 정하는 셈입니다.</p>
+    <h3>3. 지금 쓰는 설정 (모델 F)</h3>
+    <ul>
+      <li>지난 시즌 곡선은 최근 5시즌<span id="mTrain"></span>으로 만듭니다.</li>
+      <li>1·3%: 서버가 적힌 한섭 관측이 3명 이상 모이면 이번 시즌 침수 세기를 관측으로 고칩니다. 지난 시즌 예측 오차를 보고 시점별로 80% 구간을 넓힙니다.</li>
+      <li>10%: 같은 곡선을 쓰되 세기 고치기와 구간 넓히기를 하지 않습니다. 지난 시즌 검증에서 이쪽이 나았습니다.</li>
+      <li>시즌 도중에는 방법을 바꾸지 않습니다. 끝난 뒤 정직하게 채점하기 위해서입니다.</li>
+    </ul>
+    <h3>4. 80% 구간</h3>
+    <p>관측을 사람 단위로 다시 뽑고 곡선의 오차를 섞어 2,000번 계산한 값의 가운데 80%입니다. 가운데 값은 그 중앙값입니다. 단위는 억 점입니다.</p>
+    <h3>5. 서버</h3>
+    <p>서버가 적히지 않은 관측은 사이트별 서버 비율에 따라 한섭으로 나눠 넣고, 일섭·글섭은 서버가 적힌 관측만 씁니다.
+      관측이 없는 서버는 다른 서버 곡선에 지난 시즌 서버 간 비율을 곱해 채우고 신뢰도를 「참고용」으로 둡니다. 어느 서버에도 관측이 없으면 숫자를 내지 않습니다.</p>
+    <h3>6. 신뢰도와 참고값</h3>
+    <div class="tbl-wrap"><table class="m">
+      <thead><tr><th>신뢰도</th><th>언제</th></tr></thead>
+      <tbody>
+        <tr><td>보통</td><td>아래에 해당하지 않을 때. 검증 전이라 가장 높은 단계도 「보통」입니다.</td></tr>
+        <tr><td>낮음</td><td>쓴 사람 10명 미만, 서버가 적힌 사람 3명 미만, 서버 비율을 지난 시즌에서 빌림</td></tr>
+        <tr><td>매우 낮음</td><td>시작 18시간 전, 1·3% 80% 구간 폭이 15% 넘음, 쓴 사람 3명 미만, 배율을 관측 범위 밖으로 늘려 씀</td></tr>
+        <tr><td>참고용</td><td>그 서버 관측이 없어 다른 서버 자료로 채움</td></tr>
+      </tbody></table></div>
+    <p>「매우 낮음」·「참고용」이면 가운데 숫자를 흐리게 하고 80% 구간을 먼저 보입니다.
+      「참고값」은 그 % 근처(절반~두 배)로 옮겨진 관측이 <span id="mRef"></span>개 미만인 칸입니다. 그만큼 지난 시즌 곡선의 모양에 기댑니다.</p>
+    <h3>7. 갱신</h3>
+    <p>6시간 칸의 경계(05·11·17·23시)까지 올라온 글만 씁니다. 경계 뒤에 올라온 글은 다음 칸에 들어갑니다.
+      「T시간」은 챌린지 시작(3일차 05:00)부터 잰 시간입니다.</p>
+  </section>
+
+  <section class="card prose" id="m-calc">
+    <h2>계산기</h2>
+    <h3>최종 점수 ↔ 최종 %</h3>
+    <p>최근 컷 예측이 만든 곡선(0.5~30% 지점)을 그대로 씁니다. 지점 사이는 로그 눈금에서 직선으로 잇습니다.
+      점수는 기록을 올리기 전까지 그대로이므로, 지금 점수를 넣으면 더 올리지 않았을 때의 최종 %가 나옵니다.
+      점수 → %의 80% 구간은 구간 위·아래 곡선을 각각 거꾸로 읽은 근사입니다. 「참고값」은 위 컷 예측과 같은 뜻입니다.</p>
+    <h3>지금 % ↔ 최종 %</h3>
+    <p id="mConv"></p>
+    <ul>
+      <li>시점은 챌린지 시작 기준입니다. 1일차는 05:00에 시작해 다음 날 04:59까지입니다. 진행 중 시즌이 있으면 그 시즌 날짜로 보입니다.</li>
+      <li>「최종 X% 안에 들려면」의 80% 구간은 앞 값이 안전한 쪽입니다.</li>
+      <li>시작 3시간 안은 관측이 없어 곡선을 늘려 그린 값이고(그래프에서는 그리지 않음), 첫 11시간은 곡선 모양 자체가 불확실해 구간이 넓습니다.</li>
+      <li>그래프의 띠는 80% 구간입니다. 이번 시즌 침수 세기를 모를수록 넓고, 관측으로 세기를 고치면 좁아집니다. 세로축은 로그 눈금이고 위로 갈수록 상위입니다.</li>
+      <li>근거 관측이 없는 서버는 한섭 배율을 그대로 빌립니다.</li>
+    </ul>
+    <h3>실선과 점선</h3>
+    <p id="mRule"></p>
+    <div class="tbl-wrap"><table class="m" id="mChk"></table></div>
+  </section>
+
+  <section class="card prose" id="m-past">
+    <h2>지난 시즌 탭</h2>
+    <h3 id="m-cut">지난 시즌 커트라인</h3>
+    <p>표시 없는 값은 커뮤니티 집계표(공식 확정값 아님), *는 끝난 뒤 올라온 점수·%로 그린 곡선에서 읽은 값입니다.
+      1·3·10·30% 가운데 값이 있는 시즌이 둘 이상인 지점만 그립니다. 30%는 시즌마다 크게 오르내려 참고값입니다.</p>
+    <h3 id="m-rec">실제로 낸 예측 · 독립 검증</h3>
+    <p>진행 중에 6시간마다 낸 예측을 그대로 두고, 시즌이 끝난 뒤 실제 컷과 견줍니다. 시즌이 끝나기 전에 커밋된 예측만 채점하므로 결과를 보고 고칠 수 없습니다.
+      끝난 시즌의 예측은 이벤트가 끝날 때(챌린지 끝 + 4일)까지 「이번 시즌」 탭에도 남습니다. 끝난 시즌이 생기면 이 카드가 보입니다.</p>
+    <h3 id="m-back">되돌려 보기 · 개발 검증</h3>
+    <p id="mBack"></p>
+    <h3 id="m-sink">시즌별 침수 비교</h3>
+    <p id="mSink"></p>
+    <p>점은 고른 지난 시즌 진행 중에 올라온 순위 화면에서 읽은 그때 %와, 같은 점수가 시즌이 끝났을 때 몇 %였는지(끝난 뒤 점수표에서 찾음 — 그 사람의 최종 순위가 아님)를 이은 것입니다.
+      그때 %가 입력한 %의 ÷1.3~×1.3 안인 것만 골라, 배율(최종 ÷ 그때)은 그대로 두고 「그때 딱 입력한 %였다면」으로 옮겨 찍었습니다. 같은 사람의 같은 날 화면은 하나로 셉니다.
+      점이 선보다 위에 많으면 그 시점에는 선보다 더 밀렸던 것입니다.</p>
+    <p>진행 중 시즌은 컷 예측이 세기를 고친 뒤부터 「(추정)」을 붙여 함께 보이고, 세로 선이 80% 구간입니다. 선은 시작 6시간 뒤부터 그립니다(그 앞은 관측이 거의 없음).</p>
+  </section>
+
+  <section class="card prose" id="m-limit">
+    <h2>검증과 한계</h2>
+    <ul>
+      <li><b>개발 검증</b>(되돌려 보기): 끝난 시즌으로 방법을 고르고 다듬으며 잰 정확도입니다. 고르는 데 쓴 자료라 실제보다 좋게 나왔을 수 있습니다.</li>
+      <li><b>독립 검증</b>(실제로 낸 예측): 새 시즌마다 끝나기 전에 커밋된 예측을 끝난 뒤 한 번 채점합니다. 시즌 하나가 표본 하나라 몇 시즌이 쌓여야 판단할 수 있습니다.</li>
+      <li>인증 글은 기록이 좋거나 자주 갱신하는 사람이 더 많이 올릴 수 있습니다. 글 수를 참여자 수로 보지 않습니다.</li>
+      <li>게임사는 컷을 발표하지 않습니다. 「실제 컷」도 커뮤니티 집계표나 끝난 뒤 관측으로 그린 곡선에서 읽은 값입니다.</li>
+    </ul>
+    <p id="mSeasons"></p>
+  </section>
+  </div>
+
   <footer>
-    <p id="foot"></p>
 <!--FOOTER-->
   </footer>
 </main>
@@ -302,9 +435,9 @@ const NS = "http://www.w3.org/2000/svg";
 // 화면에는 「신뢰도」라는 말로만 보인다 (2026-10-17 사용자 결정 — 「등급」·A~D 글자는 처음 보는 사람에게 설명이 필요했다)
 const GRADE = {A: "보통", B: "낮음", C: "매우 낮음", D: "참고용"};
 const GNOTE = {
-  B: "근거가 넉넉하지 않습니다 — 80% 구간을 함께 보세요.",
-  C: "관측이 적거나 이른 시점이라 크게 흔들릴 수 있습니다.",
-  D: "이 서버는 아직 관측이 없어, 다른 서버와 지난 시즌 곡선으로 채운 값입니다 — 숫자만 참고하세요."
+  B: "80% 구간을 함께 보세요.",
+  C: "크게 흔들릴 수 있습니다.",
+  D: "이 서버 관측이 없어 다른 서버 자료로 채운 값입니다."
 };
 const WD = "일월화수목금토";
 const NOW = Date.now();
@@ -395,11 +528,10 @@ function drawLive() {
   const ctl = document.getElementById("liveCtl"), body = document.getElementById("liveBody"), title = document.getElementById("liveTitle");
   ctl.innerHTML = ""; body.innerHTML = "";
   const waiting = LAT_ON && !LIVE.some(x => x.season === LAT.season);   // 새 시즌이 시작했지만 첫 예측 전
-  if (waiting) note(body, "gnote", `${LAT.season} ${LAT.boss || ""} 챌린지가 진행 중입니다 (${isoTxt(LAT.c_start)} ~ ${isoTxt(LAT.end)}). 첫 예측은 챌린지 시작 6시간 뒤까지 올라온 자료로 내고, 그 뒤 6시간마다 갱신합니다 (한국 시간 05·11·17·23시까지 올라온 자료, 30~50분 뒤 반영).`);
+  if (waiting) note(body, "gnote", `${LAT.season} ${LAT.boss || ""} 챌린지 진행 중 (${isoTxt(LAT.c_start)} ~ ${isoTxt(LAT.end)}) · 첫 예측은 시작 6시간 뒤`);
   if (!NOWS) {
     title.textContent = "최종 컷 예측";
-    if (!waiting) empty(body, "지금 예측을 내고 있는 시즌이 없습니다. 다음 시즌 챌린지가 열리면 6시간마다 갱신됩니다."
-      + (RECS.length ? " 지난 시즌에 낸 예측과 채점은 「지난 시즌」 탭에 있습니다." : ""));
+    if (!waiting) empty(body, "지금 예측 중인 시즌이 없습니다." + (RECS.length ? " 지난 예측은 「지난 시즌」 탭에 있습니다." : ""));
     return;
   }
   const S = NOWS, done = ended(S);
@@ -407,7 +539,7 @@ function drawLive() {
   const info = document.createElement("span"); info.className = "muted";
   info.textContent = `챌린지 ${isoTxt(S.c_start)} ~ ${isoTxt(S.end)} · ${done ? "끝남" : "진행 중"}`;
   ctl.appendChild(info);
-  if (done) note(body, "muted", `이 시즌 예측은 이벤트가 끝나는 ${isoTxt(S.e_end)}까지 여기에 두고, 그 뒤로는 「지난 시즌」 탭의 「실제로 낸 예측」에서 볼 수 있습니다.`);
+  if (done) note(body, "short", `${isoTxt(S.e_end)}까지 표시 · 그 뒤로는 「지난 시즌」 탭`);
   renderPred(S, body);
 }
 // 「지난 시즌」 탭: 끝난 시즌에 실제로 낸 예측과 채점 (독립 검증 — 끝나기 전에 커밋된 예측만)
@@ -442,18 +574,15 @@ function renderPred(S, body) {
   if (!P.length) { empty(body, `${SRV[srv]} 예측이 아직 없습니다.`); return; }
   const last = P[P.length - 1], ls = last.srv[srv], g = ls.grade || "–", truth = S.truth[srv] || {};
   const weak = g === "C" || g === "D";
+  // 설명은 「방법」 탭에 두고 여기에는 꼬리표만 (2026-10-18 사용자 결정)
   const head = document.createElement("p");
-  const lead = `<b>${done ? "마지막 예측" : "최근 예측"}</b> — 챌린지 시작 ${last.T}시간 뒤(${last.T_kst || ""})까지 올라온 자료`;
+  const lead = `<b>${done ? "마지막 예측" : "최근 예측"}</b> · ${last.T}시간 <span class="muted">(${last.T_kst || ""}까지 자료)</span>`;
   head.innerHTML = ls.nodata ? `${lead} · 아직 관측 없음`
     : `${lead} · 신뢰도 <span class="grade ${g}">${GRADE[g] || g}</span> · 커뮤니티 데이터 ${ls.n_persons}개`;
   body.appendChild(head);
-  // 시즌 도중 방법이 바뀌었으면 앞 시점의 방법도 적는다 (S42는 T24까지 S41 한 시즌 prior — 2026-10-18 사용자 결정으로 교체)
-  const older = P.filter(p => p.method !== last.method), olderNote = older.length
-    ? ` (${older[older.length - 1].T}시간 예측까지는 ${[...new Set(older.map(p => p.method))].join(" · ")})` : "";
-  note(body, "muted", `예측 방법: ${last.method}${olderNote} · 아직 검증 중인 예측입니다.${done ? "" : " 6시간마다(한국 시간 05·11·17·23시까지 올라온 자료) 갱신합니다."}`);
-  if (ls.nodata) note(body, "gnote", "아직 이번 시즌 순위 화면(% 표시)이 하나도 모이지 않아 숫자를 내지 않습니다. 관측이 1개 이상 들어오면 다음 갱신부터 표시합니다.");
-  else if (GNOTE[g]) note(body, "gnote", `${SRV[srv]} 신뢰도 ${GRADE[g]}: ${GNOTE[g]}`);
-  if (done && !Object.keys(truth).length) note(body, "muted", "실제 컷과의 비교는 시즌 자료를 채점한 뒤 나옵니다.");
+  if (ls.nodata) note(body, "gnote", "아직 관측이 없어 숫자를 내지 않습니다.");
+  else if (GNOTE[g]) note(body, "gnote", `신뢰도 ${GRADE[g]}: ${GNOTE[g]}`);
+  if (done && !Object.keys(truth).length) note(body, "short", "실제 컷: 채점 전");
 
   const tiles = document.createElement("div"); tiles.className = "tiles"; body.appendChild(tiles);
   for (const p of PCTS) {
@@ -466,8 +595,6 @@ function renderPred(S, body) {
       + (t != null ? `<div class="r">실제 ${fmt(t)}억${q ? ` (예측 ${(q.m / t - 1 >= 0 ? "+" : "−") + Math.abs((q.m / t - 1) * 100).toFixed(1)}%)` : ""}</div>` : "");
     tiles.appendChild(d);
   }
-  const refP = PCTS.filter(p => isRef(ls.pts[p] && ls.pts[p].near));
-  if (refP.length) note(body, "muted", `${refP.join("·")}% 컷은 그 근처에 모인 자료가 적어(${REF_NEAR}개 미만) 지난 시즌 곡선 모양에 기대는 참고값입니다. 자료가 쌓이면 이 표시는 사라집니다.`);
 
   // 시점별 예측 그래프
   const lg = document.createElement("div"); lg.className = "legend"; body.appendChild(lg);
@@ -550,8 +677,8 @@ function drawKcard() {
   const body = document.getElementById("kBody"); body.innerHTML = "";
   const P = CUR ? CUR.preds.filter(p => p.srv[srv]) : [], last = P[P.length - 1], ls = last && last.srv[srv];
   if (!ls || !ls.curve || ls.curve.length < 2) {
-    note(body, "muted", !CUR ? "진행 중 시즌의 컷 예측이 나오면, 그 예측 곡선으로 「최종 X% 안에 들려면 최종 점수」와 「최종 점수가 Y억이면 최종 몇 %」를 계산합니다."
-      : ls && ls.nodata ? `${SRV[srv]}은 아직 관측이 없어 컷 예측 숫자가 없습니다 — 관측이 들어오면 계산합니다.` : `${SRV[srv]} 컷 예측이 아직 없습니다.`);
+    note(body, "short", !CUR ? "진행 중 시즌의 컷 예측이 나오면 계산합니다."
+      : ls && ls.nodata ? `${SRV[srv]}: 아직 관측이 없어 계산하지 않습니다.` : `${SRV[srv]} 컷 예측이 아직 없습니다.`);
     return;
   }
   drawKcalc(body, ls.curve, ls.grade === "C" || ls.grade === "D", `${CUR.season} 최근 예측(${last.T}시간)`);
@@ -564,11 +691,11 @@ function drawKcalc(body, C, weak, src) {
       <span class="big" id="kS"></span><span class="rng" id="kSR"></span><div class="rng" id="kSN"></div></div>
     <div class="calcbox">최종 점수가 <input type="number" id="kSc" value="${kScV}" min="1" step="0.1">억이면 → 최종
       <span class="big" id="kQ"></span><span class="rng" id="kQR"></span><div class="rng" id="kQN"></div></div>`;
-  const note = document.createElement("p"); note.className = "muted";
-  note.textContent = `위 컷 예측과 같은 ${src}의 곡선으로 계산합니다 (${qf(qlo)}~${qf(qhi)} 사이만). 점수는 기록을 갱신하기 전까지 그대로이므로, 지금 점수를 넣으면 더 올리지 않았을 때의 최종 %입니다. 작은 글씨는 80% 구간입니다.`;
+  const note = document.createElement("p"); note.className = "short";
+  note.textContent = `${src} 곡선 · ${qf(qlo)}~${qf(qhi)}`;
   body.appendChild(note);
   const $ = id => box.querySelector("#" + id);
-  const refTxt = n => isRef(n) ? "참고값 — 이 % 근처에 모인 자료가 적어 지난 시즌 곡선 모양에 기댑니다." : "";
+  const refTxt = n => isRef(n) ? "참고값" : "";
   const side = r => r.side < 0 ? `${qf(qlo)} 안` : r.side > 0 ? `${qf(qhi)} 밖` : qf(r.q);
   const upd = () => {
     const q = parseFloat($("kTgt").value);
@@ -651,12 +778,12 @@ function renderCalc() {
   }
   if (tgt > 0) {
     document.getElementById("oNow").textContent = pf(tgt / r) + " 이내";
-    document.getElementById("oNowR").textContent = `80% 구간 ${pf(tgt / rhi)} ~ ${pf(tgt / rlo)} (안전하게 가려면 앞 값)`;
+    document.getElementById("oNowR").textContent = `80% 구간 ${pf(tgt / rhi)} ~ ${pf(tgt / rlo)}`;
   }
-  let s = `이 시점에서 최종 %는 지금 %의 약 ${r.toFixed(2)}배 (80% ${rlo.toFixed(2)}~${rhi.toFixed(2)}배)입니다.`;
-  if (CV.borrow[srv]) s += ` ${SRV[srv]}은 근거 관측이 없어 한섭 배율을 그대로 빌립니다(가정).`;
-  if (h < 3) s += " 시작 3시간 안은 관측이 없어 모델이 늘려 그린 값입니다 — 숫자만 참고하세요.";
-  else if (h < 11) s += " 첫 11시간은 관측이 적어 곡선 모양 자체가 불확실합니다(구간에 반영).";
+  let s = `최종 % = 지금 % × ${r.toFixed(2)} (80% ${rlo.toFixed(2)}~${rhi.toFixed(2)})`;
+  if (CV.borrow[srv]) s += ` · ${SRV[srv]}: 한섭 배율 빌림`;
+  if (h < 3) s += " · 시작 3시간 안: 관측 없음";
+  else if (h < 11) s += " · 첫 11시간: 불확실";
   document.getElementById("cNote").textContent = s;
   markA(h);
 }
@@ -665,25 +792,8 @@ const convT = () => ["1", "3", "10", "30"].filter(p => (CV.check[srv] || {})[p])
 const convOk = t => CV.check[srv][String(t)].ok;
 const wk = t => convOk(t) ? "" : ` <span class="muted">(근거 부족)</span>`;
 function drawConv() {
-  const seas = CV.seasons, TGT = convT();
-  const ru = CV.rule, weak = TGT.filter(t => !convOk(t));
+  const TGT = convT();
   document.getElementById("cvH").textContent = `최종 ${TGT.join("·")}%가 되는 「지금 %」`;
-  const cs = CV.check_seasons || seas, span = `${cs[0]}~${cs[cs.length - 1]}`;
-  document.getElementById("cvChk").textContent = `실선 = 곡선을 맞춘 ${span} 관측과 견줘 기준을 넘은 지점입니다.`
-    + (weak.length ? ` ${SRV[srv]} ${weak.map(t => `${t}%(관측 ${CV.check[srv][String(t)].n}개)`).join("·")}는 근거가 부족해 흐린 점선이니 숫자만 참고하세요.` : "");
-  document.getElementById("cvRule").textContent = `최종이 그 %의 ÷${ru.near}~×${ru.near} 안으로 끝난 지난 시즌 관측이 ${ru.n}개·시즌 ${ru.seasons}개 이상이고, `
-    + `곡선과 견준 치우침이 ÷${ru.bias}~×${ru.bias} 안, 80% 구간이 덮은 몫이 ${ru.cov[0]}~${ru.cov[1]}이면 실선입니다. 관측은 있는데 못 미치면 흐린 점선, 관측이 없으면 그리지 않습니다 `
-    + `(곡선을 맞춘 ${span} 관측으로 이번 시즌 세기 없이 대 본 표본 안 점검). `
-    + TGT.map(t => { const c = CV.check[srv][String(t)]; return `${SRV[srv]} ${t}%: 관측 ${c.n}개·${c.seasons}시즌, 치우침 ×${c.bias}, 덮은 몫 ${c.cov}`; }).join(" · ") + ".";
-  const B = CV.base, LV = CV.live;
-  document.getElementById("calcIntro").textContent = (B
-      ? `위 컷 예측과 같은 곡선입니다 — 최근 ${B.train.length}시즌(${B.train[0]}~${B.train[B.train.length - 1]})에서 잰 「최종 % ÷ 지금 %」 배율`
-        + (LV && LV.level != null
-          ? `에 이번 시즌(${LV.season}) ${LV.T}시간까지의 관측(서버가 적힌 한섭 ${LV.persons}명)으로 고친 침수 세기 ×${LV.level.toFixed(2)}를 곱했습니다.`
-          : `입니다. 이번 시즌 침수 세기는 아직 고치지 않았습니다(서버가 적힌 한섭 관측이 3명 이상 모이면 컷 예측이 고치고, 여기에도 같이 반영됩니다).`)
-      : `지난 개발 시즌 ${seas.length}개(${seas[0]}~${seas[seas.length - 1]})에서 잰 「최종 % ÷ 지금 %」 배율(여러 시즌 평균)로 바꿉니다.`)
-    + ` 지난 시즌마다 얼마나 밀렸는지(실제 관측 점 포함)는 「지난 시즌」 탭의 「시즌별 침수 비교」에서 견줘 볼 수 있습니다. 시점은 챌린지 시작 기준 — 1일차는 05:00 KST에 시작해 다음 날 04:59까지입니다.`
-    + (CS != null ? ` 지금 ${LAT.season} 챌린지가 진행 중이라 그 시즌 날짜로 보여 줍니다.` : "");
   const host = document.getElementById("cvA"); host.innerHTML = "";
   document.getElementById("lgA").innerHTML = TGT.map(t => `<span><i class="sw${convOk(t) ? "" : " weak"}" style="background:${COL(t)};color:${COL(t)}"></i>최종 ${t}%${convOk(t) ? "" : " (근거 부족)"}</span>`).join("") +
     `<span><i class="sw band" style="background:var(--text-muted)"></i>80% 구간</span>` + (CS != null ? `<span><i class="sw" style="background:var(--truth)"></i>지금</span>` : "");
@@ -812,9 +922,9 @@ function drawPast() {
     return `<tr><td>${r.season}<span class="boss-sm">${r.boss}</span></td><td class="l hide-sm">${r.boss}</td><td class="l hide-sm">${r.start}</td>${cells}<td class="l muted hide-sm">${srcText(r)}</td></tr>`;
   });
   tbl.innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th><th class="l hide-sm">시작</th>${PP.map(p => `<th>${p}%</th>`).join("")}<th class="l hide-sm">출처</th></tr></thead><tbody>${rows.join("")}</tbody>`;
-  note.innerHTML = `<sup class="cv">*</sup> = 끝난 뒤 올라온 점수·%로 그린 곡선에서 읽은 값, 표시 없는 값 = 커뮤니티 집계표(공식 확정값 아님).`
-    + (PP.includes("30") ? " 30% 컷은 시즌마다 크게 오르내려 참고값입니다." : "")
-    + (skipped.length ? ` 표에서 뺀 시즌: ${skipped[0].season}${skipped.length > 1 ? "~" + skipped[skipped.length - 1].season : ""} (${SRV[srv]} 컷 자료가 없음).` : "");
+  note.innerHTML = `<sup class="cv">*</sup> 관측 곡선 · 표시 없음 = 집계표`
+    + (PP.includes("30") ? " · 30%는 참고값" : "")
+    + (skipped.length ? ` · ${skipped[0].season}${skipped.length > 1 ? "~" + skipped[skipped.length - 1].season : ""}: ${SRV[srv]} 자료 없음` : "");
 }
 
 // ---------- 지난 시즌 탭: 되돌려 보기 (2026-10-18 사용자 요청 — 「S35를 S34 이하 자료만으로 예측했다면」) ----------
@@ -829,10 +939,7 @@ function drawBack() {
   const lg = document.getElementById("bLg"), tbl = document.getElementById("bTbl");
   host.innerHTML = "";
   if (!BK || !BK.seasons.length) { empty(host, "되돌려 본 자료가 아직 없습니다."); return; }
-  const L = BK.seasons, nT = BK.T.length;
-  document.getElementById("backIntro").textContent = `끝난 시즌 하나하나를 지금 컷 예측과 같은 방법(모델 ${BK.model})으로 다시 예측해 본 결과입니다. `
-    + `맞힐 시즌보다 앞서 끝난 5시즌으로만 곡선을 만들고, 챌린지 시작 6시간 뒤부터 6시간마다(${nT}번) 그때까지 올라온 자료만 썼습니다. `
-    + `예측이 시간이 지나며 실제 컷으로 어떻게 다가가는지 볼 수 있습니다. 다만 이 방법 자체를 이 시즌들의 결과를 보며 골랐으므로 실제보다 좋게 나왔을 수 있습니다(개발 검증).`;
+  const L = BK.seasons;
   const sel = document.getElementById("bSea");
   if (!sel.options.length) {
     for (const S of L.slice().reverse()) { const o = document.createElement("option"); o.value = S.season; o.textContent = `${S.season} ${S.boss || ""}`; sel.appendChild(o); }
@@ -857,7 +964,8 @@ function drawBack() {
     + (tr != null ? ` · 실제 ${bPct}% 컷 <b>${fmt(tr)}억</b> <span class="muted">(${BASIS[X0.basis] || X0.basis || ""})</span>` + (quick ? `<br><span class="muted">예측 오차 ${quick}</span>` : "")
                   : ` · <span class="muted">${SRV[srv]} ${bPct}% 실제 컷은 근거가 부족해 예측만 보입니다</span>`);
   lg.innerHTML = `<span><i class="sw" style="background:${COL(bPct)}"></i>${bPct}% 예측(가운데 값)</span><span><i class="sw band" style="background:${COL(bPct)}"></i>80% 구간</span>`
-    + (tr != null ? `<span><i class="sw dash"></i>실제 컷</span><span><i class="sw band" style="background:var(--text-muted)"></i>허용 오차 ±${Math.round(tol * 100)}%</span>` : "");
+    + (tr != null ? `<span><i class="sw dash"></i>실제 컷</span><span><i class="sw band" style="background:var(--text-muted)"></i>허용 오차 ±${Math.round(tol * 100)}%</span>`
+      + `<span><i class="dot" style="background:${COL(bPct)}"></i>허용 오차 안</span><span><i class="dot" style="background:var(--surface-1);box-shadow:inset 0 0 0 2px ${COL(bPct)}"></i>밖</span>` : "");
   const vals = R.flatMap(r => [r[2], r[3]]);
   if (tr != null) vals.push(tr * (1 - tol), tr * (1 + tol));
   const nt = niceTicks(Math.min(...vals), Math.max(...vals));
@@ -887,10 +995,7 @@ function drawBack() {
       + (e != null ? `<br>실제 ${fmt(tr)}억 · 오차 <b>${pctf(e)}</b>${Math.abs(e) <= tol ? " (허용 오차 안)" : ""}` : "")
       + `<br><span class="muted">신뢰도 ${GRADE[r[4]] || r[4] || "–"} · 근거 ${r[5]}명</span>`, ...hostXY(host, ev));
   }, () => { tip.hide(); cur.setAttribute("visibility", "hidden"); });
-  const D0 = R.some(r => r[4] === "D");
-  note.textContent = (tr != null ? `채운 점 = 허용 오차(±${Math.round(tol * 100)}%) 안, 빈 점 = 밖. ` : "")
-    + `1·3%는 지난 시즌 오차로 구간을 넓혔고(그 시즌보다 앞 시즌만으로 정한 배율), 10%는 넓히지 않았습니다 — 「이번 시즌」 탭의 컷 예측과 같습니다.`
-    + (D0 ? ` 신뢰도 「참고용」 시점은 ${SRV[srv]} 관측이 없어 다른 서버 곡선으로 채운 값입니다.` : "");
+  note.textContent = R.some(r => r[4] === "D") ? `신뢰도 「참고용」 시점: ${SRV[srv]} 관측 없음` : "";
   tbl.innerHTML = `<thead><tr><th>시점</th><th class="l hide-sm">KST</th><th>예측</th><th>80% 구간</th>${tr != null ? "<th>오차</th>" : ""}<th class="l">신뢰도</th><th class="hide-sm">근거</th></tr></thead><tbody>`
     + R.map(r => `<tr><td>${r[0]}시간</td><td class="l hide-sm">${bAt(S, r[0])}</td><td><b>${fmt(r[1])}</b></td><td>${fmt(r[2])}~${fmt(r[3])}</td>`
       + (tr != null ? `<td>${pctf(err(r))}</td>` : "") + `<td class="l">${GRADE[r[4]] || r[4] || "–"}</td><td class="hide-sm">${r[5]}명</td></tr>`).join("") + "</tbody>";
@@ -898,7 +1003,7 @@ function drawBack() {
 function drawBackSum() {
   const tb = document.getElementById("bSum"), Ts = [12, 24, 48, 72, 96];
   const tol = bPct === "10" ? 0.03 : 0.02;
-  document.getElementById("bSumIntro").textContent = `${SRV[srv]} ${bPct}% · 칸 = 그 시점 예측 ÷ 실제 컷 − 1. 허용 오차(±${Math.round(tol * 100)}%) 밖은 주황색 굵은 글씨입니다. 줄을 누르면 위 그래프가 그 시즌으로 바뀝니다.`;
+  document.getElementById("bSumIntro").textContent = `${SRV[srv]} ${bPct}% · 예측 ÷ 실제 − 1 · 주황 = 허용 오차(±${Math.round(tol * 100)}%) 밖 · 줄을 누르면 위 그래프로`;
   const ok = Ts.map(() => [0, 0]), cov = Ts.map(() => [0, 0]);
   const body = BK.seasons.slice().reverse().map(S => {
     const X0 = bX(S), tr = X0 && X0.truth;
@@ -958,10 +1063,7 @@ function drawSink() {
     skSel = [...new Set([hi.season, lo.season, rec.season])].map((s, i) => ({s, slot: i}));
   }
   const slotOf = s => { const x = skSel.find(y => y.s === s); return x ? x.slot : null; };
-  const x0 = skNowV(), H24 = 24, Pa = devP(H24), hiI = past.reduce((a, b) => b.lev > a.lev ? b : a);
-  document.getElementById("skIntro").innerHTML = `「침수」는 시간이 지나며 다른 사람들이 점수를 올려 내 순위(%)가 밀려 내려가는 것입니다. 같은 시각에 같은 %였어도 시즌마다 최종 %가 다릅니다. `
-    + `여기서 <b>세기</b>는 끝난 시즌 ${past.length}개를 함께 맞춘 곡선에서 그 시즌이 얼마나 더(덜) 밀렸는지를 나타내는 배수입니다. 예를 들어 24시간 뒤 1%였던 사람은 평균 시즌이면 최종 약 ${pf(10 ** Pa)}, `
-    + `가장 많이 밀린 ${hiI.season}(세기 ${hiI.lev.toFixed(2)})이면 최종 약 ${pf(10 ** (Pa * hiI.lev))}였습니다.`;
+  const x0 = skNowV(), Pa = devP(24);
   // 막대 대신 막대사탕: 1(평균)에서 그 시즌 세기까지
   const W = Math.max(300, bar.clientWidth), narrow = W < 600, Hh = narrow ? 230 : 260;
   const lv = items.flatMap(x => x.live && x.sd ? [x.lev * Math.exp(-Z80 * x.sd), x.lev * Math.exp(Z80 * x.sd)] : [x.lev]);
@@ -988,11 +1090,6 @@ function drawSink() {
       + `<br>24시간 뒤 ${pf(x0)} → 최종 약 <b>${pf(x0 * 10 ** (Pa * x.lev))}</b> <span class="muted">(평균 ${pf(x0 * 10 ** Pa)})</span><br><span class="muted">누르면 아래 그래프에 넣고 뺍니다</span>`, ...hostXY(bar, ev));
   }, () => tip.hide());
   hit.addEventListener("click", ev => skToggle(items[idx(ev)].season));
-  const lv0 = SK.live;
-  document.getElementById("skBarNote").textContent = `세기는 ${SK.prior || "끝난 시즌 모두"} 곡선을 맞출 때 함께 잰 시즌 수준 배수입니다(시즌마다 ±2~3% 안팎의 오차). `
-    + `점을 누르면 아래 그래프에 넣고 뺍니다(3개까지). `
-    + (lv0 ? `${lv0.season}*은 ${lv0.T}시간까지의 관측(서버가 적힌 한섭 ${lv0.persons}명)으로 컷 예측이 고친 세기를 같은 잣대로 옮긴 추정이고, 세로 선이 80% 구간입니다.`
-           : `진행 중 시즌의 세기는 서버가 적힌 한섭 관측이 3명 이상 모여 컷 예측이 세기를 고친 뒤부터 여기에 함께 보입니다.`);
   // 선: 지금 x0%였던 사람의 최종 % (평균 + 고른 시즌)
   const sel = skSel.map(y => ({...items.find(x => x.season === y.s), slot: y.slot})).filter(x => x.season);
   document.getElementById("skChips").innerHTML = sel.map(x => `<button class="chip" data-s="${x.season}"><i class="sw" style="background:${SLOT[x.slot]}"></i>${skName(x)}<span class="x">✕</span></button>`).join("")
@@ -1064,44 +1161,98 @@ function drawSink() {
     }
     tip2.show(html, ...hostXY(line, ev));
   }, () => { tip2.hide(); cross.setAttribute("visibility", "hidden"); });
-  document.getElementById("skLineNote").textContent = `시작 6시간 뒤부터 그렸습니다(그 앞은 관측이 거의 없음). 모든 시즌이 같은 모양으로 밀리고 세기만 다르다고 본 값이라, 어떤 시즌이 초반에 더 밀리고 어떤 시즌이 막판에 더 밀렸는지는 이 그림으로 알 수 없습니다.`
-    + (SK.borrow[srv] ? ` ${SRV[srv]}은 근거 관측이 없어 한섭 곡선을 그대로 씁니다.` : "")
-    + ` 지금 컷 예측이 쓰는 곡선(최근 5시즌)은 이 평균보다 조금 덜 밀리는 쪽입니다 — 「이번 시즌」 탭 계산기와 숫자가 조금 다를 수 있습니다.`;
   const nPast = sel.filter(x => !x.live).length, byS = {};
   for (const d of dots) byS[d.o[0]] = (byS[d.o[0]] || 0) + 1;
-  document.getElementById("skObsNote").textContent = !nPast ? "" :
-    `점 = 고른 지난 시즌 진행 중에 올라온 순위 화면에서 읽은 그 시각의 점수와 % 가운데, 그때 %가 ${pf(x0)}의 ÷${OBS_NEAR}~×${OBS_NEAR} 안인 것입니다 (같은 사람의 같은 날 화면은 하나로 셉니다). `
-    + `같은 점수가 시즌이 끝났을 때 몇 %였는지는 끝난 뒤 모은 점수표에서 찾아 붙였고(그 사람의 최종 순위가 아님), 배율(최종 ÷ 그때)은 그대로 두고 「그때 딱 ${pf(x0)}였다면」으로 옮겨 찍었습니다. `
-    + `점이 그 시즌 선보다 위에 많으면 그 시점에는 선보다 더 밀렸던 것입니다. 선은 세기만 곱한 곡선이라 관측을 이은 선이 아닙니다. `
-    + `${SRV[srv]} ` + (dots.length ? sel.filter(x => !x.live).map(x => `${x.season} ${byS[x.season] || 0}개`).join(" · ") + "." : "고른 시즌에 이 % 근처 관측이 없습니다.")
-    + (dots.length && dots.length < 10 ? ` 관측이 적어 점이 듬성듬성합니다.` : "");
+  document.getElementById("skObsNote").textContent = (!nPast ? "" : `관측 점 (${SRV[srv]}): `
+    + (dots.length ? sel.filter(x => !x.live).map(x => `${x.season} ${byS[x.season] || 0}개`).join(" · ") : "이 % 근처 관측 없음"))
+    + (SK.borrow[srv] ? `${nPast ? " · " : ""}${SRV[srv]}: 한섭 곡선 사용` : "");
   document.getElementById("skTbl").innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th><th>세기</th>${[24, 48, 96].map(h => `<th>${h}시간 ${pf(x0)} →</th>`).join("")}</tr></thead><tbody>`
     + items.slice().reverse().map(x => `<tr><td>${skName(x)}<span class="boss-sm">${x.boss || ""}</span></td><td class="l hide-sm">${x.boss || ""}</td><td>${x.lev.toFixed(2)}</td>`
       + [24, 48, 96].map(h => `<td>${pf(x0 * 10 ** (devP(h) * x.lev))}</td>`).join("") + `</tr>`).join("")
     + `<tr><td>평균</td><td class="hide-sm"></td><td>1.00</td>` + [24, 48, 96].map(h => `<td>${pf(x0 * 10 ** devP(h))}</td>`).join("") + `</tr></tbody>`;
 }
 
-// ---------- 탭 (2026-10-18 사용자 결정 — 「이번 시즌」·「지난 시즌」) ----------
-let tab = location.hash === "#past" ? "past" : "now";
+// ---------- 방법 탭 (2026-10-18 사용자 결정 — 다른 탭의 긴 설명을 모음). 글은 HTML에 두고, 자료에 따라 바뀌는 값만 여기서 채운다 ----------
+const spanTxt = L => L && L.length ? `${L[0]}~${L[L.length - 1]}` : "";
+function drawMethod() {
+  const $ = id => document.getElementById(id);
+  $("mMethod").textContent = DATA.analysis.live_method;
+  // 가장 최근 예측 시즌에서 도중에 방법이 바뀌었으면 적는다 (S42: 24시간 예측까지 S41 한 시즌 곡선 → 30시간부터 모델 F)
+  const S = LIVE[LIVE.length - 1], last = S && S.preds[S.preds.length - 1];
+  const older = S ? S.preds.filter(p => p.method !== last.method) : [];
+  $("mOlder").textContent = older.length
+    ? ` (${S.season}: ${older[older.length - 1].T}시간 예측까지 ${[...new Set(older.map(p => p.method))].join(" · ")})` : "";
+  const B = CV.base, LV = CV.live;
+  $("mTrain").textContent = B ? `(${spanTxt(B.train)})` : "";
+  $("mRef").textContent = REF_NEAR;
+  $("mConv").textContent = (B
+      ? `컷 예측과 같은 곡선입니다. 최근 ${B.train.length}시즌(${spanTxt(B.train)})에서 잰 「최종 % ÷ 지금 %」 배율`
+        + (LV && LV.level != null
+          ? `에, 이번 시즌(${LV.season}) ${LV.T}시간까지의 관측(서버가 적힌 한섭 ${LV.persons}명)으로 고친 침수 세기 ×${LV.level.toFixed(2)}를 곱했습니다.`
+          : `입니다. 이번 시즌 침수 세기는 아직 고치지 않았습니다. 서버가 적힌 한섭 관측이 3명 이상 모이면 컷 예측과 함께 고칩니다.`)
+      : `끝난 시즌 ${CV.seasons.length}개(${spanTxt(CV.seasons)})에서 잰 「최종 % ÷ 지금 %」 배율의 평균입니다.`)
+    + " 컷 예측이 6시간마다 바뀌면 계산기도 같이 바뀝니다. 배율은 지금 %와 상관없이 시점에만 달려 있다고 봅니다.";
+  // 실선·점선 기준과 서버별 점검 값 (site.py CONV_RULE — 곡선을 맞춘 그 자료로 대 본 표본 안 점검)
+  const ru = CV.rule, cs = spanTxt(CV.check_seasons || CV.seasons);
+  $("mRule").textContent = `「지금 % ↔ 최종 %」 그래프의 지점마다, 최종이 그 %의 ÷${ru.near}~×${ru.near} 안으로 끝난 지난 시즌 관측(${cs})을 곡선과 견줍니다. `
+    + `관측 ${ru.n}개·시즌 ${ru.seasons}개 이상이고, 치우침이 ÷${ru.bias}~×${ru.bias} 안, 80% 구간이 덮은 몫이 ${ru.cov[0]}~${ru.cov[1]}이면 실선입니다. `
+    + `관측은 있는데 못 미치면 흐린 점선(근거 부족), 관측이 없으면 그리지 않습니다. 곡선을 맞춘 바로 그 자료로 대 본 점검이라 너그러운 편입니다.`;
+  let t = `<thead><tr><th>서버</th><th>지점</th><th>관측</th><th>시즌</th><th>치우침</th><th>덮은 몫</th><th>선</th></tr></thead><tbody>`;
+  for (const sv of Object.keys(SRV)) for (const p of ["1", "3", "10", "30"]) {
+    const c = (CV.check[sv] || {})[p];
+    if (c) t += `<tr><td>${SRV[sv]}</td><td>${p}%</td><td class="n">${c.n}</td><td class="n">${c.seasons}</td><td class="n">×${c.bias}</td><td class="n">${c.cov}</td><td>${c.ok ? "실선" : "점선"}</td></tr>`;
+  }
+  $("mChk").innerHTML = t + "</tbody>";
+  $("mBack").textContent = BK && BK.seasons.length
+    ? `끝난 시즌(${spanTxt(BK.seasons.map(x => x.season))})마다 지금 방법(모델 ${BK.model})으로, 그 시즌보다 앞서 끝난 5시즌의 곡선과 T시간까지 올라온 글만 써서 6시간마다(${BK.T.length}번) 다시 예측했습니다. `
+      + `1·3%는 그 시즌보다 앞 시즌만으로 정한 배율로 구간을 넓혔고, 10%는 넓히지 않았습니다. 허용 오차는 1·3% ±2%, 10% ±3%입니다. `
+      + `이 방법을 이 시즌들의 결과를 보며 골랐으므로 실제보다 좋게 나왔을 수 있습니다.`
+    : "되돌려 본 자료가 아직 없습니다.";
+  const past = SK ? SK.seasons : [];
+  $("mSink").textContent = `침수 세기는 끝난 시즌 ${past.length}개를 함께 맞춘 곡선에서 그 시즌이 평균보다 얼마나 더(덜) 밀렸는지를 나타내는 배수입니다(1 = 평균, 시즌마다 ±2~3% 안팎의 오차). `
+    + `모든 시즌이 같은 모양으로 밀리고 크기만 다르다고 본 값이라, 어떤 시즌이 초반에 더 밀리고 어떤 시즌이 막판에 더 밀렸는지는 알 수 없습니다. `
+    + `이 평균 곡선은 컷 예측이 쓰는 곡선(최근 5시즌)과 바탕이 달라, 「이번 시즌」 계산기와 숫자가 조금 다를 수 있습니다.`;
+  const AS = DATA.analysis.seasons;
+  $("mSeasons").innerHTML = `분석에 든 끝난 시즌: ${AS.length ? `${spanTxt(AS)} (${AS.length}개)` : "없음"}. `
+    + `방법을 고르기 전의 분석 화면(끝난 시즌 평균 곡선, 시즌 하나씩 빼고 맞히기)은 <a href="analysis.html">분석 페이지</a>에 있습니다.`;
+}
+
+// ---------- 탭 (2026-10-18 사용자 결정 — 「이번 시즌」·「지난 시즌」·「방법」) ----------
+// 주소: #past = 지난 시즌, #method = 방법, #method-{이름} = 방법 탭의 그 절(id m-{이름})로
+const tabOf = h => h === "#past" ? "past" : h.startsWith("#method") ? "method" : "now";
+let tab = tabOf(location.hash);
 function showTab(t, push) {
   tab = t;
-  for (const k of ["now", "past"]) {
+  for (const k of ["now", "past", "method"]) {
     document.getElementById("tab-" + k).hidden = k !== t;
     document.getElementById("tabBtn-" + k).setAttribute("aria-selected", k === t);
   }
-  if (push) { try { history.replaceState(null, "", t === "past" ? "#past" : location.pathname + location.search); } catch (e) {} }
+  document.getElementById("srvbar").hidden = t === "method";
+  if (push) { try { history.replaceState(null, "", t === "now" ? location.pathname + location.search : "#" + t); } catch (e) {} }
   drawAll();
 }
+function route() {
+  const h = location.hash;
+  showTab(tabOf(h), false);
+  const sec = h.startsWith("#method-") && document.getElementById("m-" + h.slice(8));
+  (sec || document.querySelector(".tabs")).scrollIntoView({block: "start"});
+}
 document.querySelectorAll(".tabs button").forEach(b => { b.onclick = () => showTab(b.dataset.tab, true); });
-window.addEventListener("hashchange", () => {   // 본문의 「지난 시즌」 탭 링크(#past)도 여기로 온다
-  showTab(location.hash === "#past" ? "past" : "now", false);
-  document.querySelector(".tabs").scrollIntoView({block: "start"});
+window.addEventListener("hashchange", route);   // 본문의 「설명」·목차 링크도 여기로 온다
+document.addEventListener("click", e => {        // 이미 그 주소면 hashchange가 안 생기므로 직접 옮긴다
+  const a = e.target.closest('a[href^="#"]');
+  if (a && a.getAttribute("href") === location.hash) { e.preventDefault(); route(); }
 });
 
-function drawAll() { drawSrv(); if (tab === "past") { drawPast(); drawRec(); drawBack(); drawSink(); } else { drawLive(); drawKcard(); drawConv(); } }
+function drawAll() {
+  drawSrv();
+  if (tab === "past") { drawPast(); drawRec(); drawBack(); drawSink(); }
+  else if (tab === "method") drawMethod();
+  else { drawLive(); drawKcard(); drawConv(); }
+}
 document.getElementById("sub").textContent = `자료 기준 ${DATA.asof} KST · 한섭·일섭·글섭`;
-document.getElementById("foot").textContent = `분석에 든 개발 시즌: ${DATA.analysis.seasons.join(" · ") || "없음"}`;
 showTab(tab, false);
+if (location.hash.startsWith("#method-")) route();
 let rz, rw = window.innerWidth;
 window.addEventListener("resize", () => { if (window.innerWidth === rw) return; rw = window.innerWidth; clearTimeout(rz); rz = setTimeout(drawAll, 150); });
 </script>
