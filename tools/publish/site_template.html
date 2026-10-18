@@ -727,8 +727,10 @@ const whenLab = h => {
   const c = clock(h), late = +c.slice(0, 2) < 5;
   return `${Math.min(NDAY, Math.floor(h / 24) + 1)}일차 ${c}${late ? "(다음 날)" : ""}`;
 };
-function convAt(h) {
-  const rows = CV.srv[srv], i = Math.max(0, Math.min(rows.length - 1, Math.round(h * 2)));
+// 최종 t%가 CV.split 이하면 1·3%용 곡선(띠는 컷 예측처럼 넓힘), 위면 5~30%용 곡선 — 컷 예측과 같은 나눔 (2026-10-18)
+const convRows = t => (t != null && CV.srv_ref && t > (CV.split || 4) ? CV.srv_ref : CV.srv)[srv];
+function convAt(h, t) {
+  const rows = convRows(t), i = Math.max(0, Math.min(rows.length - 1, Math.round(h * 2)));
   return {P: rows[i][1], sd: rows[i][2]};
 }
 // 시점 타임라인: 슬라이더 하나(30분 칸)가 챌린지 전체를 덮고, 아래 일차 칸이 같은 가로축에 붙는다
@@ -769,16 +771,19 @@ function renderCalc() {
   const h = curH();
   document.getElementById("cWhen").textContent = `${whenLab(h)} · 시작 후 ${h.toFixed(1)}시간`;
   paintTL(h);
-  const {P, sd} = convAt(h);
   const now = +document.getElementById("cNow").value, tgt = +document.getElementById("cTgt").value;
-  const r = 10 ** P, rlo = 10 ** (P - Z80 * sd), rhi = 10 ** (P + Z80 * sd);
+  const rat = t => { const {P, sd} = convAt(h, t); return [10 ** P, 10 ** (P - Z80 * sd), 10 ** (P + Z80 * sd)]; };
+  // 지금 % → 최종 %: 1·3%용 곡선으로 낸 최종이 나눔 % 위면 5~30%용 곡선으로 다시
+  const fMain = now > 0 ? now * rat(null)[0] : null;
+  const [r, rlo, rhi] = rat(fMain);
   if (now > 0) {
     document.getElementById("oFinal").textContent = "약 " + pf(now * r);
     document.getElementById("oFinalR").textContent = `80% 구간 ${pf(now * rlo)} ~ ${pf(now * rhi)}`;
   }
   if (tgt > 0) {
-    document.getElementById("oNow").textContent = pf(tgt / r) + " 이내";
-    document.getElementById("oNowR").textContent = `80% 구간 ${pf(tgt / rhi)} ~ ${pf(tgt / rlo)}`;
+    const [q, qlo, qhi] = rat(tgt);
+    document.getElementById("oNow").textContent = pf(tgt / q) + " 이내";
+    document.getElementById("oNowR").textContent = `80% 구간 ${pf(tgt / qhi)} ~ ${pf(tgt / qlo)}`;
   }
   let s = `최종 % = 지금 % × ${r.toFixed(2)} (80% ${rlo.toFixed(2)}~${rhi.toFixed(2)})`;
   if (CV.borrow[srv]) s += ` · ${SRV[srv]}: 한섭 배율 빌림`;
@@ -814,15 +819,16 @@ function drawConv() {
       CS != null ? (narrow ? kstDay(CS + d * 24 * 3600e3).replace(/\(.\)$/, "") : kstDay(CS + d * 24 * 3600e3)) : (narrow ? `${d + 1}일` : `${d + 1}일차`);
   }
   el("line", {x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, stroke: "var(--axis)"}, svg);
-  const rows = CV.srv[srv].filter(r => r[0] >= 3);
+  const rowsT = t => convRows(t).filter(r => r[0] >= 3);
   const path = pts => pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join("");
   for (const t of TGT) {
+    const rows = rowsT(t);
     const up = rows.map(r => [X(r[0]), Y(t / 10 ** (r[1] - Z80 * r[2]))]);
     const dn = rows.map(r => [X(r[0]), Y(t / 10 ** (r[1] + Z80 * r[2]))]);
     el("path", {d: path(up.concat(dn.reverse())) + "Z", fill: COL(t), opacity: convOk(t) ? .14 : .05}, svg);
   }
   for (const t of TGT) {
-    const ok = convOk(t);
+    const ok = convOk(t), rows = rowsT(t);
     el("path", {d: path(rows.map(r => [X(r[0]), Y(t / 10 ** r[1])])), fill: "none", stroke: COL(t), "stroke-width": ok ? 2.2 : 1.6,
       "stroke-dasharray": ok ? null : "6 4", opacity: ok ? 1 : .55}, svg);
     if (!narrow) el("text", {x: W - m.r + 6, y: Y(t) + 4, class: "lbl", opacity: ok ? null : .6}, svg).textContent = `최종 ${t}%`;
@@ -835,8 +841,7 @@ function drawConv() {
   const dots = TGT.map(t => el("circle", {r: 4.5, fill: COL(t), stroke: "var(--surface-1)", "stroke-width": 2}, svg));
   const place = h => {
     cross.setAttribute("x1", X(h)); cross.setAttribute("x2", X(h));
-    const {P} = convAt(h);
-    TGT.forEach((t, i) => { dots[i].setAttribute("cx", X(h)); dots[i].setAttribute("cy", Y(t / 10 ** P)); });
+    TGT.forEach((t, i) => { const {P} = convAt(h, t); dots[i].setAttribute("cx", X(h)); dots[i].setAttribute("cy", Y(t / 10 ** P)); });
   };
   markA = place;
   const tip = mkTip(host);
@@ -845,9 +850,8 @@ function drawConv() {
     const mx = svgX(svg, W, ev);
     const h = Math.max(3, Math.min(CV.H - 0.5, (mx - m.l) / (W - m.l - m.r) * CV.H));
     place(h);
-    const {P, sd} = convAt(h);
     let html = `<b>${whenLab(h)}</b> <span class="muted">시작 후 ${h.toFixed(1)}시간 · ${SRV[srv]}</span>`;
-    for (const t of TGT) html += `<div class="r"><i class="sw" style="background:${COL(t)}"></i>최종 ${t}% ← 지금 <b>${pf(t / 10 ** P)}</b> <span class="muted">(${pf(t / 10 ** (P + Z80 * sd))}~${pf(t / 10 ** (P - Z80 * sd))})</span>${wk(t)}</div>`;
+    for (const t of TGT) { const {P, sd} = convAt(h, t); html += `<div class="r"><i class="sw" style="background:${COL(t)}"></i>최종 ${t}% ← 지금 <b>${pf(t / 10 ** P)}</b> <span class="muted">(${pf(t / 10 ** (P + Z80 * sd))}~${pf(t / 10 ** (P - Z80 * sd))})</span>${wk(t)}</div>`; }
     tip.show(html, ...hostXY(host, ev));
   }, () => { tip.hide(); place(curH()); });
 
@@ -857,9 +861,8 @@ function drawConv() {
   for (let d = 0; d < NDAY; d++) for (const hh of [0, 7, 13, 19]) if (d * 24 + hh < CV.H && d * 24 + hh >= 1) pts.push(d * 24 + hh);
   pts.push(CV.H - 0.5);
   for (const h of pts) {
-    const {P, sd} = convAt(h);
-    th += `<tr><td>${whenLab(h)}</td>` + TGT.map(t =>
-      `<td><b>${pf(t / 10 ** P)}</b> <span class="muted rng-sm">${pf(t / 10 ** (P + Z80 * sd))}~${pf(t / 10 ** (P - Z80 * sd))}</span></td>`).join("") + `</tr>`;
+    th += `<tr><td>${whenLab(h)}</td>` + TGT.map(t => { const {P, sd} = convAt(h, t); return (
+      `<td><b>${pf(t / 10 ** P)}</b> <span class="muted rng-sm">${pf(t / 10 ** (P + Z80 * sd))}~${pf(t / 10 ** (P - Z80 * sd))}</span></td>`); }).join("") + `</tr>`;
   }
   document.getElementById("tvT").innerHTML = th + "</tbody>";
   renderCalc();
@@ -1191,6 +1194,10 @@ function drawMethod() {
           ? `에, 이번 시즌(${LV.season}) ${LV.T}시간까지의 관측(서버가 적힌 한섭 ${LV.persons}명)으로 고친 침수 세기 ×${LV.level.toFixed(2)}를 곱했습니다.`
           : `입니다. 이번 시즌 침수 세기는 아직 고치지 않았습니다. 서버가 적힌 한섭 관측이 3명 이상 모이면 컷 예측과 함께 고칩니다.`)
       : `끝난 시즌 ${CV.seasons.length}개(${spanTxt(CV.seasons)})에서 잰 「최종 % ÷ 지금 %」 배율의 평균입니다.`)
+    + (B && CV.srv_ref !== undefined
+      ? ` 컷 예측처럼 최종 ${CV.split}% 이하(1·3% 선)는 이 곡선을 쓰고 80% 구간을 컷 예측과 같은 배율(지난 시즌 검증, 시점마다${CV.m1 ? ` — ${LV ? LV.T : ""}시간 예측 때 ×${CV.m1.toFixed(2)}` : ""})로 넓혔습니다.`
+        + ` 그 위(10·30% 선)는 5~30%용으로 따로 맞춘 같은 5시즌 곡선을 침수 세기 보정·넓히기 없이 씁니다.`
+      : "")
     + " 컷 예측이 6시간마다 바뀌면 계산기도 같이 바뀝니다. 배율은 지금 %와 상관없이 시점에만 달려 있다고 봅니다.";
   // 실선·점선 기준과 서버별 점검 값 (site.py CONV_RULE — 곡선을 맞춘 그 자료로 대 본 표본 안 점검)
   const ru = CV.rule, cs = spanTxt(CV.check_seasons || CV.seasons);

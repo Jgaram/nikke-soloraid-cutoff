@@ -49,6 +49,7 @@ SERVERS = ["KR", "JP", "GL"]
 PCTS = ["1", "3", "10"]
 # 지난 시즌 컷과 계산기가 고르는 지점 (2026-10-16 사용자 결정 — 서버를 정해 두지 않고 아래 기준을 넘는 지점만 그린다)
 CAND = ["1", "3", "10", "30"]
+SPLIT = 4.0   # 계산기: 최종 이 % 이하는 1·3%용(main) 곡선, 위는 5~30%용(ref) 곡선 — 컷 예측의 main 0.5~3% · ref 5~30% 사이
 PAST_MIN = 2   # 지난 시즌: 값이 있는(잠기지 않은) 시즌이 이만큼 있는 지점만 열·선
 # 계산기: 최종이 그 지점의 ÷near~×near로 끝난 관측 칸으로 곡선을 대 본다 (곡선을 맞춘 그 자료라 표본 안 점검이다).
 # 넘으면 실선, 관측이 있는데 못 넘으면 흐린 점선(근거 부족), 관측 0이면 그리지 않는다.
@@ -274,20 +275,24 @@ def curve_source(lat):
         return None
     model = jload(mpath)
     prior = jload(os.path.join(ROOT, model["main"]["prior"]))
-    return {"model": model, "prior": prior, "level": lvl, "pred": meta}
+    # 5~30%는 컷 예측이 ref prior(세기 갱신·구간 넓히기 없음)로 낸다 — 계산기 10·30% 선도 그 곡선으로 (2026-10-18 사용자 요청)
+    ref = jload(os.path.join(ROOT, model["ref"]["prior"])) if (model.get("ref") or {}).get("prior") else None
+    return {"model": model, "prior": prior, "ref": ref, "level": lvl, "pred": meta}
 
 
-def conv_row(PR, tr, sv, h, H, m_s, s_lvl):
-    """[P, sd] — viz의 % 변환 행과 같은 셈 (σ(P)·꼴 외삽·시즌 수준 폭). m_s = 시즌 침수 세기 배수, s_lvl = 그 ln 폭."""
+def conv_row(PR, tr, sv, h, H, m_s, s_lvl, c=1.0):
+    """[P, sd] — viz의 % 변환 행과 같은 셈 (σ(P)·꼴 외삽·시즌 수준 폭). m_s = 시즌 침수 세기 배수, s_lvl = 그 ln 폭.
+    c = 컷 예측의 M1 배율 (1·3% 구간의 로그 반폭 ×c — predict.widen과 같은 꼴이라 sd에 곱한다)."""
     P = PR.p_full(tr, sv, h, 1.0, H, m_s)
     sig = math.sqrt(tr["sigma"]["s0"] ** 2 + (tr["sigma"]["rho"] * P) ** 2)
     sf = PR.sigma_form(tr, h, H)
-    return P, math.sqrt(sig ** 2 + (P * s_lvl) ** 2 + sf ** 2)
+    return P, c * math.sqrt(sig ** 2 + (P * s_lvl) ** 2 + sf ** 2)
 
 
 def conv(vdata, src, lat_H=None):
     """계산기용 % 변환, 0.5시간 간격. 행 = [시작 후 시간, log10(최종 % ÷ 지금 %), 80% 구간용 sd].
     곡선은 컷 예측과 같은 고정 모델(최근 5시즌 main prior × 이번 시즌 침수 세기, 2026-10-18 사용자 결정 — 전에는 viz의 23시즌 평균).
+    컷 예측처럼 최종 SPLIT% 이하(1·3%)는 main 곡선 + M1 넓힌 띠(srv), 그 위(10·30%)는 ref 곡선 그대로(srv_ref) — 2026-10-18 사용자 요청.
     이번 시즌 것만 싣는다. 지난 시즌 관측 점과 시즌마다의 곡선(23시즌 곡선 × 그 시즌 세기)은 「지난 시즌」 탭의 침수 비교(sink)로 옮겼다 (2026-10-18 사용자 결정)."""
     import predict as PR
     cv = vdata["conv"]
@@ -301,13 +306,22 @@ def conv(vdata, src, lat_H=None):
         m_live, s_live = (math.exp(lv["mu"]), lv["sd"]) if lv else (1.0, tau)
         train = list(src["model"].get("borrow") or [])
         base = {"name": src["model"].get("name"), "train": train, "season": src["model"].get("season")}
-        rowsF = {sv: [[i / 2, *[round(v, 5) for v in conv_row(PR, tr, sv, i / 2, H, m_live, s_live)]] for i in range(H * 2 + 1)] for sv in SERVERS}
-        at_base = lambda sv, h: conv_row(PR, tr, sv, h, H, 1.0, tau)  # noqa: E731
+        mdl = src["model"]
+        m1 = (lambda h: PR.m1_factor(mdl, h)) if mdl.get("m1") else (lambda h: 1.0)  # noqa: E731
+        rowsF = {sv: [[i / 2, *[round(v, 5) for v in conv_row(PR, tr, sv, i / 2, H, m_live, s_live, m1(i / 2))]] for i in range(H * 2 + 1)] for sv in SERVERS}
+        if src.get("ref"):
+            trR = src["ref"]["transform"]
+            tauR = src["ref"]["season_diff"]["tau_p"]["value"]
+            rowsR = {sv: [[i / 2, *[round(v, 5) for v in conv_row(PR, trR, sv, i / 2, H, 1.0, tauR)]] for i in range(H * 2 + 1)] for sv in SERVERS}
+        else:
+            trR, tauR, rowsR = tr, tau, rowsF
+        at_base = lambda sv, h, p="1": conv_row(PR, tr, sv, h, H, 1.0, tau, m1(h)) if float(p) <= SPLIT else conv_row(PR, trR, sv, h, H, 1.0, tauR)  # noqa: E731
         m_src = tr.get("m_src", {})
     else:   # 고정 모델 파일이 없을 때만 (옛 웹과 같게 viz 곡선)
         H, train, base, lv, tau = cv["H"], list(seas), None, None, cv["tau_p"]
         rowsF = {sv: [[r[0], r[1], r[2]] for i, r in enumerate(cv["srv"][sv]) if i % 2 == 0] for sv in SERVERS}
-        at_base = lambda sv, h: min(cv["srv"][sv], key=lambda r: abs(r[0] - h))[1:3]  # noqa: E731
+        rowsR = rowsF
+        at_base = lambda sv, h, p="1": min(cv["srv"][sv], key=lambda r: abs(r[0] - h))[1:3]  # noqa: E731
         m_src = cv["m_src"]
     # 지점마다 곡선 점검 (CONV_RULE): 최종 1·3·10·30% 근처(÷1.3~×1.3)로 끝난 칸 중 그 곡선을 맞춘 학습 시즌의 것을
     # 이번 시즌 세기 없는 곡선과 견준다 (표본 안 점검)
@@ -322,8 +336,8 @@ def conv(vdata, src, lat_H=None):
             hit = [p for p in CAND if float(p) / near <= f <= float(p) * near]
             if not hit:
                 continue
-            P, sd = at_base(u["sv"], u["h"])
             for p in hit:
+                P, sd = at_base(u["sv"], u["h"], p)
                 res[(u["sv"], p)].append((s, u["P"] - P, sd))
     check = {sv: {} for sv in SERVERS}
     for (sv, p), L in res.items():
@@ -340,7 +354,8 @@ def conv(vdata, src, lat_H=None):
         live = {**src["pred"], "level": round(math.exp(lv["mu"]), 4) if lv else None, "sd": round(lv["sd"], 4) if lv else None,
                 "persons": lv.get("persons") if lv else None, "tau": round(tau, 4)}
     return {"H": H, "seasons": seas, "rule": CONV_RULE, "check": check, "check_seasons": train, "base": base, "live": live,
-            "borrow": {sv: (m_src.get(sv) or "").startswith("borrow") for sv in SERVERS}, "srv": rowsF}
+            "borrow": {sv: (m_src.get(sv) or "").startswith("borrow") for sv in SERVERS}, "srv": rowsF, "srv_ref": rowsR, "split": SPLIT,
+            "m1": round(PR.m1_factor(src["model"], float(src["pred"]["T"])), 4) if src and src.get("pred") and src["model"].get("m1") else None}
 
 
 def sink(vdata, cvd, reg, src):
