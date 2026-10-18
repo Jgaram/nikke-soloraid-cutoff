@@ -152,7 +152,7 @@ li { margin: 3px 0; }
 <body>
 <main>
 <p class="muted"><a href="./">← 이번 시즌 (컷 예측 · 계산기)</a> · <a href="./#past">지난 시즌 (커트라인 · 되돌려 보기 · 침수 비교)</a> · <a href="./#method">방법 (작업 흐름 · 로직)</a></p>
-<p class="note">이 페이지는 예측 방법을 고르기 전의 분석 화면입니다. 아래 ①은 끝난 시즌 23개의 평균 「% 변환」이고, ②의 정확도는 <b>여러 시즌 prior</b>(맞힐 시즌 하나만 빼고 나머지 전부)로 잰 것입니다. 첫 화면 「이번 시즌」 탭의 컷 예측과 계산기는 <b>S41 한 시즌 곡선</b>로 냅니다 (지난 시즌 검증으로 고른 방법 — 아래 ①·②와는 설정이 다릅니다). 이 방법으로 지난 시즌을 그 앞 시즌 자료만으로 되돌려 본 결과는 첫 화면의 「지난 시즌」 탭에 있습니다. 독립 정확도는 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다.</p>
+<p class="note">이 페이지는 예측 방법을 고르기 전의 분석 화면입니다. 아래 ①은 끝난 시즌 23개의 평균 「% 변환」이고, ②의 정확도는 <b>여러 시즌 prior</b>(맞힐 시즌 하나만 빼고 나머지 전부)로 잰 것입니다. 첫 화면 「이번 시즌」 탭의 컷 예측과 계산기는 <b>최근 5시즌(S37~S41) 곡선 · 1·3%는 이번 시즌 침수 세기 갱신·구간 넓히기 더함</b>로 냅니다 (지난 시즌 검증으로 고른 방법 — 아래 ①·②와는 설정이 다릅니다). 이 방법으로 지난 시즌을 그 앞 시즌 자료만으로 되돌려 본 결과는 첫 화면의 「지난 시즌」 탭에 있습니다. 독립 정확도는 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다.</p>
 
   <h1>솔로레이드 컷 분석 현황</h1>
   <p class="sub" id="sub"></p>
@@ -694,7 +694,7 @@ function renderNotes() {
   document.getElementById("notes").innerHTML = DATA.notes[SV].notes.map(s => `<li>${s}</li>`).join("");
 }
 document.getElementById("xvN").textContent = SEAS.length < 8 ? `개발 시즌 ${SEAS.length}개로 돌린 시험 운전이라 판정에는 쓰지 않습니다(기준: 시즌 8개 이상).` : `개발 시즌 ${SEAS.length}개로 잰 결과입니다.`;
-document.getElementById("sub").innerHTML = `개발 시즌 ${SEAS[0]}~${SEAS[SEAS.length - 1]} (${SEAS.length}개) · 만든 시각 2026-10-18 11:07 KST · 자료: <code>data/solo-raid/analysis/</code>, 시즌별 <code>state/</code>`;
+document.getElementById("sub").innerHTML = `개발 시즌 ${SEAS[0]}~${SEAS[SEAS.length - 1]} (${SEAS.length}개) · 만든 시각 2026-10-18 11:08 KST · 자료: <code>data/solo-raid/analysis/</code>, 시즌별 <code>state/</code>`;
 document.getElementById("stamp").textContent = `만든 도구: tools/solo_raid/viz.py · 검증 xval_dev.json (도구 ${DATA.stamp.xval_head}) · prior ${DATA.stamp.prior} · 정답 표 ${DATA.stamp.answer_key_final ? "최종" : "개발 시즌만"}`;
 
 /* ---------- 서버 전환 ---------- */
@@ -715,7 +715,7 @@ function renderAll() {
 renderAll();
 </script>
 <script>
-document.getElementById("sub").textContent = "개발 시즌 S19~S41 (23개) · 2026-10-18 11:07 KST 기준";
+document.getElementById("sub").textContent = "개발 시즌 S19~S41 (23개) · 2026-10-18 11:08 KST 기준";
 document.getElementById("stamp").textContent = "정답 표는 끝난 시즌을 모두 씁니다 — 이 시즌들로 방법을 고르고 다듬었으므로 개발 검증입니다. 독립 검증은 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다.";
 </script>
 </body>
