@@ -1,6 +1,6 @@
 {
- "asof": "2026-10-18 11:38",
- "content": "a941a9b2786419fa",
+ "asof": "2026-10-18 11:52",
+ "content": "dd4faaa6afd62207",
  "past": [
   {
    "season": "S19",
@@ -64263,6 +64263,32 @@
     }
    }
   ]
+ },
+ "boss_img": {
+  "S19": "boss/S19.webp?v=34de0a6f",
+  "S20": "boss/S20.webp?v=6e3bd08b",
+  "S21": "boss/S21.webp?v=311e4cf7",
+  "S22": "boss/S22.webp?v=386e5c62",
+  "S23": "boss/S23.webp?v=21744d8e",
+  "S24": "boss/S24.webp?v=9997305c",
+  "S25": "boss/S25.webp?v=bc72198d",
+  "S26": "boss/S26.webp?v=acb10035",
+  "S27": "boss/S27.webp?v=80e8ea32",
+  "S28": "boss/S28.webp?v=03b95860",
+  "S29": "boss/S29.webp?v=2b74018e",
+  "S30": "boss/S30.webp?v=f251211d",
+  "S31": "boss/S31.webp?v=b7f9a5df",
+  "S32": "boss/S32.webp?v=f74440f3",
+  "S33": "boss/S33.webp?v=34b73953",
+  "S34": "boss/S34.webp?v=ee1ac9b1",
+  "S35": "boss/S35.webp?v=71641a5a",
+  "S36": "boss/S36.webp?v=7db2a4e4",
+  "S37": "boss/S37.webp?v=dfd4840f",
+  "S38": "boss/S38.webp?v=79553987",
+  "S39": "boss/S39.webp?v=c2fb3b7b",
+  "S40": "boss/S40.webp?v=063d9151",
+  "S41": "boss/S41.webp?v=66f86080",
+  "S42": "boss/S42.webp?v=ac4f6577"
  },
  "analysis": {
   "seasons": [
