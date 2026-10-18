@@ -383,7 +383,8 @@ def sink(vdata, cvd, reg, src):
         tr, trd = src["prior"]["transform"], pd["transform"]
         H = int(src["pred"].get("H") or cvd["H"])
         m = math.exp(src["level"]["mu"])
-        L = [math.log(PR.p_full(tr, "KR", h, 1.0, H, m) / PR.p_full(trd, "KR", h, 1.0, H)) for h in range(12, H + 1)]
+        # 끝 시각(h = H)은 두 곡선 모두 0이라 비가 정의되지 않아 뺀다 (2026-10-18, 첫 세기 고침 T42에서 0÷0)
+        L = [math.log(PR.p_full(tr, "KR", h, 1.0, H, m) / PR.p_full(trd, "KR", h, 1.0, H)) for h in range(12, H)]
         live = {"season": src["pred"]["season"], "T": src["pred"]["T"], "T_kst": src["pred"].get("T_kst"),
                 "lev": round(math.exp(sum(L) / len(L)), 4), "sd": round(src["level"]["sd"], 4), "persons": src["level"].get("persons")}
     ps = (pd.get("season") or "").split("+")
