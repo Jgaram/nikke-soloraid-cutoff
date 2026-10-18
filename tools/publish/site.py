@@ -421,38 +421,51 @@ def boss_img():
     return out
 
 
-WEAK = {"Fire": "작열", "Water": "수냉", "Electric": "전격", "Iron": "철갑", "Wind": "풍압"}
-# 시즌 형식이 다른 것 (2026-10-18 사용자 결정 「형식이 다른 것만」 — seasons.json note·registry 형식 notes에서 옮겨 적음).
-# [꼬리표, 한 줄 설명]. 웹 표에 꼬리표, 마우스를 올리면 설명. 모의전 사전 개방은 S41부터 모든 시즌이라 아래 boss_info가 붙인다.
-SPECIAL = {
-    "S19": ["재진행", "첫 진행분이 일시정지 기능 오류로 초기화 — 11-08부터 다시 진행"],
-    "S26": ["재시작", "6월 진행분 중단·취소 — 07-03 점검 뒤 다시 시작"],
-    "S28": ["재개", "도중에 닫고 챌린지 기록 초기화 — 18:30경 재개, 4일 연장"],
-    "S38": ["재오픈", "06-18 진행분 중단·취소 — 07-03 재오픈 첫날부터 챌린지 (5일)"],
-}
-MOCK_FROM = 41   # 개발자 노트 2026-08-28 「첫날부터 도전 난이도 모의전」
+WEAK = {"Fire": ("fire", "작열"), "Water": ("water", "수냉"), "Electric": ("electric", "전격"), "Iron": ("iron", "철갑"), "Wind": ("wind", "풍압")}
+MOCK_FROM = 41   # 챌린지 전 모의전 가능 — 개발자 노트 2026-08-28 「첫날부터 도전 난이도 모의전」
+
+
+def span_txt(a, b):
+    """'2024-10-31 12:00' ~ '2024-11-01 22:00' → '10-31 12:00 ~ 11-01 22:00 (1일 10시간)'."""
+    d = dt.datetime.strptime(b, "%Y-%m-%d %H:%M") - dt.datetime.strptime(a, "%Y-%m-%d %H:%M")
+    h = round(d.total_seconds() / 3600)
+    return f"{a[5:]} ~ {b[5:]} ({f'{h // 24}일 ' if h >= 24 else ''}{h % 24}시간)".replace(" 0시간)", ")")
 
 
 def boss_info(seasons):
-    """시즌 → {"weak": 약점 속성(한국어), "tags": [[꼬리표, 설명], …]} (2026-10-18 사용자 요청 — 지난 시즌 탭 표의 보스 칸).
-    약점은 data/solo-raid/bosses/bosses.json의 weak (tools/publish/boss_icons.py가 nikke-analysis 표에서 받아 둠). 없으면 빠진다."""
+    """시즌 → {"weak": [아이콘 이름, 한국어], "tags": [[꼬리표, 설명], …]} (2026-10-18 사용자 요청 — 지난 시즌 탭 표의 보스 칸).
+    data/solo-raid/bosses/bosses.json(tools/publish/boss_icons.py가 nikke-analysis 표에서 받아 둠)의 weak·periods로만 정한다 — 손으로 적는 목록 없음.
+    도중에 닫혔다 다시 열린 시즌(기간 2개 이상)은 까닭(오류·초기화·취소)과 상관없이 모두 「재오픈」, 설명은 닫히기 전에 열려 있던 기간 (사용자 결정)."""
     try:
         meta = jload(os.path.join(D, "bosses", "bosses.json"))
     except (OSError, ValueError):
         meta = {}
     out = {}
     for s in sorted(set(seasons) | set(meta), key=split.snum):
-        x = {}
-        w = WEAK.get((meta.get(s) or {}).get("weak"))
-        if w:
-            x["weak"] = w
-        tags = [SPECIAL[s]] if s in SPECIAL else []
+        m, x, tags = meta.get(s) or {}, {}, []
+        if m.get("weak") in WEAK:
+            x["weak"] = list(WEAK[m["weak"]])
+        closed = [p for p in m.get("periods") or [] if p[2] == "suspended"]
+        if closed:
+            tags.append(["재오픈" if len(closed) == 1 else f"재오픈 {len(closed)}회",
+                         "닫히기 전 열린 기간: " + " · ".join(span_txt(p[0], p[1]) for p in closed)])
         if split.snum(s) >= MOCK_FROM:
             tags.append(["모의전 선개방", "챌린지가 열리기 전부터 도전 난이도 모의전 가능 (S41부터)"])
         if tags:
             x["tags"] = tags
         if x:
             out[s] = x
+    return out
+
+
+def el_img():
+    """약점 속성 아이콘 → 웹 주소 (data/solo-raid/bosses/elements/{속성}.png → el/{속성}.png, 주소 끝 v=는 내용 지문)."""
+    out = {}
+    for name in ("fire", "water", "electric", "iron", "wind"):
+        p = os.path.join(D, "bosses", "elements", f"{name}.png")
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                out[name] = f"el/{name}.png?v={hashlib.sha1(f.read()).hexdigest()[:8]}"
     return out
 
 
@@ -508,7 +521,7 @@ def build(prev=None):
     cvd = conv(vdata, src)
     data = {"past": pst, "past_pcts": past_pcts(pst), "live": lv, "latest": lat, "conv": cvd,
             "sink": sink(vdata, cvd, reg, src), "back": back(reg), "boss_img": boss_img(),
-            "boss_info": boss_info(list(reg) + [x["season"] for x in lv]),
+            "boss_info": boss_info(list(reg) + [x["season"] for x in lv]), "el_img": el_img(),
             "analysis": {"seasons": vdata["season_list"], "live_method": " · ".join(methods) if methods else default_method()}}
     content = fingerprint(data, vdata)
     data = {"asof": asof_for(content, prev), "content": content, **data}
@@ -562,6 +575,10 @@ def main():
         f.write(analysis_html(vdata, data))
     with open(os.path.join(a.out, ".nojekyll"), "w") as f:
         f.write("")
+    if data["el_img"]:
+        os.makedirs(os.path.join(a.out, "el"), exist_ok=True)
+        for name in data["el_img"]:
+            shutil.copyfile(os.path.join(D, "bosses", "elements", f"{name}.png"), os.path.join(a.out, "el", f"{name}.png"))
     if data["boss_img"]:
         os.makedirs(os.path.join(a.out, "boss"), exist_ok=True)
         for s in data["boss_img"]:

@@ -9,6 +9,9 @@ python3 -I tools/publish/boss_icons.py [--from DIR] [--check]
   `data/solo-raid/bosses/S{n}.webp`에 쓰고, `bosses.json`에 출처를 적는다. 있는 그림은 다시 받지 않는다.
 - 약점 속성(`weak_element` — Fire·Water·Electric·Iron·Wind)도 `bosses.json`의 `weak`에 적는다 (2026-10-18 사용자 요청,
   웹 지난 시즌 표의 꼬리표). 그림은 있는데 `weak`가 없는 시즌은 표만 다시 읽어 채운다.
+- 진행 기간(`data/processed/soloraid_periods.csv`)도 읽어, 도중에 닫혔다 다시 열린 시즌(기간 2개 이상)은 `periods`
+  ([시작, 끝, 끝난 까닭] — 끝난 까닭 suspended = 도중에 닫힘)로 적는다. 웹의 「재오픈」 꼬리표가 이것으로 정해진다 (2026-10-18 사용자 요청).
+- 약점 속성 아이콘(같은 레포 `data/assets/icons/elements/{속성}.png`, 63×73 PNG)이 없으면 `bosses/elements/`에 받는다.
 - 보스 이름이 이 레포와 다르면(시즌 번호가 어긋났을 수 있음) 받지 않고 경고만 한다.
 - --from: nikke-analysis 로컬 클론 (주지 않으면 GitHub raw에서 받는다)
 - --check: 받지 않고 무엇이 없는지만 보인다
@@ -31,6 +34,9 @@ OUT = os.path.join(D, "bosses")
 RAW = "https://raw.githubusercontent.com/Jgaram/nikke-analysis/main/"
 CSV = "data/processed/soloraid_seasons.csv"
 IMG = "data/assets/icons/bosses/{}.webp"
+PERIODS = "data/processed/soloraid_periods.csv"
+EL = "data/assets/icons/elements/{}.png"
+ELEMENTS = ("fire", "water", "electric", "iron", "wind")
 UA = "nikke-community-research/0.1 (+https://github.com/jgaram/nikke-community)"
 MAX_BYTES = 200_000
 
@@ -72,11 +78,10 @@ def main():
     meta = json.load(open(meta_p, encoding="utf-8")) if os.path.exists(meta_p) else {}
     want = [s for s in known_seasons() if not os.path.exists(os.path.join(OUT, f"{s}.webp"))]
     no_weak = [s for s in known_seasons() if s not in want and not (meta.get(s) or {}).get("weak")]
-    if not want and not no_weak:
-        print("보스 그림: 모두 있음")
-        return
+    no_el = [e for e in ELEMENTS if not os.path.exists(os.path.join(OUT, "elements", f"{e}.png"))]
     if a.check:
-        print("보스 그림 없음: " + (", ".join(want) or "-") + " · 약점 없음: " + (", ".join(no_weak) or "-"))
+        print("보스 그림 없음: " + (", ".join(want) or "-") + " · 약점 없음: " + (", ".join(no_weak) or "-")
+              + " · 속성 아이콘 없음: " + (", ".join(no_el) or "-"))
         return
     rows = {f"S{int(r['season'])}": r for r in csv.DictReader(io.StringIO(fetch(a.src, CSV).decode("utf-8")))}
     names = known_seasons()
@@ -85,6 +90,31 @@ def main():
         r = rows.get(s)
         if r and r.get("weak_element") and (not names.get(s) or norm(r.get("boss_ko")) == norm(names[s])):
             meta.setdefault(s, {})["weak"] = r["weak_element"]
+    # 진행 기간: 끝난 시즌은 바뀌지 않지만 nikke-analysis가 고칠 수 있어 매번 다시 읽는다 (작은 표 하나)
+    try:
+        per = {}
+        for r in csv.DictReader(io.StringIO(fetch(a.src, PERIODS).decode("utf-8"))):
+            per.setdefault(f"S{int(r['season'])}", []).append(r)
+        for s in names:
+            ps = sorted(per.get(s, []), key=lambda r: int(r["period"]))
+            if len(ps) > 1 and (not names.get(s) or norm((rows.get(s) or {}).get("boss_ko")) == norm(names[s])):
+                meta.setdefault(s, {})["periods"] = [[r["start_at"][:16].replace("T", " "), r["end_at"][:16].replace("T", " "), r["end_reason"]] for r in ps]
+            elif s in meta:
+                meta[s].pop("periods", None)
+    except (OSError, ValueError, KeyError) as e:
+        miss.append(f"진행 기간 표를 읽지 못함 ({e}) — 있던 값 그대로")
+    for e in no_el:
+        try:
+            b = fetch(a.src, EL.format(e))
+        except OSError as x:
+            miss.append(f"속성 아이콘 {e} 받지 못함 ({x})")
+            continue
+        if b[:8] != b"\x89PNG\r\n\x1a\n" or len(b) > 50_000:
+            miss.append(f"속성 아이콘 {e}가 PNG가 아니거나 너무 큼 ({len(b):,}바이트)")
+            continue
+        os.makedirs(os.path.join(OUT, "elements"), exist_ok=True)
+        with open(os.path.join(OUT, "elements", f"{e}.png"), "wb") as f:
+            f.write(b)
     for s in want:
         r = rows.get(s)
         if not r or not r.get("boss_image"):
