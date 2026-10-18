@@ -43,8 +43,7 @@ FOOTER = (
     '    <p>코드와 수집 방법: <a href="https://github.com/jgaram/nikke-soloraid-cutoff">github.com/jgaram/nikke-soloraid-cutoff</a>'
     ' (CC0 1.0 — 이 프로젝트가 만든 코드와 숫자에만 해당합니다).</p>\n'
     '    <p>컷 정보는 커뮤니티 이용자분들이 공개로 올린 순위 화면에서 모았습니다. 예측값이라 실제 컷과 다를 수 있습니다.</p>\n'
-    '    <p>「승리의 여신: 니케」와 게임 속 이름·내용·보스 그림의 권리는 SHIFT UP과 Level Infinite에 있습니다'
-    ' (보스 그림은 <a href="https://enikk.app">enikk.app</a>에서 가져왔습니다).'
+    '    <p>「승리의 여신: 니케」와 게임 속 이름·내용·보스 그림의 권리는 SHIFT UP과 Level Infinite에 있습니다.'
     ' 이 사이트는 게임사와 관계없는 비공식 팬 프로젝트입니다.</p>\n'
 )
 
