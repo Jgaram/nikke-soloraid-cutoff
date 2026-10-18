@@ -65,6 +65,7 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 1. 공식 공지 아카이브 `notices/`에서 이번 솔로 레이드 공지(보스·기간)를 찾는다. 없거나 보스 이름이 없으면 사용자에게 묻는다.
 2. `data/solo-raid/S{n}/state/season.json`:
    `name`·`boss`·`start`·`end`, `c_start`(기본 3일차 05:00 — 공지가 다르게 말하면 그것, 근거를 README에), `e_start` = `c_start`, `e_end` = 종료 + 4일 05:00.
+   이어서 웹의 보스 그림을 받는다: `python3 -I tools/publish/boss_icons.py` (nikke-analysis에 아직 없으면 「아직 없음」만 나오고 넘어간다 — 웹 빌드가 다음에 다시 시도, [publish 「보스 그림」](publish.md#보스-그림)).
 3. `data/solo-raid/S{n}/README.md`를 만든다 (일괄 수집 「시즌 요약」 형식의 머리 + 몫 `python3 -I tools/solo_raid/split.py role S{n}`).
    **맨 끝 절은 「자동 실행」 표로 둔다** — 실행마다 `live_tick.py record`가 README 맨 끝에 줄을 덧붙인다.
 4. 시즌 전용 세션과 예약 작업을 만든다 (켜는 세션이 `claude-code-remote` 도구로).

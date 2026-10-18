@@ -139,6 +139,17 @@ sup.cv { color: var(--text-muted); font-size: 11px; margin-left: 1px; }
 .calcbox input[type=number] { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
 .calcbox .res.weak .big { color: var(--text-muted); }
 .boss-sm { display: none; }
+/* 보스 그림 (2026-10-18 사용자 요청 — enikk 그림, 배경이 투명한 WebP라 두 테마에 그대로). 그림이 없는 시즌은 이름만 */
+.bimg { width: 26px; height: 26px; object-fit: contain; vertical-align: middle; margin: -5px 6px -5px 0; }
+.hero { display: flex; align-items: center; gap: 14px; }
+.hero-img { flex: none; width: 92px; height: 92px; object-fit: contain; padding: 6px; border-radius: 12px; background: var(--surface-0); border: 1px solid var(--border); }
+.hero-txt { flex: 1; min-width: 0; }
+.hero-txt h2 { word-break: keep-all; }
+.hero-txt .controls { margin-bottom: 0; }
+.hrow { display: flex; align-items: center; gap: 10px; }
+.hrow .bimg { width: 48px; height: 48px; margin: 0; flex: none; }
+.tip .bimg { display: block; width: 72px; height: 72px; margin: 0 0 4px; }
+.chip .bimg { width: 20px; height: 20px; margin: -3px -2px -3px 0; }
 /* 탭 (2026-10-18 사용자 결정 — 「이번 시즌」·「지난 시즌」) */
 .tabs { display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--border); margin: 6px 0 0; }
 .tabs button { font: inherit; font-size: 15px; padding: 9px 14px 8px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
@@ -185,6 +196,9 @@ footer { color: var(--text-muted); font-size: 13px; margin-top: 28px; }
 details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5px; margin-top: 12px; }
 @media (max-width: 600px) {
   .card { padding: 16px 14px; }
+  .hero { gap: 10px; }
+  .hero-img { width: 60px; height: 60px; padding: 4px; }
+  .boss-sm .bimg { width: 20px; height: 20px; margin: -3px 4px -3px 0; }
   .hide-sm { display: none; }
   .boss-sm { display: block; font-size: 12px; color: var(--text-muted); }
   .rng-sm { display: block; }
@@ -217,8 +231,9 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
   <!-- 「이번 시즌」: 진행 중(끝났으면 이벤트 종료까지) 시즌의 컷 예측과 계산기 (2026-10-18 사용자 결정) -->
   <div id="tab-now" role="tabpanel" aria-labelledby="tabBtn-now">
   <section class="card" id="liveCard">
-    <div class="ch"><h2 id="liveTitle">최종 컷 예측</h2><a class="how" href="#method-pred">설명</a></div>
-    <div class="controls" id="liveCtl"></div>
+    <div class="hero"><img class="hero-img" id="liveBoss" alt="" hidden>
+      <div class="hero-txt"><div class="ch"><h2 id="liveTitle">최종 컷 예측</h2><a class="how" href="#method-pred">설명</a></div>
+      <div class="controls" id="liveCtl"></div></div></div>
     <div id="liveBody"></div>
   </section>
 
@@ -271,8 +286,9 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
   </section>
 
   <section class="card" id="recCard" hidden>
-    <div class="ch"><h2>실제로 낸 예측<span class="tag">독립 검증</span></h2><a class="how" href="#method-rec">설명</a></div>
-    <div class="controls" id="recCtl"></div>
+    <div class="hero"><img class="hero-img" id="recBoss" alt="" hidden>
+      <div class="hero-txt"><div class="ch"><h2>실제로 낸 예측<span class="tag">독립 검증</span></h2><a class="how" href="#method-rec">설명</a></div>
+      <div class="controls" id="recCtl"></div></div></div>
     <div id="recBody"></div>
   </section>
 
@@ -532,11 +548,16 @@ const LIVE = DATA.live.filter(x => x.preds.length);
 const CUR = LIVE.find(x => !ended(x)) || null;                          // 진행 중 시즌 (계산기가 쓴다)
 const NOWS = CUR || LIVE.filter(x => NOW < evEnd(x)).pop() || null;     // 「이번 시즌」 탭에 보일 시즌
 const RECS = LIVE.filter(ended);                                        // 「지난 시즌」 탭의 「실제로 낸 예측」
+// 보스 그림: 표·풍선에는 작은 그림, 예측 카드 머리에는 큰 그림 (2026-10-18). 이름이 옆에 있으니 alt는 비운다
+const BIMG = DATA.boss_img || {};
+const bossImg = (s, lazy = true) => BIMG[s] ? `<img class="bimg" src="${BIMG[s]}" alt=""${lazy ? ' loading="lazy"' : ""} decoding="async">` : "";
+function setHero(id, s) { const im = document.getElementById(id), u = s && BIMG[s]; im.hidden = !u; if (u) im.src = u; else im.removeAttribute("src"); }
 function note(body, cls, text) { const n = document.createElement("p"); n.className = cls; n.textContent = text; body.appendChild(n); return n; }
 function drawLive() {
   const ctl = document.getElementById("liveCtl"), body = document.getElementById("liveBody"), title = document.getElementById("liveTitle");
   ctl.innerHTML = ""; body.innerHTML = "";
   const waiting = LAT_ON && !LIVE.some(x => x.season === LAT.season);   // 새 시즌이 시작했지만 첫 예측 전
+  setHero("liveBoss", NOWS ? NOWS.season : waiting ? LAT.season : null);
   if (waiting) note(body, "gnote", `${LAT.season} ${LAT.boss || ""} 챌린지 진행 중 (${isoTxt(LAT.c_start)} ~ ${isoTxt(LAT.end)}) · 첫 예측은 시작 6시간 뒤`);
   if (!NOWS) {
     title.textContent = "최종 컷 예측";
@@ -571,6 +592,7 @@ function drawRec() {
     lab.appendChild(sel); ctl.appendChild(lab);
   }
   const S = RECS.find(x => x.season === recSel);
+  setHero("recBoss", S.season);
   const info = document.createElement("span"); info.className = "muted";
   info.textContent = `${S.season} ${S.boss || ""} · 챌린지 ${isoTxt(S.c_start)} ~ ${isoTxt(S.end)}`;
   ctl.appendChild(info);
@@ -916,13 +938,13 @@ function drawPast() {
       const sx = svgX(f.svg, W, ev);
       const i = Math.max(0, Math.min(R.length - 1, Math.round((sx - f.X(0)) / bw))), r = R[i], c = (r.cuts || {})[srv] || {}, b = (r.basis || {})[srv] || {};
       const lines = PP.filter(p => c[p] != null).map(p => `<div class="r"><i class="sw" style="background:${COL(p)}"></i>${p}% ${fmt(c[p], 2)}억 <span class="muted">${BASIS[b[p]] || ""}</span></div>`).join("") || `<span class="muted">${SRV[srv]} 컷 없음</span>`;
-      tip.show(`<b>${r.season} ${r.boss}</b> · ${r.start}<br>${lines}`, ...hostXY(host, ev));
+      tip.show(`${bossImg(r.season, false)}<b>${r.season} ${r.boss}</b> · ${r.start}<br>${lines}`, ...hostXY(host, ev));
     }, () => tip.hide());
   }
   const rows = R.slice().reverse().map(r => {
     const c = (r.cuts || {})[srv] || {}, b = (r.basis || {})[srv] || {};
     const cells = PP.map(p => `<td>${c[p] != null ? fmt(c[p], 2) + (b[p] === "curve" ? `<sup class="cv">*</sup>` : "") : "–"}</td>`).join("");
-    return `<tr><td>${r.season}<span class="boss-sm">${r.boss}</span></td><td class="l hide-sm">${r.boss}</td><td class="l hide-sm">${r.start}</td>${cells}<td class="l muted hide-sm">${srcText(r)}</td></tr>`;
+    return `<tr><td>${r.season}<span class="boss-sm">${bossImg(r.season)}${r.boss}</span></td><td class="l hide-sm">${bossImg(r.season)}${r.boss}</td><td class="l hide-sm">${r.start}</td>${cells}<td class="l muted hide-sm">${srcText(r)}</td></tr>`;
   });
   tbl.innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th><th class="l hide-sm">시작</th>${PP.map(p => `<th>${p}%</th>`).join("")}<th class="l hide-sm">출처</th></tr></thead><tbody>${rows.join("")}</tbody>`;
   note.innerHTML = `<sup class="cv">*</sup> 관측 곡선 · 표시 없음 = 집계표`
@@ -963,9 +985,9 @@ function drawBack() {
   const err = r => tr != null ? r[1] / tr - 1 : null;
   const quick = [24, 48, 96].map(T => R.find(r => r[0] === T)).filter(r => r && tr != null)
     .map(r => `${r[0]}시간 ${pctf(err(r))}`).join(" · ");
-  head.innerHTML = `<b>${S.season} ${S.boss || ""}</b> · ${isoTxt(S.c_start).slice(0, 10)} 시작 · 학습 ${S.train[0]}~${S.train[S.train.length - 1]} (${S.train.length}시즌)`
+  head.innerHTML = `<span class="hrow">${bossImg(S.season, false)}<span><b>${S.season} ${S.boss || ""}</b> · ${isoTxt(S.c_start).slice(0, 10)} 시작 · 학습 ${S.train[0]}~${S.train[S.train.length - 1]} (${S.train.length}시즌)`
     + (tr != null ? ` · 실제 ${bPct}% 컷 <b>${fmt(tr)}억</b> <span class="muted">(${BASIS[X0.basis] || X0.basis || ""})</span>` + (quick ? `<br><span class="muted">예측 오차 ${quick}</span>` : "")
-                  : ` · <span class="muted">${SRV[srv]} ${bPct}% 실제 컷은 근거가 부족해 예측만 보입니다</span>`);
+                  : ` · <span class="muted">${SRV[srv]} ${bPct}% 실제 컷은 근거가 부족해 예측만 보입니다</span>`) + `</span></span>`;
   lg.innerHTML = `<span><i class="sw" style="background:${COL(bPct)}"></i>${bPct}% 예측(가운데 값)</span><span><i class="sw band" style="background:${COL(bPct)}"></i>80% 구간</span>`
     + (tr != null ? `<span><i class="sw dash"></i>실제 컷</span><span><i class="sw band" style="background:var(--text-muted)"></i>허용 오차 ±${Math.round(tol * 100)}%</span>`
       + `<span><i class="dot" style="background:${COL(bPct)}"></i>허용 오차 안</span><span><i class="dot" style="background:var(--surface-1);box-shadow:inset 0 0 0 2px ${COL(bPct)}"></i>밖</span>` : "");
@@ -1017,7 +1039,7 @@ function drawBackSum() {
       ok[i][0] += inn; ok[i][1]++; cov[i][0] += r[2] <= tr && tr <= r[3]; cov[i][1]++;
       return `<td class="${inn ? "" : "out"}">${pctf(e)}</td>`;
     }).join("");
-    return `<tr data-s="${S.season}" class="${S.season === bSea ? "sel" : ""}"><td>${S.season}<span class="boss-sm">${S.boss || ""}</span></td><td class="l hide-sm">${S.boss || ""}</td>${cells}</tr>`;
+    return `<tr data-s="${S.season}" class="${S.season === bSea ? "sel" : ""}"><td>${S.season}<span class="boss-sm">${bossImg(S.season)}${S.boss || ""}</span></td><td class="l hide-sm">${bossImg(S.season)}${S.boss || ""}</td>${cells}</tr>`;
   }).join("");
   const frac = a => a[1] ? `${a[0]}/${a[1]}` : "–";
   tb.innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th>${Ts.map(T => `<th>${T}시간</th>`).join("")}</tr></thead><tbody>${body}</tbody>`
@@ -1089,13 +1111,13 @@ function drawSink() {
   const idx = ev => Math.max(0, Math.min(items.length - 1, Math.round((svgX(f.svg, W, ev) - f.X(0)) / bw)));
   hover(hit, ev => {
     const x = items[idx(ev)];
-    tip.show(`<b>${skName(x)} ${x.boss || ""}</b><br>세기 <b>${x.lev.toFixed(2)}</b>배` + (x.live && x.sd ? ` <span class="muted">(80% ${(x.lev * Math.exp(-Z80 * x.sd)).toFixed(2)}~${(x.lev * Math.exp(Z80 * x.sd)).toFixed(2)})</span>` : "")
+    tip.show(`${bossImg(x.season, false)}<b>${skName(x)} ${x.boss || ""}</b><br>세기 <b>${x.lev.toFixed(2)}</b>배` + (x.live && x.sd ? ` <span class="muted">(80% ${(x.lev * Math.exp(-Z80 * x.sd)).toFixed(2)}~${(x.lev * Math.exp(Z80 * x.sd)).toFixed(2)})</span>` : "")
       + `<br>24시간 뒤 ${pf(x0)} → 최종 약 <b>${pf(x0 * 10 ** (Pa * x.lev))}</b> <span class="muted">(평균 ${pf(x0 * 10 ** Pa)})</span><br><span class="muted">누르면 아래 그래프에 넣고 뺍니다</span>`, ...hostXY(bar, ev));
   }, () => tip.hide());
   hit.addEventListener("click", ev => skToggle(items[idx(ev)].season));
   // 선: 지금 x0%였던 사람의 최종 % (평균 + 고른 시즌)
   const sel = skSel.map(y => ({...items.find(x => x.season === y.s), slot: y.slot})).filter(x => x.season);
-  document.getElementById("skChips").innerHTML = sel.map(x => `<button class="chip" data-s="${x.season}"><i class="sw" style="background:${SLOT[x.slot]}"></i>${skName(x)}<span class="x">✕</span></button>`).join("")
+  document.getElementById("skChips").innerHTML = sel.map(x => `<button class="chip" data-s="${x.season}"><i class="sw" style="background:${SLOT[x.slot]}"></i>${bossImg(x.season, false)}${skName(x)}<span class="x">✕</span></button>`).join("")
     + (sel.length < 3 ? `<span class="muted">위 점을 눌러 시즌을 더하세요</span>` : "");
   document.getElementById("skChips").onclick = e => { const b = e.target.closest("button.chip"); if (b) skToggle(b.dataset.s); };
   const HL = (SK.dev[srv].length - 1) / 2, h0 = 6;
@@ -1170,7 +1192,7 @@ function drawSink() {
     + (dots.length ? sel.filter(x => !x.live).map(x => `${x.season} ${byS[x.season] || 0}개`).join(" · ") : "이 % 근처 관측 없음"))
     + (SK.borrow[srv] ? `${nPast ? " · " : ""}${SRV[srv]}: 한섭 곡선 사용` : "");
   document.getElementById("skTbl").innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th><th>세기</th>${[24, 48, 96].map(h => `<th>${h}시간 ${pf(x0)} →</th>`).join("")}</tr></thead><tbody>`
-    + items.slice().reverse().map(x => `<tr><td>${skName(x)}<span class="boss-sm">${x.boss || ""}</span></td><td class="l hide-sm">${x.boss || ""}</td><td>${x.lev.toFixed(2)}</td>`
+    + items.slice().reverse().map(x => `<tr><td>${skName(x)}<span class="boss-sm">${bossImg(x.season)}${x.boss || ""}</span></td><td class="l hide-sm">${bossImg(x.season)}${x.boss || ""}</td><td>${x.lev.toFixed(2)}</td>`
       + [24, 48, 96].map(h => `<td>${pf(x0 * 10 ** (devP(h) * x.lev))}</td>`).join("") + `</tr>`).join("")
     + `<tr><td>평균</td><td class="hide-sm"></td><td>1.00</td>` + [24, 48, 96].map(h => `<td>${pf(x0 * 10 ** devP(h))}</td>`).join("") + `</tr></tbody>`;
 }

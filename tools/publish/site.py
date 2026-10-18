@@ -7,6 +7,7 @@ python3 -I tools/publish/site.py --out DIR [--prev 이전_data.json]     # DIR/i
   「지난 시즌」(#past) = 지난 시즌 커트라인 · 실제로 낸 예측(끝난 시즌 채점) · 되돌려 보기 · 시즌별 침수 비교(실제 관측 점).
   「방법」(#method) = 작업 흐름(단계별 코드 위치·공개 범위) · 컷 예측 · 계산기 · 지난 시즌 탭 · 검증과 한계. 데이터 탭에는 꼬리표만 둔다.
   tools/publish/site_template.html에 data.json을 넣은 것.
+- boss/S{n}.webp: 시즌별 보스 그림 (data/solo-raid/bosses/, tools/publish/boss_icons.py가 받아 둠 — 2026-10-18). 게임 그림이라 CC0 범위 밖이다.
 - analysis.html: tools/solo_raid/viz.py와 같은 화면(예측 방법·정확도). 공개용으로 위에 안내를 더하고 비공개 경로·수집 상태를 뺀다.
 
 공개 규칙 (docs/publish.md)
@@ -26,6 +27,7 @@ import json
 import math
 import os
 import re
+import shutil
 import statistics
 import sys
 
@@ -41,7 +43,8 @@ FOOTER = (
     '    <p>코드와 수집 방법: <a href="https://github.com/jgaram/nikke-soloraid-cutoff">github.com/jgaram/nikke-soloraid-cutoff</a>'
     ' (CC0 1.0 — 이 프로젝트가 만든 코드와 숫자에만 해당합니다).</p>\n'
     '    <p>컷 정보는 커뮤니티 이용자분들이 공개로 올린 순위 화면에서 모았습니다. 예측값이라 실제 컷과 다를 수 있습니다.</p>\n'
-    '    <p>「승리의 여신: 니케」와 게임 속 이름·내용의 권리는 SHIFT UP과 Level Infinite에 있습니다.'
+    '    <p>「승리의 여신: 니케」와 게임 속 이름·내용·보스 그림의 권리는 SHIFT UP과 Level Infinite에 있습니다'
+    ' (보스 그림은 <a href="https://enikk.app">enikk.app</a>에서 가져왔습니다).'
     ' 이 사이트는 게임사와 관계없는 비공식 팬 프로젝트입니다.</p>\n'
 )
 
@@ -406,6 +409,19 @@ def back(reg):
         return None
 
 
+def boss_img():
+    """시즌 → 웹의 보스 그림 주소 (data/solo-raid/bosses/S{n}.webp, tools/publish/boss_icons.py가 받아 둠 — 2026-10-18).
+    주소 끝의 v=는 그림 내용의 지문이라 그림이 바뀌면 브라우저가 새로 받고, 웹 지문(content)도 바뀐다. 그림이 없는 시즌은 빠진다."""
+    out = {}
+    for p in sorted(glob.glob(os.path.join(D, "bosses", "S*.webp")), key=lambda p: int(re.sub(r"\D", "", os.path.basename(p)) or 0)):
+        with open(p, "rb") as f:
+            b = f.read()
+        if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
+            s = os.path.basename(p)[:-5]
+            out[s] = f"boss/{s}.webp?v={hashlib.sha1(b).hexdigest()[:8]}"
+    return out
+
+
 def head_time():
     """지금 HEAD 커밋 시각 (KST). 웹 입력에 커밋 안 된 변경이 있으면(손으로 돌릴 때) 지금 시각."""
     import subprocess
@@ -457,7 +473,7 @@ def build(prev=None):
     src = curve_source(lat)
     cvd = conv(vdata, src)
     data = {"past": pst, "past_pcts": past_pcts(pst), "live": lv, "latest": lat, "conv": cvd,
-            "sink": sink(vdata, cvd, reg, src), "back": back(reg),
+            "sink": sink(vdata, cvd, reg, src), "back": back(reg), "boss_img": boss_img(),
             "analysis": {"seasons": vdata["season_list"], "live_method": " · ".join(methods) if methods else default_method()}}
     content = fingerprint(data, vdata)
     data = {"asof": asof_for(content, prev), "content": content, **data}
@@ -511,6 +527,10 @@ def main():
         f.write(analysis_html(vdata, data))
     with open(os.path.join(a.out, ".nojekyll"), "w") as f:
         f.write("")
+    if data["boss_img"]:
+        os.makedirs(os.path.join(a.out, "boss"), exist_ok=True)
+        for s in data["boss_img"]:
+            shutil.copyfile(os.path.join(D, "bosses", f"{s}.webp"), os.path.join(a.out, "boss", f"{s}.webp"))
     n_live = sum(len(x["preds"]) for x in data["live"])
     print(f"{a.out}: 기준 {data['asof']} (지문 {data['content']}) · 지난 시즌 {len(data['past'])}개 · "
           f"진행 중 예측 시즌 {len(data['live'])}개, 시점 {n_live}개 · 분석 {', '.join(vdata['season_list'])}")

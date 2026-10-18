@@ -10,6 +10,7 @@ python3 -I tools/publish/build_public.py --out DIR [--site DIR2]
 - 공개하지 않는 파일로 가는 마크다운 링크는 링크를 풀고 글자만 남긴다 (AGENTS.md·experiments 기록·data 등).
 - 특정 글을 가리키는 번호(디시 글 번호·주소, 첨부 파일명의 촬영 시각)는 가린다.
 그 뒤 검사에 걸리면(사진·jsonl·큰 파일·글 번호가 남음) 아무것도 쓰지 않고 멈춘다. 규칙은 docs/publish.md.
+웹에는 그림이 보스 그림(boss/S{n}.webp)만 들어간다 — 그 밖의 그림·하위 폴더가 있으면 멈춘다.
 """
 import argparse
 import fnmatch
@@ -55,6 +56,7 @@ BAD_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".webm", ".jsonl", 
 BAD_TEXT = [re.compile(p) for p in (r"board/gov/\d{5,}", r"\bno=\d{5,}", r"글 ?\d{6,}", r"Screenshot_\d{8}_\d{6}",
                                     r"viewimage\.php\?id=\w+&no=\w{20,}", r"download\.php\?no=\w{20,}")]
 MAX_BYTES = 1_000_000
+BOSS_IMG = re.compile(r"boss/S\d+\.webp")   # 웹(gh-pages)에 허용하는 그림 — 시즌별 보스 그림만 (tools/publish/boss_icons.py)
 MD_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)\s]+)\)")
 
 
@@ -159,6 +161,19 @@ def main():
         finally:
             if prev:
                 os.remove(prev)
+        # 웹에 들어가는 그림은 보스 그림 boss/S{n}.webp(WebP)뿐이다 (2026-10-18). 그 밖의 하위 폴더·그림이 있으면 멈춘다
+        for dp, dns, fns in os.walk(a.site):
+            dns[:] = [d for d in dns if d != ".git"]
+            for fn in fns:
+                rel = os.path.relpath(os.path.join(dp, fn), a.site).replace(os.sep, "/")
+                if "/" not in rel:
+                    continue
+                with open(os.path.join(dp, fn), "rb") as fh:
+                    head = fh.read(12)
+                if not (BOSS_IMG.fullmatch(rel) and head[:4] == b"RIFF" and head[8:12] == b"WEBP"):
+                    raise SystemExit(f"멈춤 — 웹에 보스 그림이 아닌 파일이 있다: {rel}")
+                if os.path.getsize(os.path.join(dp, fn)) > 200_000:
+                    raise SystemExit(f"멈춤 — 보스 그림이 너무 크다: {rel}")
         for name in os.listdir(a.site):
             p = os.path.join(a.site, name)
             if os.path.isfile(p):
