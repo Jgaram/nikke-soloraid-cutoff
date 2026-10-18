@@ -14,6 +14,7 @@
   --t1: #104281; --t3: #2a78d6; --t10: #86b6ef; --t30: #b26b00;
   --truth: #c43c3b; --warn: #b26b00;
   --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a;
+  --el-fire: #c43c3b; --el-water: #2a6fd6; --el-elec: #8a4fd0; --el-iron: #9a7400; --el-wind: #16936a;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -24,6 +25,7 @@
     --t1: #b7d3f6; --t3: #3987e5; --t10: #1c5cab; --t30: #e0a040;
     --truth: #e66767; --warn: #e0a040;
     --c1: #3987e5; --c2: #d95926; --c3: #199e70;
+    --el-fire: #ee7a78; --el-water: #6eaaf0; --el-elec: #bb93f2; --el-iron: #dcb84a; --el-wind: #4ccb95;
   }
 }
 :root[data-theme="dark"] {
@@ -34,6 +36,7 @@
   --t1: #b7d3f6; --t3: #3987e5; --t10: #1c5cab; --t30: #e0a040;
   --truth: #e66767; --warn: #e0a040;
   --c1: #3987e5; --c2: #d95926; --c3: #199e70;
+  --el-fire: #ee7a78; --el-water: #6eaaf0; --el-elec: #bb93f2; --el-iron: #dcb84a; --el-wind: #4ccb95;
 }
 * { box-sizing: border-box; }
 body {
@@ -160,6 +163,12 @@ sup.cv { color: var(--text-muted); font-size: 11px; margin-left: 1px; }
 .hrow .bimg { width: 48px; height: 48px; margin: 0; flex: none; }
 .tip .bimg { display: block; width: 72px; height: 72px; margin: 0 0 4px; }
 .chip .bimg { width: 20px; height: 20px; margin: -3px -2px -3px 0; }
+/* 약점 속성·특이사항 꼬리표 (2026-10-18 사용자 요청 — 지난 시즌 탭 표의 보스 칸) */
+.wk, .sp { display: inline-block; font-size: 11.5px; font-weight: 600; line-height: 1.45; padding: 0 6px; border-radius: 999px; border: 1px solid currentColor;
+  margin-left: 6px; vertical-align: 1px; white-space: nowrap; }
+.sp { font-weight: 500; color: var(--text-secondary); border-color: var(--border); background: var(--band); cursor: help; }
+.wk-작열 { color: var(--el-fire); } .wk-수냉 { color: var(--el-water); } .wk-전격 { color: var(--el-elec); } .wk-철갑 { color: var(--el-iron); } .wk-풍압 { color: var(--el-wind); }
+.boss-sm .wk, .boss-sm .sp { font-size: 10.5px; padding: 0 5px; margin-left: 4px; }
 /* 탭 (2026-10-18 사용자 결정 — 「이번 시즌」·「지난 시즌」) */
 .tabs { display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--border); margin: 6px 0 0; }
 .tabs button { font: inherit; font-size: 15px; padding: 9px 14px 8px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
@@ -465,6 +474,9 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
     <h3 id="m-cut">지난 시즌 커트라인</h3>
     <p>표시 없는 값은 커뮤니티 집계표(공식 확정값 아님), *는 끝난 뒤 올라온 점수·%로 그린 곡선에서 읽은 값입니다.
       1·3·10·30% 가운데 값이 있는 시즌이 둘 이상인 지점만 그립니다. 30%는 시즌마다 크게 오르내려 참고값입니다.</p>
+    <p>지난 시즌 탭 표의 보스 칸에는 보스의 약점 속성(작열·수냉·전격·철갑·풍압)과, 진행 형식이 보통 시즌과 다른 경우 그 꼬리표를 붙입니다.
+      형식이 다른 시즌은 초반 점수와 침수 속도가 보통 시즌과 다를 수 있습니다.</p>
+    <ul id="mSpecial"></ul>
   </section>
 
   <section class="card prose" id="m-limit">
@@ -583,6 +595,14 @@ const RECS = LIVE.filter(ended);                                        // 「�
 // 보스 그림: 표·풍선에는 작은 그림, 예측 카드 머리에는 큰 그림 (2026-10-18). 이름이 옆에 있으니 alt는 비운다
 const BIMG = DATA.boss_img || {};
 const bossImg = (s, lazy = true) => BIMG[s] ? `<img class="bimg" src="${BIMG[s]}" alt=""${lazy ? ' loading="lazy"' : ""} decoding="async">` : "";
+const BINFO = DATA.boss_info || {};
+// 보스 칸: 그림 + 이름 + 약점 속성 꼬리표 + 특이사항 꼬리표 (설명은 title — 방법 탭 「지난 시즌 커트라인」에도)
+const bossCell = (s, name) => {
+  const x = BINFO[s] || {};
+  return `${bossImg(s)}${name || ""}`
+    + (x.weak ? `<span class="wk wk-${x.weak}" title="약점 ${x.weak}">${x.weak}</span>` : "")
+    + (x.tags || []).map(([t, d]) => `<span class="sp" title="${d}">${t}</span>`).join("");
+};
 function setHero(id, s) { const im = document.getElementById(id), u = s && BIMG[s]; im.hidden = !u; if (u) im.src = u; else im.removeAttribute("src"); }
 function note(body, cls, text) { const n = document.createElement("p"); n.className = cls; n.textContent = text; body.appendChild(n); return n; }
 function drawLive() {
@@ -1026,7 +1046,7 @@ function drawPast() {
   const rows = R.slice().reverse().map(r => {
     const c = (r.cuts || {})[srv] || {}, b = (r.basis || {})[srv] || {};
     const cells = PP.map(p => `<td>${c[p] != null ? fmt(c[p], 2) + (b[p] === "curve" ? `<sup class="cv">*</sup>` : "") : "–"}</td>`).join("");
-    return `<tr><td>${r.season}<span class="boss-sm">${bossImg(r.season)}${r.boss}</span></td><td class="l hide-sm">${bossImg(r.season)}${r.boss}</td><td class="l hide-sm">${r.start}</td>${cells}<td class="l muted hide-sm">${srcText(r)}</td></tr>`;
+    return `<tr><td>${r.season}<span class="boss-sm">${bossCell(r.season, r.boss)}</span></td><td class="l hide-sm">${bossCell(r.season, r.boss)}</td><td class="l hide-sm">${r.start}</td>${cells}<td class="l muted hide-sm">${srcText(r)}</td></tr>`;
   });
   tbl.innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th><th class="l hide-sm">시작</th>${PP.map(p => `<th>${p}%</th>`).join("")}<th class="l hide-sm">출처</th></tr></thead><tbody>${rows.join("")}</tbody>`;
   note.innerHTML = `<sup class="cv">*</sup> 관측 곡선 · 표시 없음 = 집계표`
@@ -1121,7 +1141,7 @@ function drawBackSum() {
       ok[i][0] += inn; ok[i][1]++; cov[i][0] += r[2] <= tr && tr <= r[3]; cov[i][1]++;
       return `<td class="${inn ? "" : "out"}">${pctf(e)}</td>`;
     }).join("");
-    return `<tr data-s="${S.season}" class="${S.season === bSea ? "sel" : ""}"><td>${S.season}<span class="boss-sm">${bossImg(S.season)}${S.boss || ""}</span></td><td class="l hide-sm">${bossImg(S.season)}${S.boss || ""}</td>${cells}</tr>`;
+    return `<tr data-s="${S.season}" class="${S.season === bSea ? "sel" : ""}"><td>${S.season}<span class="boss-sm">${bossCell(S.season, S.boss)}</span></td><td class="l hide-sm">${bossCell(S.season, S.boss)}</td>${cells}</tr>`;
   }).join("");
   const frac = a => a[1] ? `${a[0]}/${a[1]}` : "–";
   tb.innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th>${Ts.map(T => `<th>${T}시간</th>`).join("")}</tr></thead><tbody>${body}</tbody>`
@@ -1274,7 +1294,7 @@ function drawSink() {
     + (dots.length ? sel.filter(x => !x.live).map(x => `${x.season} ${byS[x.season] || 0}개`).join(" · ") : "이 % 근처 관측 없음"))
     + (SK.borrow[srv] ? `${nPast ? " · " : ""}${SRV[srv]}: 한섭 곡선 사용` : "");
   document.getElementById("skTbl").innerHTML = `<thead><tr><th>시즌</th><th class="l hide-sm">보스</th><th>세기</th>${[24, 48, 96].map(h => `<th>${h}시간 ${pf(x0)} →</th>`).join("")}</tr></thead><tbody>`
-    + items.slice().reverse().map(x => `<tr><td>${skName(x)}<span class="boss-sm">${bossImg(x.season)}${x.boss || ""}</span></td><td class="l hide-sm">${bossImg(x.season)}${x.boss || ""}</td><td>${x.lev.toFixed(2)}</td>`
+    + items.slice().reverse().map(x => `<tr><td>${skName(x)}<span class="boss-sm">${bossCell(x.season, x.boss)}</span></td><td class="l hide-sm">${bossCell(x.season, x.boss)}</td><td>${x.lev.toFixed(2)}</td>`
       + [24, 48, 96].map(h => `<td>${pf(x0 * 10 ** (devP(h) * x.lev))}</td>`).join("") + `</tr>`).join("")
     + `<tr><td>평균</td><td class="hide-sm"></td><td>1.00</td>` + [24, 48, 96].map(h => `<td>${pf(x0 * 10 ** devP(h))}</td>`).join("") + `</tr></tbody>`;
 }
@@ -1283,6 +1303,9 @@ function drawSink() {
 const spanTxt = L => L && L.length ? `${L[0]}~${L[L.length - 1]}` : "";
 function drawMethod() {
   const $ = id => document.getElementById(id);
+  { const g = {};
+    for (const [se, x] of Object.entries(BINFO)) for (const [t, d] of x.tags || []) (g[t] = g[t] || {d, s: []}).s.push(se);
+    $("mSpecial").innerHTML = Object.entries(g).map(([t, x]) => `<li><span class="sp" style="margin:0 6px 0 0">${t}</span>${x.s.length > 2 ? `${x.s[0]}~${x.s[x.s.length - 1]}` : x.s.join("·")}: ${x.d}</li>`).join(""); }
   $("mMethod").textContent = DATA.analysis.live_method;
   // 가장 최근 예측 시즌에서 도중에 방법이 바뀌었으면 적는다 (S42: 24시간 예측까지 S41 한 시즌 곡선 → 30시간부터 고정 모델)
   const S = LIVE[LIVE.length - 1], last = S && S.preds[S.preds.length - 1];

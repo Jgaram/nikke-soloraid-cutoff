@@ -421,6 +421,41 @@ def boss_img():
     return out
 
 
+WEAK = {"Fire": "작열", "Water": "수냉", "Electric": "전격", "Iron": "철갑", "Wind": "풍압"}
+# 시즌 형식이 다른 것 (2026-10-18 사용자 결정 「형식이 다른 것만」 — seasons.json note·registry 형식 notes에서 옮겨 적음).
+# [꼬리표, 한 줄 설명]. 웹 표에 꼬리표, 마우스를 올리면 설명. 모의전 사전 개방은 S41부터 모든 시즌이라 아래 boss_info가 붙인다.
+SPECIAL = {
+    "S19": ["재진행", "첫 진행분이 일시정지 기능 오류로 초기화 — 11-08부터 다시 진행"],
+    "S26": ["재시작", "6월 진행분 중단·취소 — 07-03 점검 뒤 다시 시작"],
+    "S28": ["재개", "도중에 닫고 챌린지 기록 초기화 — 18:30경 재개, 4일 연장"],
+    "S38": ["재오픈", "06-18 진행분 중단·취소 — 07-03 재오픈 첫날부터 챌린지 (5일)"],
+}
+MOCK_FROM = 41   # 개발자 노트 2026-08-28 「첫날부터 도전 난이도 모의전」
+
+
+def boss_info(seasons):
+    """시즌 → {"weak": 약점 속성(한국어), "tags": [[꼬리표, 설명], …]} (2026-10-18 사용자 요청 — 지난 시즌 탭 표의 보스 칸).
+    약점은 data/solo-raid/bosses/bosses.json의 weak (tools/publish/boss_icons.py가 nikke-analysis 표에서 받아 둠). 없으면 빠진다."""
+    try:
+        meta = jload(os.path.join(D, "bosses", "bosses.json"))
+    except (OSError, ValueError):
+        meta = {}
+    out = {}
+    for s in sorted(set(seasons) | set(meta), key=split.snum):
+        x = {}
+        w = WEAK.get((meta.get(s) or {}).get("weak"))
+        if w:
+            x["weak"] = w
+        tags = [SPECIAL[s]] if s in SPECIAL else []
+        if split.snum(s) >= MOCK_FROM:
+            tags.append(["모의전 선개방", "챌린지가 열리기 전부터 도전 난이도 모의전 가능 (S41부터)"])
+        if tags:
+            x["tags"] = tags
+        if x:
+            out[s] = x
+    return out
+
+
 def head_time():
     """지금 HEAD 커밋 시각 (KST). 웹 입력에 커밋 안 된 변경이 있으면(손으로 돌릴 때) 지금 시각."""
     import subprocess
@@ -473,6 +508,7 @@ def build(prev=None):
     cvd = conv(vdata, src)
     data = {"past": pst, "past_pcts": past_pcts(pst), "live": lv, "latest": lat, "conv": cvd,
             "sink": sink(vdata, cvd, reg, src), "back": back(reg), "boss_img": boss_img(),
+            "boss_info": boss_info(list(reg) + [x["season"] for x in lv]),
             "analysis": {"seasons": vdata["season_list"], "live_method": " · ".join(methods) if methods else default_method()}}
     content = fingerprint(data, vdata)
     data = {"asof": asof_for(content, prev), "content": content, **data}
