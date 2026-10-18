@@ -130,7 +130,8 @@ def model_label(md):
     """고정 모델(predict.py --model, 2026-10-18)을 사람이 읽는 말로."""
     tr = md.get("train") or []
     span = f"{tr[0]}~{tr[-1]}" if tr else "?"
-    return f"최근 {len(tr)}시즌({span}) 곡선 · 1·3%는 이번 시즌 침수 세기 갱신·구간 넓히기 더함 (모델 {md.get('name', '?')})"
+    # 「모델 F」 같은 분석 안 이름은 웹에 싣지 않는다 (2026-10-18 사용자 결정 — 우리가 붙인 이름이라 보는 사람에게 뜻이 없음)
+    return f"최근 {len(tr)}시즌({span}) 곡선 · 1·3%는 이번 시즌 침수 세기 갱신·구간 넓히기 더함"
 
 
 def method_label(o):
