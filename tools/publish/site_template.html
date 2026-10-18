@@ -138,6 +138,12 @@ sup.cv { color: var(--text-muted); font-size: 11px; margin-left: 1px; }
 .calcbox .rng { color: var(--text-secondary); font-size: 13px; }
 .calcbox input[type=number] { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
 .calcbox .res.weak .big { color: var(--text-muted); }
+/* ②·③ 결과 시점 (2026-10-18 사용자 요청 — 기본은 최종, 원하면 시점을 직접 입력) */
+.rt { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 14px; margin: 12px 0 10px; }
+.rt .rt-lab { font-weight: 600; }
+.rt input[type=number] { width: 58px; text-align: right; font-variant-numeric: tabular-nums; }
+.rt input[type=time] { font: inherit; color: var(--text-primary); background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 4px 6px; }
+.rt .rt-in { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .boss-sm { display: none; }
 /* 보스 그림 (2026-10-18 사용자 요청 — 배경이 투명한 WebP라 두 테마에 그대로). 그림이 없는 시즌은 이름만 */
 .bimg { width: 26px; height: 26px; object-fit: contain; vertical-align: middle; margin: -5px 6px -5px 0; }
@@ -254,14 +260,25 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
         </div>
       </div>
       <!-- 최종 % → 지금 %·최종 점수 / 지금 % → 최종 % / 최종 점수 → 최종 %. 시점은 지금 %에만, 점수는 최근 컷 예측 곡선 (2026-10-18 사용자 결정) -->
+      <!-- ②·③의 결과 시점: 기본 최종, 「시점 입력」이면 그 시점의 % (2026-10-18 사용자 요청 — 드롭다운 말고 직접 입력) -->
+      <div class="rt">
+        <span class="rt-lab">②·③ 결과 시점</span>
+        <span class="seg sm" id="rtMode"><button data-v="final" aria-pressed="true">최종</button><button data-v="at" aria-pressed="false">시점 입력</button></span>
+        <span class="rt-in" id="rtIn" hidden>
+          <span><input type="number" id="rtDay" min="1" max="5" step="1" value="3" aria-label="결과 시점 일차">일차</span>
+          <input type="time" id="rtClock" step="1800" value="05:00" aria-label="결과 시점 시각">
+          <button class="btn" id="rtSame">위 시점과 같게</button>
+          <span class="muted" id="rtLab"></span>
+        </span>
+      </div>
       <div class="calcgrid">
-        <div class="calcbox"><div class="q">최종 <input type="number" id="cTgt" value="3" min="0.01" max="100" step="0.5">% 안에 들려면</div>
+        <div class="calcbox"><div class="q">① 최종 <input type="number" id="cTgt" value="3" min="0.01" max="100" step="0.5">% 안에 들려면</div>
           <div class="res"><span class="lab">→ 지금</span><span class="big" id="oNow"></span><span class="rng" id="oNowR"></span></div>
           <div class="res kpart"><span class="lab">→ 최종 점수</span><span class="big" id="kS"></span><span class="rng" id="kSR"></span></div></div>
-        <div class="calcbox"><div class="q">지금 <input type="number" id="cNow" value="1" min="0.01" max="100" step="0.1">% 이면</div>
-          <div class="res"><span class="lab">→ 최종</span><span class="big" id="oFinal"></span><span class="rng" id="oFinalR"></span></div></div>
-        <div class="calcbox"><div class="q">최종 점수가 <input type="number" id="kSc" min="1" step="0.1">억이면</div>
-          <div class="res kpart"><span class="lab">→ 최종</span><span class="big" id="kQ"></span><span class="rng" id="kQR"></span></div></div>
+        <div class="calcbox"><div class="q">② 지금 <input type="number" id="cNow" value="1" min="0.01" max="100" step="0.1">% 이면</div>
+          <div class="res"><span class="lab" id="oFinalL">→ 최종</span><span class="big" id="oFinal"></span><span class="rng" id="oFinalR"></span></div></div>
+        <div class="calcbox"><div class="q">③ <span id="kScPre">최종 점수가</span> <input type="number" id="kSc" min="1" step="0.1">억이면</div>
+          <div class="res kpart"><span class="lab" id="kQL">→ 최종</span><span class="big" id="kQ"></span><span class="rng" id="kQR"></span></div></div>
       </div>
       <p class="muted" id="cNote" style="margin-top:10px"></p>
     </div>
@@ -395,8 +412,14 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
 
   <section class="card prose" id="m-calc">
     <h2>계산기</h2>
-    <p>세 칸입니다. 「최종 X% 안에 들려면」은 그 시점에 필요한 지금 %와 최종 점수를 함께, 「지금 X%이면」은 최종 %를, 「최종 점수가 X억이면」은 최종 %를 냅니다.
-      시점은 지금 % 계산에만 쓰고, 점수 계산은 시점과 상관없이 최근 컷 예측의 곡선 하나를 씁니다.</p>
+    <p>세 칸입니다. ① 「최종 X% 안에 들려면」은 그 시점에 필요한 지금 %와 최종 점수를 함께, ② 「지금 X%이면」은 최종 %를, ③ 「최종 점수가 X억이면」은 최종 %를 냅니다.
+      위 시점은 지금 % 계산에만 쓰고, 점수 계산은 시점과 상관없이 최근 컷 예측의 곡선 하나를 씁니다.</p>
+    <h3>②·③ 결과 시점</h3>
+    <p>기본은 최종입니다. 「시점 입력」을 누르고 일차와 시각을 넣으면 ②·③이 그 시점의 %를 냅니다.
+      ②는 위 시점에 X%인 점수를 더 올리지 않았을 때 그 시점에 몇 %인지, ③은 그 시점에 점수가 X억인 사람이 그때 몇 %인지입니다.
+      같은 점수의 그때 %와 최종 %의 비(아래 침수 곡선과 같은 곡선)로 옮깁니다. 결과 시점이 위 시점보다 앞이면 더 상위 %가 나옵니다.</p>
+    <p>80% 구간은 근사입니다. ②는 두 시점의 침수 폭이 대부분 겹친다고 보고 분산의 차로 셉니다(두 시점이 같으면 폭 0).
+      ③은 점수 곡선의 폭과 그 시점 침수 폭을 로그 눈금에서 제곱합으로 셉니다. 종료 시각 뒤를 넣으면 최종과 같습니다.</p>
     <h3>최종 점수 ↔ 최종 %</h3>
     <p>최근 컷 예측이 만든 곡선(0.5~30% 지점)을 그대로 씁니다. 지점 사이는 로그 눈금에서 직선으로 잇습니다.
       점수는 기록을 올리기 전까지 그대로이므로, 지금 점수를 넣으면 더 올리지 않았을 때의 최종 %가 나옵니다.
@@ -730,9 +753,19 @@ function renderK() {
     $("kS").innerHTML = `${fmt(kAtQ(C, q, 1))}<small>억</small>`;
     $("kSR").textContent = `80% 구간 ${fmt(kAtQ(C, q, 2))} ~ ${fmt(kAtQ(C, q, 3))}억${ref(kNear(C, q))}`;
   }
-  const s = parseFloat($("kSc").value);
+  const s = parseFloat($("kSc").value), R = rtPoint();
+  $("kScPre").textContent = R ? "그 시점 점수가" : "최종 점수가";
+  $("kQL").textContent = R ? `→ ${whenLab(R.h)}` : "→ 최종";
   if (!(s > 0)) { $("kQ").textContent = "–"; $("kQR").textContent = "점수를 억 단위로 넣어 주세요."; return; }
   const m = kQAt(C, s, 1), best = kQAt(C, s, 2), worst = kQAt(C, s, 3);
+  if (R) {   // 그 시점에 점수 s → 같은 점수의 최종 % ÷ 10^P(그 시점). 구간은 점수 곡선 폭과 침수 폭을 로그에서 제곱합
+    const {P, sd} = convAt(R.h, m.q), d = 10 ** P, w = Z80 * sd * Math.LN10;
+    if (m.side) { $("kQ").textContent = m.side < 0 ? `${qf(qlo / d)} 안` : `${qf(qhi / d)} 밖`; $("kQR").textContent = `최종으로 ${side(m)}`; return; }
+    const y = m.q / d, a = Math.log(m.q / best.q), b = Math.log(worst.q / m.q);
+    $("kQ").textContent = "약 " + pf(y);
+    $("kQR").textContent = `80% 구간 ${pf(y * Math.exp(-Math.hypot(a, w)))} ~ ${pf(y * Math.exp(Math.hypot(b, w)))} · 최종으로 ${side(m)}` + ref(kNear(C, m.q));
+    return;
+  }
   $("kQ").textContent = side(m);
   $("kQR").textContent = (side(best) === side(worst) ? `80% 구간도 ${side(best)}` : `80% 구간 ${side(best)} ~ ${side(worst)}`) + (m.side ? "" : ref(kNear(C, m.q)));
 }
@@ -787,6 +820,38 @@ if (CS != null) {
   }
 }
 for (const id of ["cT", "cNow", "cTgt"]) document.getElementById(id).addEventListener("input", renderCalc);
+// ②·③ 결과 시점 (2026-10-18 사용자 요청): 기본은 최종. 「시점 입력」이면 일차·시각을 직접 넣어 그 시점의 %를 낸다.
+// 같은 점수가 시점마다 몇 %인지는 침수 곡선(최종 ÷ 그때)으로 옮긴다 — 그때 % = 최종 % ÷ 10^P(그때).
+let rtAt = false, rtTouched = false;
+const rtDay = document.getElementById("rtDay"), rtClock = document.getElementById("rtClock");
+rtDay.max = String(NDAY);
+function rtH() {   // 일차·시각 → 시작 후 시간. 하루는 05:00에 시작하므로 05:00 앞 시각은 그 일차의 다음 날 새벽이다
+  const d = Math.max(1, Math.min(NDAY, Math.round(+rtDay.value || 1)));
+  const [hh, mm] = (rtClock.value || "05:00").split(":").map(Number);
+  return (d - 1) * 24 + (((hh * 60 + (mm || 0) - 300) % 1440 + 1440) % 1440) / 60;
+}
+function rtSet(h) {
+  h = Math.round(Math.max(0, Math.min(CV.H - 0.5, h)) * 2) / 2;
+  rtDay.value = String(Math.floor(h / 24) + 1); rtClock.value = clock(h);
+}
+// 결과 시점: 최종이면 null. 종료 시각 뒤를 넣으면 최종과 같으므로 null
+function rtPoint() { if (!rtAt) return null; const h = rtH(); return h < CV.H - 0.25 ? {h} : null; }
+document.getElementById("rtMode").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  rtAt = b.dataset.v === "at";
+  if (rtAt && !rtTouched) { rtSet(curH() + 24); rtTouched = true; }   // 처음에는 위 시점 하루 뒤
+  document.querySelectorAll("#rtMode button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  document.getElementById("rtIn").hidden = !rtAt;
+  renderCalc();
+});
+document.getElementById("rtSame").onclick = () => { rtSet(curH()); renderCalc(); };
+for (const x of [rtDay, rtClock]) x.addEventListener("input", () => { rtTouched = true; renderCalc(); });
+function paintRt() {
+  if (!rtAt) return;
+  const h = rtH();
+  document.getElementById("rtLab").textContent = h >= CV.H - 0.25 ? "종료 뒤 — 최종과 같습니다"
+    : `${CS != null ? kstLab(CS + h * 3600e3) + " · " : ""}시작 후 ${h.toFixed(1)}시간`;
+}
 let markA = () => {};
 function renderCalc() {
   const h = curH();
@@ -797,9 +862,17 @@ function renderCalc() {
   // 지금 % → 최종 %: 1·3%용 곡선으로 낸 최종이 나눔 % 위면 5~30%용 곡선으로 다시
   const fMain = now > 0 ? now * rat(null)[0] : null;
   const [r, rlo, rhi] = rat(fMain);
-  if (now > 0) {
+  const R = rtPoint();
+  paintRt();
+  document.getElementById("oFinalL").textContent = R ? `→ ${whenLab(R.h)} (점수 그대로면)` : "→ 최종";
+  if (now > 0 && !R) {
     document.getElementById("oFinal").textContent = "약 " + pf(now * r);
     document.getElementById("oFinalR").textContent = `80% 구간 ${pf(now * rlo)} ~ ${pf(now * rhi)}`;
+  } else if (now > 0) {
+    // 위 시점 h의 지금 % → 같은 점수의 결과 시점 %: 10^(P(h) − P(결과 시점)). 두 시점 폭은 겹치는 몫이 커서 분산의 차로 셈 (같은 시점이면 0)
+    const a = convAt(h, fMain), b = convAt(R.h, fMain), y = now * 10 ** (a.P - b.P), w = Z80 * Math.sqrt(Math.abs(a.sd ** 2 - b.sd ** 2));
+    document.getElementById("oFinal").textContent = "약 " + pf(y);
+    document.getElementById("oFinalR").textContent = (Math.abs(R.h - h) < 0.25 ? "위 시점과 같은 시점입니다" : `80% 구간 ${pf(y * 10 ** -w)} ~ ${pf(y * 10 ** w)}`) + ` · 최종 약 ${pf(now * r)}`;
   }
   if (tgt > 0) {
     const [q, qlo, qhi] = rat(tgt);
@@ -810,6 +883,7 @@ function renderCalc() {
   if (CV.borrow[srv]) s += ` · ${SRV[srv]}: 한섭 배율 빌림`;
   if (h < 3) s += " · 시작 3시간 안: 관측 없음";
   else if (h < 11) s += " · 첫 11시간: 불확실";
+  if (R) s += ` · 결과 시점 ${whenLab(R.h)}: 그때 % = 최종 % ÷ ${(10 ** convAt(R.h, fMain).P).toFixed(2)}`;
   if (KC) s += ` · 점수는 시점과 상관없이 ${KSRC} 곡선(${qf(KC[0][0])}~${qf(KC[KC.length - 1][0])})`;
   document.getElementById("cNote").textContent = s;
   renderK();
