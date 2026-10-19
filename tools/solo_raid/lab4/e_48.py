@@ -2,7 +2,7 @@
 
 predict.py·xval.py·backtest_web.py는 고치지 않는다 (S42 기본 동작). 창은 이 프로세스 안에서만 predict.predict를 감싸 넣고 xval.main을 부른다 (m5run.py와 같은 방식).
 
-  python3 -I tools/solo_raid/lab4/e_48.py run --win W [--win-min N] [--patch no_interval ...] -- <xval.py 인자 --out F.json>
+  python3 -I tools/solo_raid/lab4/e_48.py run [--win W [--win-min N]] [--r2 M --r2-part main|ref --sigma-dir SIG] [--u1 A] [--l1] [--patch no_interval ...] -- <xval.py 인자 --out F.json>
   python3 -I tools/solo_raid/lab4/e_48.py r0check --main MAIN.json --ref REF.json --out BT.json   # R0 = backtest_F 재현 확인
   python3 -I tools/solo_raid/lab4/e_48.py a1 RES --out diag48.json                                # A1 모으기 (diag48의 「a1」 열쇠만 고쳐 씀)
   python3 -I tools/solo_raid/lab4/e_48.py pts --work XW --out PTS [--mode tr,full] [--jobs 4]      # A2~A5 점 표 (세션 임시, S19~S41)
@@ -15,6 +15,13 @@ run — A1 창 R1: 촬영 시각 ≥ T − W인 점만 쓴다 (W 시간). 판정
   게시 시각만 있는 C 줄은 구간 위 끝 h_hi = 게시 시각). 서버마다 창 안 사람(거르기 mono 뒤, 크게 어긋난 점 거르기 전)이 N명 미만이면
   그 서버는 모든 점(R0)으로 돌아간다 (기본 N 3, 0이면 늘 창). 수준 갱신(M4l, xval --level-update)은 xval이 predict 앞에서 전체 줄로 푼다 — 창은 predict 안에만 걸린다.
   줄마다 win(서버별 창 정보: 사람·줄·C 줄 수, 「확실히 창 안」 사람 = 촬영 구간 아래 끝 ≥ T − W, 돌아감 여부)을 남긴다. m5run의 warn은 늘 켠다.
+  4.9 B 후보 (2026-10-19, 사전 고정 docs 「4.9 B 사전 고정」 — 창 없이도 돈다, 옵션 없으면 m5run run과 같음):
+  --r2 M   R2 시각 칸 합치기: 6시간 칸(j 0 = [T−6, T])마다 지금처럼 가중 평균하고 칸 분산 1/Σw에 공통 오차 (M·σ_c)²를 더해 칸끼리 합친다 (est_curve만 바꿈).
+           σ_c = pdiff (√(s0² + β²·ΔP²), ΔP = 칸과 기준 칸의 무게 평균 중앙 변환 P 차이), SIG/{시즌}.json의 (i) 맞춤 — main은 L0(1%·3% 중 로그로 가까운 목표 %), ref는 L2(10%).
+           라벨 d가 있는 학습 시즌이 3개 미만이면 같은 학습 시즌의 LU 맞춤. 기준 칸 = 사람 3명 이상인 가장 최근 칸 (없으면 그 서버 R0). M 0이면 R0와 같다.
+  --u1 A   U1: 서버 미상 줄(mono가 한섭으로 둔 줄)의 무게를 A배 — 가중 평균에만 (크게 어긋난 점 거르기는 R0 무게로). A 1이면 R0와 같다.
+  --l1     L1: 1%·3% 목표마다 중앙 변환 최종 %가 그 목표의 ×2 안인 라벨 한섭 줄만으로 M4l을 풀고 예측을 두 번 낸다 (0.5·1%는 1% 실행, 나머지는 3% 실행).
+           수준 갱신은 창과 무관하게 전체 줄에서 고른다. xval --level-update '{"unknown": false}'와 함께 준다.
 a1 — RES/{R0,w6,w12,w24}/{MAIN,REF}.json(6시간 격자 T6~T120)과 같은 폴더의 {MAIN,REF}_S28.json·_S38.json(시즌 H 기준 T_end — 검토 보완 1)을 모은다.
   1·3%는 MAIN 줄 + M1(변형마다 그 변형의 앞 맞힐 시즌 줄로 — backtest_web.m1_for, 넓히기만), 10%는 REF 줄 그대로 (backtest_F와 같은 합침).
   창: T18+ = 6시간 격자의 18 ≤ T ≤ H와 T_end, T_main 18·24·36·48, T_end = 시즌마다 H−12·H−6·H. 「3명 이상 칸」 = 그 변형에서 창이 실제로 쓰인 칸(돌아가지 않음)만 R0와 견줌.
@@ -121,13 +128,224 @@ def apply_window(w, nmin):
     XV.SLIM_KEYS = tuple(XV.SLIM_KEYS) + ("win",)
 
 
+# ---------------- 4.9 B 후보 patch: R2 · U1 · L1 (사전 고정 docs 「4.9 B 사전 고정」) ----------------
+
+R2_MIN_P = 3                 # 기준 칸: 사람 3명 이상인 가장 최근 칸
+R2_LABEL_MIN_SEASONS = 3     # 라벨 d가 있는 학습 시즌이 이보다 적으면 LU(라벨 + 미상) d 맞춤
+R2 = {"mult": None, "part": None, "sigdir": None, "_info": {}}   # s42 참고 실행처럼 한 프로세스에서 main·ref를 오갈 때 part를 바꾼다
+NEAR_L1 = ((1.0, 0.5, 2.0), (3.0, 1.5, 6.0))       # L1: (목표 %, 중앙 변환 최종 % 아래·위) — A4와 같은 ×2 창
+L1_FROM_1 = ("0.5", "1.0")                          # 1% 실행에서 가져올 지점 (나머지는 3% 실행)
+
+
+def r2_pars(season, part, sigdir):
+    """→ ({목표 %: (s0, β)}, 정보). σ_c 파일이 없거나 맞춤이 없으면 (None, 정보) — 그 시즌은 R0."""
+    p = os.path.join(sigdir, f"{season}.json")
+    if not os.path.exists(p):
+        return None, {"src": None, "why": "σ_c 파일 없음 → R0"}
+    d = jl(p)
+    key = "L0" if part == "main" else "L2"
+    ns = d["fits"][key]["ln_q3"]["i"]["n_seasons"]
+    src = key if ns >= R2_LABEL_MIN_SEASONS else f"{key}_LU"
+    pars = {}
+    for q in ((1.0, 3.0) if part == "main" else (10.0,)):
+        f = d["fits"][src][f"ln_q{q:g}"]["i"].get("pdiff")
+        if not f:
+            return None, {"src": src, "why": f"pdiff 맞춤 없음 (ln_q{q:g}) → R0"}
+        pars[q] = (f["s0"], f["beta"])
+    return pars, {"src": src, "n_label_seasons": ns, "sets_i": d["sets"]["i"], "file_sha1": sha1_of(p),
+                  "pars": {f"{q:g}": [round(a, 6), round(b, 6)] for q, (a, b) in pars.items()}}
+
+
+def r2_grid_pars(G, pars):
+    """예측 격자 G의 지점마다 (s0, β): main은 1%·3% 중 ln으로 가까운 쪽 (√3% 아래면 1%), ref는 10%."""
+    if 10.0 in pars:
+        return [pars[10.0]] * len(G)
+    return [pars[1.0] if q < math.sqrt(3.0) else pars[3.0] for q in G]
+
+
+def apply_r2(mult, part, sigdir):
+    R2.update(mult=mult, part=part, sigdir=sigdir)
+    orig_predict = PR.predict
+    orig_est = PR.Predictor.est_curve
+
+    def r2_prep(self, srv, O, cfg):
+        cache = self.__dict__.setdefault("_r2c", {})
+        key = (srv, id(O))
+        if key in cache:
+            return cache[key][1]
+        sh = self.shapes[srv]
+        T = cfg["T"]
+        bins, Pc, pers = [], [], collections.defaultdict(set)
+        for ob in O:
+            j = lag_bin(T, ob["h"])
+            P = PR.p_full(self.tr_central(ob.get("fold", 0)), srv, ob["h"], ob["x"], self.H)
+            bins.append(j)
+            Pc.append(P)
+            if sh.inside(math.log(ob["x"]) + max(P, 0.0) * LN10):
+                pers[j].add(ob["person"])
+        ok = sorted(j for j, s in pers.items() if len(s) >= R2_MIN_P)
+        prep = None if not ok or not cfg.get("gpar") else {"bin": bins, "Pc": Pc, "ref": ok[0], "nb": max(bins) + 1}
+        cache[key] = (O, prep)    # O를 붙들어 id가 다시 쓰이지 않게
+        # 줄 정보: 서버마다 predict 안 첫 실행(뽑기 본 실행) 것만 — 기준 칸 j·그 칸 사람·사람 3명 이상 칸 수·R0로 돌아감
+        R2["_info"].setdefault(srv, {"ref_j": ok[0] if ok else None, "persons_ref": len(pers[ok[0]]) if ok else 0,
+                                     "n_bins": len(pers), "n_bins_ge3": len(ok), "fallback": prep is None})
+        return prep
+
+    def est_curve_r2(self, srv, O, trs, m_season, Z, counts, zs, W, xi=0.0, shift=None):
+        cfg = self.o.get("_r2")
+        if not cfg:
+            return orig_est(self, srv, O, trs, m_season, Z, counts, zs, W, xi, shift)
+        if self.o.get("robust") == "wmedian":
+            raise SystemExit("R2는 가중 평균(robust mean)에서만")
+        prep = r2_prep(self, srv, O, cfg)
+        if prep is None:       # 사람 3명 이상인 칸이 없음 → 그 서버는 R0
+            return orig_est(self, srv, O, trs, m_season, Z, counts, zs, W, xi, shift)
+        sh = self.shapes[srv]
+        H = self.H
+        nG, nb = len(self.G), prep["nb"]
+        lrG = [sh.lr_at(u) + Z * self.tau_shape * sh.D_at(u) for u in self.uG]
+        num = [[0.0] * nG for _ in range(nb)]
+        den = [[0.0] * nG for _ in range(nb)]
+        swp = [[0.0] * nG for _ in range(nb)]
+        for i, ob in enumerate(O):     # est_curve와 같은 점 셈 (칸별로 모을 뿐)
+            c = counts[i]
+            if c == 0:
+                continue
+            tr = trs[ob.get("fold", 0)]
+            P = PR.p_full(tr, srv, ob["h"], ob["x"], H, m_season)
+            if xi:
+                P += xi * tr["m"].get(srv, 1.0) * PR.sigma_form(self.priors[ob.get("fold", 0)]["transform"], ob["h"], H)
+            if zs is not None:
+                P += math.sqrt(tr["s0"] ** 2 + (tr["rho"] * P) ** 2) * zs[i]
+            P = max(P, 0.0)
+            uy = math.log(ob["x"]) + P * LN10
+            if not sh.inside(uy):
+                continue
+            ci = math.log(ob["s"]) - (sh.lr_at(uy) + Z * self.tau_shape * sh.D_at(uy))
+            if shift is not None:
+                ci += shift[i]
+            j, pc, wi = prep["bin"][i], prep["Pc"][i], W[i]
+            nj, dj, pj = num[j], den[j], swp[j]
+            for gi in range(nG):
+                w = wi[gi] * c
+                nj[gi] += w * ci
+                dj[gi] += w
+                pj[gi] += w * pc
+        if not any(any(d) for d in den):
+            return None
+        m2 = cfg["mult"] ** 2
+        est = []
+        for gi in range(nG):
+            js = [j for j in range(nb) if den[j][gi] > 0]
+            r = prep["ref"] if den[prep["ref"]][gi] > 0 else js[0]    # 이 뽑기에서 기준 칸이 비면 가장 최근의 찬 칸
+            Pr = swp[r][gi] / den[r][gi]
+            s0, beta = cfg["gpar"][gi]
+            A = B = 0.0
+            for j in js:
+                d = den[j][gi]
+                s2 = 0.0 if j == r else m2 * (s0 * s0 + (beta * (swp[j][gi] / d - Pr)) ** 2)
+                v = 1.0 / d + s2
+                A += num[j][gi] / d / v
+                B += 1.0 / v
+            est.append(lrG[gi] + A / B)
+        return PR.pav_dec(est)
+
+    def predict_r2(state, prior, T, opts, draws=2000, seed=1, comps_split=True, priors=None, rows=None):
+        pars, info = r2_pars(M5.season_of_state(state), R2["part"], R2["sigdir"])
+        gpar = r2_grid_pars(PR.qgrid(), pars) if pars else None
+        R2["_info"] = {}
+        out = orig_predict(state, prior, T, dict(opts, _r2={"T": T, "mult": R2["mult"], "gpar": gpar}), draws, seed, comps_split, priors, rows)
+        info = dict(info, mult=R2["mult"], part=R2["part"])
+        out["r2"] = info
+        for s, sv in out["servers"].items():
+            sv["r2"] = dict(R2["_info"].get(s) or {"fallback": True}, src=info.get("src"), mult=R2["mult"])
+        return out
+    PR.predict = predict_r2
+    PR.Predictor.est_curve = est_curve_r2
+    orig_score = XV.score
+
+    def score_r2(out, akey, tgt, T, fold_name, train, crit):
+        rows = orig_score(out, akey, tgt, T, fold_name, train, crit)
+        for r in rows:
+            r["r2"] = (out["servers"].get(r["server"]) or {}).get("r2")
+        return rows
+    XV.score = score_r2
+    XV.SLIM_KEYS = tuple(XV.SLIM_KEYS) + ("r2",)
+
+
+def apply_u1(alpha):
+    orig_w = PR.Predictor.weights
+    orig_screen = PR.Predictor.screen
+
+    def weights_u1(self, srv, O, tr):
+        W, ys = orig_w(self, srv, O, tr)
+        return [row if o["server"] else [w * alpha for w in row] for o, row in zip(O, W)], ys
+
+    def screen_u1(self, srv, O, tr, W, ys):   # 크게 어긋난 점 거르기는 R0 무게로 (A3의 U1과 같음)
+        W0, ys0 = orig_w(self, srv, O, tr)
+        return orig_screen(self, srv, O, tr, W0, ys0)
+    PR.Predictor.weights = weights_u1
+    PR.Predictor.screen = screen_u1
+
+
+def l1_wrap(orig_predict):
+    """L1 predict 감싸기 (apply_l1·e_49 s42가 씀). 안쪽(창·R2)은 orig_predict 그대로 부른다."""
+    import m_update as MU
+
+    def predict_l1(state, prior, T, opts, draws=2000, seed=1, comps_split=True, priors=None, rows=None):
+        _, c0, H = PR.season_info(state, allow_fallback=opts.get("allow_cstart_fallback", False))
+        if rows is None:
+            rows, _ = PR.load_obs(state, T, H, c0, opts.get("grades", "all"), opts.get("c_delay", 0.0), opts.get("server_mix"), opts.get("unknown"))
+        t = prior["transform"]
+        tr = {"form": t["form"], "theta": t["theta"], "bx": t.get("bx", 0.0), "m": t["m"]}
+        cfg = dict(opts.get("level_update") or {"unknown": False})
+        tau = cfg.pop("tau", None) or prior["season_diff"]["tau_p"]["value"]
+        base = {k: v for k, v in opts.items() if k not in ("_lvl", "level_update")}
+        outs, lv = {}, {}
+        for q, lo, hi in NEAR_L1:
+            sub = [o for o in rows if o.get("server") == "KR" and not o.get("unused")
+                   and lo <= o["x"] * 10 ** PR.p_full(tr, "KR", o["h"], o["x"], H, 1.0) <= hi]
+            mu = MU.m_posterior(prior, sub, H, tau, **cfg)
+            o2 = dict(base, _lvl=(mu["mu"], mu["sd"])) if mu else base
+            lv[f"{q:g}"] = [mu["mu"], mu["sd"], mu.get("persons")] if mu else None
+            outs[q] = orig_predict(state, prior, T, o2, draws, seed, comps_split, priors, rows)
+        out = outs[3.0]
+        for s, sv in out["servers"].items():
+            s1 = outs[1.0]["servers"].get(s) or {}
+            for k in L1_FROM_1:
+                if k in (s1.get("points") or {}):
+                    sv["points"][k] = s1["points"][k]
+            sv["l1_upd"] = lv
+        out["l1"] = lv
+        return out
+    return predict_l1
+
+
+def apply_l1():
+    PR.predict = l1_wrap(PR.predict)
+    orig_score = XV.score
+
+    def score_l1(out, akey, tgt, T, fold_name, train, crit):
+        rows = orig_score(out, akey, tgt, T, fold_name, train, crit)
+        for r in rows:
+            r["l1_upd"] = out.get("l1")
+        return rows
+    XV.score = score_l1
+    XV.SLIM_KEYS = tuple(XV.SLIM_KEYS) + ("l1_upd",)
+
+
 def cmd_run(argv):
     if "--" not in argv:
         raise SystemExit("run … -- <xval 인자>")
     k = argv.index("--")
     ap = argparse.ArgumentParser(prog="e_48.py run")
-    ap.add_argument("--win", type=float, required=True, help="창 너비 W (시간): 촬영 시각 ≥ T − W인 점만")
+    ap.add_argument("--win", type=float, default=None, help="R1 창 너비 W (시간): 촬영 시각 ≥ T − W인 점만 (없으면 창 없음)")
     ap.add_argument("--win-min", type=int, default=3, help="서버별 창 안 사람이 이보다 적으면 그 서버는 R0 (0이면 늘 창)")
+    ap.add_argument("--r2", type=float, default=None, help="R2 σ_c 배수 M (0이면 R0와 같아야 한다 — 기술 확인)")
+    ap.add_argument("--r2-part", choices=["main", "ref"], help="R2 σ_c 맞춤: main = L0·1%/3%, ref = L2·10%")
+    ap.add_argument("--sigma-dir", help="R2 맞힐 시즌별 σ_c 파일 폴더 (A2 a2 --sigma-out)")
+    ap.add_argument("--u1", type=float, default=None, help="U1 서버 미상 줄 무게 배수 α")
+    ap.add_argument("--l1", action="store_true", help="L1 목표 % ×2 안 라벨 줄로 푼 수준 (--level-update와 함께)")
     ap.add_argument("--patch", action="append", default=[])
     a = ap.parse_args(argv[:k])
     patches = ["warn"] + [p for p in a.patch if p != "warn"]
@@ -137,14 +355,28 @@ def cmd_run(argv):
     xargs = argv[k + 1:]
     if "--out" not in xargs:
         raise SystemExit("--out을 준다 (analysis/에 쓰지 않는다)")
+    if a.r2 is not None and (not a.r2_part or not a.sigma_dir):
+        raise SystemExit("--r2에는 --r2-part와 --sigma-dir")
+    if a.l1 and "--level-update" not in xargs:
+        raise SystemExit("--l1은 xval --level-update와 함께 (L1은 M4l의 줄만 바꾼다)")
     M5.apply(patches)
-    apply_window(a.win, a.win_min)
+    if a.win is not None:
+        apply_window(a.win, a.win_min)
+    if a.u1 is not None:
+        apply_u1(a.u1)
+    if a.r2 is not None:
+        apply_r2(a.r2, a.r2_part, a.sigma_dir)
+    if a.l1:
+        apply_l1()      # 가장 바깥 — 수준은 창 밖까지 전체 줄로
     sys.argv = ["xval.py"] + xargs
     rc = XV.main()
     out = xargs[xargs.index("--out") + 1]
     res = jl(out)
     res["run"]["lab_patches"] = {"patches": patches, "mixdir": None, "emdir": None,
-                                 "window": {"w": a.win, "min_persons": a.win_min, "time": "h (C 줄은 h_hi = 게시 시각)", "per_server": True}}
+                                 "window": None if a.win is None else {"w": a.win, "min_persons": a.win_min, "time": "h (C 줄은 h_hi = 게시 시각)", "per_server": True},
+                                 "r2": None if a.r2 is None else {"mult": a.r2, "part": a.r2_part, "sigma_dir": a.sigma_dir, "min_persons_ref": R2_MIN_P,
+                                                                   "label_min_seasons": R2_LABEL_MIN_SEASONS, "form": "pdiff", "set": "i"},
+                                 "u1": a.u1, "l1": bool(a.l1)}
     with open(out, "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False)
         f.write("\n")
