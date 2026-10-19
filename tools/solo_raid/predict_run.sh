@@ -2,7 +2,7 @@
 # 진행 중 시즌의 컷 예측을 한 명령으로: post_all.sh(후처리 1단계) → (--unknown mix면) server_mix.py --gate → predict.py
 # (모델 판독 0, 요청 0, 몇 초~1분). 2026-10-16.
 #
-# tools/solo_raid/predict_run.sh STATE T [--out DIR] [--model MODEL.json | --prior PRIOR.json [--borrow-state S]] [--unknown site|none|mix]
+# tools/solo_raid/predict_run.sh STATE T [--out DIR] [--model MODEL.json | --prior PRIOR.json [--borrow-state S]] [--unknown mono|site|none|mix]
 #                                [--draws N] [--skip-post] [--allow-cstart-fallback]
 #                                [--posts F --snap DIR --parsed F --alt F --runs DIR] [-- predict.py 옵션...]
 #
@@ -19,7 +19,7 @@
 #              prior·빌릴 시즌·「점 하나가 틀림」은 모델 파일 것을 쓴다.
 #   --prior    (옛 방식, S42 T6~T24) prior 하나로. 주면 --model을 쓰지 않는다. 예: data/solo-raid/S41/state/prior.json
 #   --borrow-state  (--prior일 때만) T까지 서버 라벨 사람이 10명 미만일 때 사이트 비율을 빌릴 끝난 시즌 (기본 data/solo-raid/S41/state)
-#   --unknown  서버 미상 줄 처리, 기본 site (docs/solo-raid-cutoff.md 「예측 도구」). mix면 server_mix.py --gate를 먼저 돌린다.
+#   --unknown  서버 미상 줄 처리, 기본 mono — 점수 비교 거르기 (2026-10-19 사용자 결정, docs/solo-raid-analysis.md 「4.7」, 전에는 site). mix면 server_mix.py --gate를 먼저 돌린다.
 #   --skip-post  post_all.sh를 건너뛴다 (이미 돌렸을 때)
 #   post_all.sh에 넘기는 시즌 전용 입력은 --posts·--snap·--parsed·--alt·--runs (S41처럼 state 밖 사본이 있을 때만)
 #
@@ -31,7 +31,7 @@ ST=$1; T=$2; shift 2
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 PRIOR=""; MODEL=""
 BORROW=$ROOT/data/solo-raid/S41/state
-UNK=site; OUT=""; DRAWS=2000; SKIP=0; PA=(); PX=(); FB=()
+UNK=mono; OUT=""; DRAWS=2000; SKIP=0; PA=(); PX=(); FB=()
 while [ $# -gt 0 ]; do
   case $1 in
     --out) OUT=$2; shift 2 ;;

@@ -20,8 +20,13 @@ predict_run.sh 기본은 --model data/solo-raid/analysis/model_{시즌}.json이�
 **검증 안 된 예측이었다.** S41 한 시즌으로 만들었고, S41 되돌아보기는 곡선 모양이 S41 정답 그 자체라 성능 근거가 아니다 (3.7 시험 미통과).
 1·3% 구간 폭의 핵심(τ_P, 1~3% 모양 차)은 가정이다. 출력 첫머리에 이 말을 늘 찍는다.
 
-서버 미상 줄 (--unknown, 기본 site — 2026-10-16 tr 점검으로 정함, docs/solo-raid-cutoff.md 「예측 도구」)
+서버 미상 줄 (--unknown, 기본 mono — 2026-10-19 사용자 결정, docs/solo-raid-analysis.md 「4.7」. 전에는 site)
 - none: 서버 라벨 줄만. S41 tr에서 48시간까지 라벨 한섭 사람 1~2명이었다
+- mono: 점수 비교 거르기. 같은 서버라면 「확실히 더 늦게 찍었고 점수가 같거나 낮은데 %가 더 좋은」 두 화면은 나올 수 없다.
+        그런 쌍의 낮은 쪽은 점수대가 낮은 서버 = 한섭이 아니다 (23시즌 모두 한섭이 가장 높았다). 라벨 한섭 줄 + 미상 줄로 어김 그래프를 만들고
+        어김이 가장 많은 미상 사람부터 빼서 서로 모순 없는 무리를 남긴다 (라벨 한섭 줄은 고정). 남은 미상 줄 = 한섭(확률 1), 뺀 줄은 쓰지 않는다.
+        「늦다」는 시각 구간으로 확실할 때만 (뒤 줄 h_lo ≥ 앞 줄 h_hi, top7 구간으로 좁힘). 점수 크기·곡선은 쓰지 않는다.
+        site와 달리 서버 라벨이 언제 붙는지에 기대지 않는다 (site는 라벨 사람 10명을 넘는 순간 한섭 몫이 떨어졌다 — 분석 4.6 원인 1)
 - site: 미상 줄을 사이트별 서버 구성 비율(서버 라벨 사람 수, 점수·%를 쓰지 않음)로 뽑기마다 서버에 배정한다. T까지 라벨 사람이
         10명 미만이면 --borrow-state(끝난 시즌, 기본 S41)의 시즌 전체 비율을 빌리고 「S41에서 빌림」으로 표시한다
 - mix : server_mix.py 확률. 같은 state로 다시 만든 파일(core.jsonl보다 새것)이고 요약 gate가 통과일 때만 쓴다. 아니면 --fallback
@@ -88,8 +93,8 @@ AUX = (0.5, 2.0, 5.0, 15.0, 30.0)
 OUT_MAIN = (1.0, 3.0)
 OUT_AUX = (0.5, 2.0)
 OUT_REF = (5.0, 10.0, 15.0, 30.0)
-UNKNOWN_MODES = ("none", "site", "mix")
-UNKNOWN_DEFAULT = "site"     # 2026-10-16 tr 점검으로 정함 (docs/solo-raid-cutoff.md 「예측 도구」)
+UNKNOWN_MODES = ("none", "site", "mix", "mono")
+UNKNOWN_DEFAULT = "mono"     # 2026-10-19 사용자 결정 (분석 4.7). 전에는 site (2026-10-16 tr 점검)
 SITE_MIN = 10                # T까지 서버 라벨 사람이 이보다 적으면 사이트 비율을 빌린다 (--borrow-state)
 SITE_M = 5.0                 # 사이트 비율의 디리클레 평활 (server_mix.PRIOR_M과 같은 값)
 TARGETS = tuple(sorted(MAIN + AUX))
@@ -421,10 +426,11 @@ def load_obs(state, T, H, c0, grades="all", c_delay=0.0, server_mix=None, unknow
             if not pm:
                 cnt["unlabeled"] += 1
                 rows.append({"key": r["key"], "oi": r["oi"], "server": None, "mix": None, "s": s, "x": r["pct"],
-                             "h": he, "hp": hp, "grade": g, "person": r["person"], "unused": True, "site": r["site"]})
+                             "h": he, "hp": hp, "grade": g, "person": r["person"], "unused": True, "site": r["site"],
+                             "span": time_span(r, he)})
                 continue
         rows.append({"key": r["key"], "oi": r["oi"], "server": srv, "mix": pm, "s": s, "x": r["pct"], "h": he,
-                     "hp": hp, "grade": g, "person": r["person"], "unused": False, "site": r["site"]})
+                     "hp": hp, "grade": g, "person": r["person"], "unused": False, "site": r["site"], "span": time_span(r, he)})
     if unknown and not server_mix:
         cnt["unknown"] = assign_unknown(state, rows, {k: len(v) for k, v in lab_pers.items()}, unknown)
         cnt["unlabeled"] = sum(1 for o in rows if o["unused"])
@@ -444,11 +450,62 @@ def load_obs(state, T, H, c0, grades="all", c_delay=0.0, server_mix=None, unknow
     return out, cnt
 
 
+def time_span(r, he):
+    """점수 비교 거르기(mono)에 쓰는 촬영 시각 구간 [lo, hi] (시간). core의 h_lo·h_hi를 top7 구간으로 좁힌다. 가정(게시 지연 등)은 넣지 않는다."""
+    lo = r["h_lo"] if r.get("h_lo") is not None else he
+    hi = r["h_hi"] if r.get("h_hi") is not None else he
+    if r.get("h_lo_top7") is not None:
+        lo = max(lo, r["h_lo_top7"])
+    if r.get("h_hi_top7") is not None:
+        hi = min(hi, r["h_hi_top7"])
+    return (min(lo, hi), hi)
+
+
+def mono_filter(rows):
+    """점수 비교 거르기 (분석 4.7, 2026-10-19). 반환: 뺄 미상 줄 번호 집합, 뺀 미상 사람 수.
+    같은 서버면 y가 x보다 확실히 늦고(y.lo ≥ x.hi) 점수가 같거나 낮으면(y.s ≤ x.s) y의 %는 x보다 좋을 수 없다(y.x ≥ x.x).
+    어기는 쌍을 이은 그래프에서, 미상 사람 가운데 남은 어김이 가장 많은 사람부터 뺀다 (라벨 한섭 줄은 빼지 않고, 라벨 한섭끼리 어김은 무시).
+    판독 실수 한 줄(예: S42 「300억·3%」)이 여러 줄을 끌어내리지 않게 하려는 것이다 — 그런 줄은 자기가 빠지는 쪽이 어김이 적다."""
+    cand = [i for i, o in enumerate(rows) if o["server"] == "KR" or o["unused"]]
+    fixed = {i for i in cand if rows[i]["server"] == "KR"}
+    adj = collections.defaultdict(set)
+    for i in cand:
+        y = rows[i]
+        for j in cand:
+            if i == j:
+                continue
+            x = rows[j]
+            if x["person"] == y["person"] or (i in fixed and j in fixed):
+                continue
+            if y["s"] <= x["s"] and y["span"][0] >= x["span"][1] and y["x"] < x["x"]:
+                adj[i].add(j)
+                adj[j].add(i)
+    per = collections.defaultdict(set)
+    for i in cand:
+        if i not in fixed:
+            per[rows[i]["person"]].add(i)
+    alive = set(cand)
+    out = set()
+    while True:
+        deg = collections.Counter()
+        for i in sorted(alive - fixed):
+            d = len(adj[i] & alive)
+            if d:
+                deg[rows[i]["person"]] += d
+        if not deg:
+            break
+        p = max(deg, key=lambda k: (deg[k], -min(per[k])))   # 같으면 앞 줄의 사람 (결정적)
+        alive -= per[p]
+        out |= per[p]
+    return out, len({rows[i]["person"] for i in out})
+
+
 def assign_unknown(state, rows, lab_pers, u):
     """서버 미상 줄(rows의 unused)에 서버 확률을 붙인다. 반환: 쓴 방식·근거·경고 dict.
     - none: 붙이지 않는다 (라벨 줄만)
     - site: 사이트별 서버 구성 비율 (점수·%를 쓰지 않음). T까지 라벨 사람으로 재되, SITE_MIN명 미만이면 borrow_state에서 빌린다
     - mix : server_mix.py 확률 (STATE/post_server_mix.jsonl). 요약의 gate가 통과일 때만 (no_gate면 늘). 아니면 fallback 방식
+    - mono: 점수 비교 거르기 (mono_filter) — 걸린 미상 줄은 빼고 나머지는 한섭(확률 1). 한섭이 허용 서버에 없으면 none과 같다
     servers: 미상 줄을 넣을 서버 (기본 KR만 — 일섭·글섭은 라벨 줄만, e1 규칙). 나머지 몫은 「쓰지 않음」."""
     mode = u.get("mode", "none")
     allowed = tuple(u.get("servers") or ("KR",))
@@ -487,6 +544,23 @@ def assign_unknown(state, rows, lab_pers, u):
         info["used"] = mode = fb
     if mode == "none":
         info["rows_assigned"] = 0
+        return info
+    if mode == "mono":
+        if "KR" not in allowed:
+            info["warnings"].append("mono는 미상 줄을 한섭에만 넣는다 — 허용 서버에 한섭이 없어 미상 줄을 쓰지 않음")
+            info["rows_assigned"] = 0
+            return info
+        drop, npers = mono_filter(rows)
+        n = 0
+        for i, o in enumerate(rows):
+            if o["unused"] and i not in drop:
+                o["mix"], o["unused"] = {"KR": 1.0}, False
+                n += 1
+        info["ratio_source"] = (f"점수 비교 거르기 — 같은 서버면 불가능한 순서라 뺀 미상 {len(drop)}줄(사람 {npers}명), "
+                                "나머지는 한섭")
+        info["rows_assigned"] = n
+        info["rows_removed"] = len(drop)
+        info["persons_removed"] = npers
         return info
     # site
     ratio, N = site_ratio(lab_pers)
@@ -1276,7 +1350,7 @@ def warning(T, s, sv, unk, prior):
         elif n < 10:
             R.append(("B", f"쓴 사람(유효) {n}명 < 10"))
         if sv["n_persons_label"] < N_FEW and sv["mixed_rows"]:
-            R.append(("B", f"서버 라벨 사람 {sv['n_persons_label']}명 < {N_FEW} — 서버 미상 줄(사이트 비율·확률)에 기댄다. 아래 「라벨 줄만」과 견준다"))
+            R.append(("B", f"서버 라벨 사람 {sv['n_persons_label']}명 < {N_FEW} — 서버 미상 줄에 기댄다. 아래 「라벨 줄만」과 견준다"))
     if sv.get("fill_draws_share", 0) > 0.1:
         R.append(("C", f"뽑기의 {sv['fill_draws_share'] * 100:.0f}%에서 쓸 점이 없어(옮긴 %가 모양 격자 밖 등) "
                        "다른 서버·prior 곡선(+가정 폭)으로 채웠다"))
@@ -1585,8 +1659,8 @@ def main():
     ap.add_argument("--at", required=True)
     ap.add_argument("--server-mix", help="(예전 방식) 서버 확률 파일을 기준 검사 없이 모든 서버에 쓴다. --unknown보다 앞선다")
     ap.add_argument("--unknown", choices=UNKNOWN_MODES, default=UNKNOWN_DEFAULT,
-                    help=f"서버 미상 줄 처리 (기본 {UNKNOWN_DEFAULT}): none 라벨 줄만 · site 사이트별 서버 구성 비율(점수·% 안 씀) · "
-                         "mix server_mix.py 확률(STATE/post_server_mix.jsonl, gate 통과일 때만)")
+                    help=f"서버 미상 줄 처리 (기본 {UNKNOWN_DEFAULT}): mono 점수 비교 거르기(같은 서버면 불가능한 순서인 줄을 빼고 나머지는 한섭) · "
+                         "none 라벨 줄만 · site 사이트별 서버 구성 비율(점수·% 안 씀) · mix server_mix.py 확률(STATE/post_server_mix.jsonl, gate 통과일 때만)")
     ap.add_argument("--unknown-servers", default="KR", help="미상 줄을 넣을 서버 (쉼표, 기본 KR — 일섭·글섭은 라벨 줄만)")
     ap.add_argument("--borrow-state", default=None,
                     help="T까지 라벨 사람이 적을 때 사이트 비율을 빌릴 끝난 시즌 state. 기본은 predict_run.sh와 같은 "

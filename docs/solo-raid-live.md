@@ -27,6 +27,8 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
   `score_live.py`·`site.py`는 `predict/T*/`를 모두 읽는다 (다른 T도 그대로).
 - **예측 기록:** `data/solo-raid/S{n}/predict/T{T}/`(predict_run.sh 출력 그대로)를 커밋한다. 끝난 뒤 정직하게 채점하려는 것이다 (AGENTS.md 「결과물」 예외).
 - **기본 도구:** 그때의 `predict_run.sh` 기본(prior·서버 미상 처리)을 그대로 쓴다. 진행 중에 결과를 보고 도구나 설정을 바꾸지 않는다.
+  - 예외 (사용자 결정 2026-10-19): 시범 기간이라 **로직에 분명한 잘못이 있으면 고치고 지난 예측에 소급한다.** S42는 T60부터 서버 미상 줄 기본이 mono(점수 비교 거르기, 분석 4.7)이고
+    T6~T54도 같은 방법으로 다시 냈다 (예측 JSON `recalc`에 원래 커밋).
   기본을 바꾸는 판정은 분석 문서의 기준(개발 시즌 8개 이상, `criteria.json`)으로만 한다.
   - **예측 방법 = 그 시즌의 고정 모델 파일** `data/solo-raid/analysis/model_S{n}.json` (2026-10-18부터, `predict_run.sh` 기본 — 없으면 예측이 멈춘다).
     분석 4.3에서 고른 F: 최근 5시즌 prior + 라벨 줄 수준 갱신 + 지난 시즌 오차로 구간 넓히기. 시즌 안에서는 모델 파일을 다시 만들지 않는다.

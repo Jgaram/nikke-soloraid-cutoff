@@ -14,7 +14,7 @@ python3 -I tools/solo_raid/xval.py [--seasons S38,S39,S40,S41] [--scheme forward
   학습 시즌 = 등록부(registry.json) 몫 dev이고 학습 등급이 none이 아닌 시즌. 맞힐 시즌 = 정답 표(answer_key.json)에 채점 정답이 있는 개발 시즌.
   prior는 fit_prior_multi.fit_multi(그 겹의 학습 시즌만). 맞힐 시즌의 정답·자료는 prior에 들어가지 않는다.
 - tr(T 절단 재처리)만: 맞힐 시즌 state에서 T까지 게시된 글·사진만 남긴 사본에 post_all.sh를 다시 돌리고 (backtest.trunc_state,
-  시즌 전용 입력은 post_all_stamp.json의 extra) predict.predict로 낸다. 서버 미상 줄은 site 방식, 빌릴 비율은 그 겹의 학습 시즌들.
+  시즌 전용 입력은 post_all_stamp.json의 extra) predict.predict로 낸다. 서버 미상 줄은 predict 기본(2026-10-19부터 mono — 점수 비교 거르기, 전에는 site), site면 빌릴 비율은 그 겹의 학습 시즌들.
 - 채점: answer_key.json의 truth(criteria.json 규칙 — 한섭 3·10% 집계표, 그 밖 곡선 strong)와 집계표·곡선 각각.
   e = 중앙값/정답 − 1, 80·50·95% 포함, 80% 폭, 기준선 0·1, 등급(predict warning level).
 - 요약은 criteria.json(판 1)의 성공·고르기 규칙대로(summary — 웹 viz가 loso를 다시 계산해 견주므로 summarize는 바꾸지 않는다).
@@ -459,7 +459,7 @@ def run_job(job):
     borrow = [FM.state_of(s) for s in train]
     opts = {"grades": "all", "c_delay": 0.0, "p_update": False, "robust": "mean", "eps_wrong": PR.EPS_WRONG,
             "notes": [], "contam": (),
-            "unknown": {"mode": "site", "servers": ["KR"], "borrow_state": borrow, "borrow_kind": "label",
+            "unknown": {"mode": PR.UNKNOWN_DEFAULT, "servers": ["KR"], "borrow_state": borrow, "borrow_kind": "label",
                         "mix_file": None, "no_gate": False, "fallback": "site"}}
     opts.update(g["pdopts"])
     if g["uopts"]:
