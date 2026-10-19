@@ -590,6 +590,7 @@ def cmd_sel(argv):
     ap.add_argument("--out", required=True)
     ap.add_argument("--pts", help="e_48 점 표 (하한 어김용, 없으면 그 지표만 뺀다)")
     ap.add_argument("--work")
+    ap.add_argument("--extra", help="보고만: 고르지 않은 후보 이름(쉼표)도 report와 같은 표로 (main·ref 모두 그 이름) — 고르기에는 쓰지 않는다 (4.9 B 결과를 본 뒤 더함)")
     a = ap.parse_args(argv)
     R = Res(a.res)
     st, need = plan(R)
@@ -613,6 +614,9 @@ def cmd_sel(argv):
         print("최종: 1·3%", f, "· 10%", p10)
         B["report"] = report(R, f, p10, a.pts, a.work)
         B["seeds"] = seed_report(R, f, p10)
+    if a.extra:
+        B["report_extra"] = {"about": "보고만 — 고르기와 무관. 4.9 B 결과를 본 뒤 C 재검토용으로 더함: score 최소 후보와 guard를 지나는 것 중 score 최소 후보 (main·ref 모두 그 R)",
+                             **{n: report(R, n, n, a.pts, a.work) for n in a.extra.split(",") if R.has(n, "main") and R.has(n, "ref")}}
     B["source"] = R.src
     old = jl(a.out) if os.path.exists(a.out) else {"about": "분석 4.9 B (docs 「4.9 B 사전 고정」·「4.9 B 결과」) — lab4/e_49.py가 씀"}
     old["B"] = B
