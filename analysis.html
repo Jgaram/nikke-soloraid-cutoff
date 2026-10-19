@@ -694,7 +694,7 @@ function renderNotes() {
   document.getElementById("notes").innerHTML = DATA.notes[SV].notes.map(s => `<li>${s}</li>`).join("");
 }
 document.getElementById("xvN").textContent = SEAS.length < 8 ? `개발 시즌 ${SEAS.length}개로 돌린 시험 운전이라 판정에는 쓰지 않습니다(기준: 시즌 8개 이상).` : `개발 시즌 ${SEAS.length}개로 잰 결과입니다.`;
-document.getElementById("sub").innerHTML = `개발 시즌 ${SEAS[0]}~${SEAS[SEAS.length - 1]} (${SEAS.length}개) · 만든 시각 2026-10-19 16:12 KST · 자료: <code>data/solo-raid/analysis/</code>, 시즌별 <code>state/</code>`;
+document.getElementById("sub").innerHTML = `개발 시즌 ${SEAS[0]}~${SEAS[SEAS.length - 1]} (${SEAS.length}개) · 만든 시각 2026-10-19 17:11 KST · 자료: <code>data/solo-raid/analysis/</code>, 시즌별 <code>state/</code>`;
 document.getElementById("stamp").textContent = `만든 도구: tools/solo_raid/viz.py · 검증 xval_dev.json (도구 ${DATA.stamp.xval_head}) · prior ${DATA.stamp.prior} · 정답 표 ${DATA.stamp.answer_key_final ? "최종" : "개발 시즌만"}`;
 
 /* ---------- 서버 전환 ---------- */
@@ -715,7 +715,7 @@ function renderAll() {
 renderAll();
 </script>
 <script>
-document.getElementById("sub").textContent = "개발 시즌 S19~S41 (23개) · 2026-10-19 16:12 KST 기준";
+document.getElementById("sub").textContent = "개발 시즌 S19~S41 (23개) · 2026-10-19 17:11 KST 기준";
 document.getElementById("stamp").textContent = "정답 표는 끝난 시즌을 모두 씁니다 — 이 시즌들로 방법을 고르고 다듬었으므로 개발 검증입니다. 독립 검증은 새 시즌마다 끝나기 전에 낸 예측을 끝난 뒤 채점해 쌓습니다.";
 </script>
 </body>
