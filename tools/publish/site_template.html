@@ -728,7 +728,7 @@ function renderPred(S, body) {
     const s = r.srv[srv];
     tip.show(`<b>${r.T}시간 뒤</b> · ${r.T_kst || ""}<br>` + PCTS.filter(p => s.pts[p]).map(p =>
       `<div class="r"><i class="sw" style="background:${COL(p)}"></i>${p}% ${fmt(s.pts[p].m)}억 <span class="muted">(${fmt(s.pts[p].lo)}~${fmt(s.pts[p].hi)})</span></div>`).join("")
-      + (s.nodata ? `<span class="muted">관측 없음</span>` : `<span class="muted">신뢰도 ${GRADE[s.grade] || s.grade || "–"} · 근거 ${s.n_persons}명</span>`), ...hostXY(host, ev));
+      + (s.nodata ? `<span class="muted">관측 없음</span>` : `<span class="muted">신뢰도 ${GRADE[s.grade] || s.grade || "–"} · 기록 ${s.n_persons}개</span>`), ...hostXY(host, ev));
   }, () => { tip.hide(); cur.setAttribute("visibility", "hidden"); });
   } else lg.remove();
 
@@ -739,7 +739,7 @@ function renderPred(S, body) {
     return `<tr><td>${r.T}시간</td><td class="l hide-sm">${r.T_kst || ""}</td>` + PCTS.map(p => s.pts[p]
       ? `<td><b>${fmt(s.pts[p].m)}</b> <span class="muted rng-sm">${fmt(s.pts[p].lo)}~${fmt(s.pts[p].hi)}</span></td>` : "<td>–</td>").join("")
       + (s.nodata ? `<td class="l">–</td><td class="hide-sm">관측 없음</td></tr>`
-                  : `<td class="l">${GRADE[s.grade] || s.grade || "–"}</td><td class="hide-sm">${s.n_persons}명</td></tr>`);
+                  : `<td class="l">${GRADE[s.grade] || s.grade || "–"}</td><td class="hide-sm">기록 ${s.n_persons}개</td></tr>`);
   });
   wrap.innerHTML = `<table><thead><tr><th>시점</th><th class="l hide-sm">KST</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}<th class="l">신뢰도</th><th class="hide-sm">근거</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
@@ -1151,14 +1151,14 @@ function drawBack() {
     const e = err(r);
     tip.show(`<b>${r[0]}시간 뒤</b> · ${bAt(S, r[0])}<br>예측 <b>${fmt(r[1])}억</b> <span class="muted">(80% ${fmt(r[2])}~${fmt(r[3])})</span>`
       + (e != null ? `<br>실제 ${fmt(tr)}억 · 오차 <b>${pctf(e)}</b>${Math.abs(e) <= tol ? " (허용 오차 안)" : ""}` : "")
-      + `<br><span class="muted">신뢰도 ${GRADE[r[4]] || r[4] || "–"} · 근거 ${r[5]}명</span>`, ...hostXY(host, ev));
+      + `<br><span class="muted">신뢰도 ${GRADE[r[4]] || r[4] || "–"} · 기록 ${r[5]}개</span>`, ...hostXY(host, ev));
   }, () => { tip.hide(); cur.setAttribute("visibility", "hidden"); });
   const nOut = tr != null ? R.filter(r => r[1] > yhi || r[1] < ylo).length : 0;
   note.textContent = [nOut ? `세로축은 실제 컷 ±${B_SPAN}억 · 넘는 예측 ${nOut}개는 가장자리 세모(표에 값)` : "",
     R.some(r => r[4] === "D") ? `신뢰도 「참고용」 시점: ${SRV[srv]} 관측 없음` : ""].filter(Boolean).join(" · ");
   tbl.innerHTML = `<thead><tr><th>시점</th><th class="l hide-sm">KST</th><th>예측</th><th>80% 구간</th>${tr != null ? "<th>오차</th>" : ""}<th class="l">신뢰도</th><th class="hide-sm">근거</th></tr></thead><tbody>`
     + R.map(r => `<tr><td>${r[0]}시간</td><td class="l hide-sm">${bAt(S, r[0])}</td><td><b>${fmt(r[1])}</b></td><td>${fmt(r[2])}~${fmt(r[3])}</td>`
-      + (tr != null ? `<td>${pctf(err(r))}</td>` : "") + `<td class="l">${GRADE[r[4]] || r[4] || "–"}</td><td class="hide-sm">${r[5]}명</td></tr>`).join("") + "</tbody>";
+      + (tr != null ? `<td>${pctf(err(r))}</td>` : "") + `<td class="l">${GRADE[r[4]] || r[4] || "–"}</td><td class="hide-sm">기록 ${r[5]}개</td></tr>`).join("") + "</tbody>";
 }
 function drawBackSum() {
   const tb = document.getElementById("bSum"), Ts = [12, 24, 48, 72, 96];
