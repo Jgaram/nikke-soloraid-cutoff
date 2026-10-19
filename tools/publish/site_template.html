@@ -1077,6 +1077,7 @@ try { const v = localStorage.getItem("nsp-bpct"); if (PCTS.includes(v)) bPct = v
 const pctf = e => (e >= 0 ? "+" : "−") + Math.abs(e * 100).toFixed(1) + "%";
 const bAt = (S, T) => kstLab(ts(S.c_start) + T * 3600e3);
 const bX = S => ((S.srv[srv] || {})[bPct]) || null;
+const B_SPAN = 5;   // 되돌려 보기 세로축: 실제 컷 ±5억 (2026-10-19 사용자 요청)
 function drawBack() {
   const host = document.getElementById("bChart"), head = document.getElementById("bHead"), note = document.getElementById("bNote");
   const lg = document.getElementById("bLg"), tbl = document.getElementById("bTbl");
@@ -1109,24 +1110,38 @@ function drawBack() {
   lg.innerHTML = `<span><i class="sw" style="background:${COL(bPct)}"></i>${bPct}% 예측(가운데 값)</span><span><i class="sw band" style="background:${COL(bPct)}"></i>80% 구간</span>`
     + (tr != null ? `<span><i class="sw dash"></i>실제 컷</span><span><i class="sw band" style="background:var(--text-muted)"></i>허용 오차 ±${Math.round(tol * 100)}%</span>`
       + `<span><i class="dot" style="background:${COL(bPct)}"></i>허용 오차 안</span><span><i class="dot" style="background:var(--surface-1);box-shadow:inset 0 0 0 2px ${COL(bPct)}"></i>밖</span>` : "");
-  const vals = R.flatMap(r => [r[2], r[3]]);
-  if (tr != null) vals.push(tr * (1 - tol), tr * (1 + tol));
-  const nt = niceTicks(Math.min(...vals), Math.max(...vals));
+  // 실제 컷이 있으면 세로축을 실제 컷 ±B_SPAN억으로 고정한다 (2026-10-19 사용자 요청). 넘는 점은 가장자리 화살표로 보인다
+  let ylo, yhi, yt;
+  if (tr != null) {
+    ylo = tr - B_SPAN; yhi = tr + B_SPAN;
+    yt = niceTicks(ylo, yhi).ticks.filter(v => v >= ylo - 1e-9 && v <= yhi + 1e-9);
+  } else {
+    const vals = R.flatMap(r => [r[2], r[3]]), nt = niceTicks(Math.min(...vals), Math.max(...vals));
+    ylo = nt.lo; yhi = nt.hi; yt = nt.ticks;
+  }
   const W = Math.max(300, host.clientWidth), narrow = W < 600;
-  const f = frame(host, {W, H: narrow ? 260 : 340, m: {l: 44, r: narrow ? 12 : 76, t: 12, b: 34}, xlo: 0, xhi: S.H, ylo: nt.lo, yhi: nt.hi, yt: nt.ticks,
+  const f = frame(host, {W, H: narrow ? 260 : 340, m: {l: 44, r: narrow ? 12 : 76, t: 12, b: 34}, xlo: 0, xhi: S.H, ylo, yhi, yt,
     label: `${S.season} ${SRV[srv]} ${bPct}% 시점별 예측과 실제 컷`});
   for (let h = 0; h <= S.H; h += 24) el("text", {x: f.X(h), y: f.y0 + 18, "text-anchor": "middle"}, f.svg).textContent = h ? (narrow ? `${h / 24}일` : `${h / 24}일 뒤`) : "시작";
+  const clip = el("clipPath", {id: "bClip"}, el("defs", {}, f.svg));
+  el("rect", {x: f.x0, y: f.y1, width: f.x1 - f.x0, height: f.y0 - f.y1}, clip);
+  const plot = el("g", {"clip-path": "url(#bClip)"}, f.svg);
   if (tr != null) {
-    el("rect", {x: f.x0, width: f.x1 - f.x0, y: f.Y(tr * (1 + tol)), height: f.Y(tr * (1 - tol)) - f.Y(tr * (1 + tol)), fill: "var(--band-strong)"}, f.svg);
-    el("line", {x1: f.x0, x2: f.x1, y1: f.Y(tr), y2: f.Y(tr), stroke: "var(--truth)", "stroke-dasharray": "5 4", "stroke-width": 1.5}, f.svg);
+    el("rect", {x: f.x0, width: f.x1 - f.x0, y: f.Y(tr * (1 + tol)), height: f.Y(tr * (1 - tol)) - f.Y(tr * (1 + tol)), fill: "var(--band-strong)"}, plot);
+    el("line", {x1: f.x0, x2: f.x1, y1: f.Y(tr), y2: f.Y(tr), stroke: "var(--truth)", "stroke-dasharray": "5 4", "stroke-width": 1.5}, plot);
     if (!narrow) el("text", {x: f.x1 + 6, y: f.Y(tr) + 4, class: "lbl"}, f.svg).textContent = `실제 ${fmt(tr)}`;
   }
   const band = R.map(r => `${f.X(r[0])},${f.Y(r[3])}`).concat(R.slice().reverse().map(r => `${f.X(r[0])},${f.Y(r[2])}`));
-  el("polygon", {points: band.join(" "), fill: COL(bPct), opacity: .18}, f.svg);
-  el("polyline", {points: R.map(r => `${f.X(r[0])},${f.Y(r[1])}`).join(" "), fill: "none", stroke: COL(bPct), "stroke-width": 2}, f.svg);
+  el("polygon", {points: band.join(" "), fill: COL(bPct), opacity: .18}, plot);
+  el("polyline", {points: R.map(r => `${f.X(r[0])},${f.Y(r[1])}`).join(" "), fill: "none", stroke: COL(bPct), "stroke-width": 2}, plot);
   for (const r of R) {
-    const ok = tr == null || Math.abs(err(r)) <= tol;
-    el("circle", {cx: f.X(r[0]), cy: f.Y(r[1]), r: narrow ? 3 : 4, fill: ok ? COL(bPct) : "var(--surface-1)", stroke: COL(bPct), "stroke-width": narrow ? 1.5 : 2}, f.svg);
+    const ok = tr == null || Math.abs(err(r)) <= tol, x = f.X(r[0]);
+    if (r[1] > yhi || r[1] < ylo) {   // 범위 밖: 위·아래 가장자리에 바깥을 가리키는 세모
+      const up = r[1] > yhi, y = up ? f.y1 : f.y0, d = up ? 1 : -1, s = narrow ? 4 : 5;
+      el("polygon", {points: `${x},${y} ${x - s},${y + d * s * 1.6} ${x + s},${y + d * s * 1.6}`, fill: "var(--surface-1)", stroke: COL(bPct), "stroke-width": 1.5}, f.svg);
+      continue;
+    }
+    el("circle", {cx: x, cy: f.Y(r[1]), r: narrow ? 3 : 4, fill: ok ? COL(bPct) : "var(--surface-1)", stroke: COL(bPct), "stroke-width": narrow ? 1.5 : 2}, plot);
   }
   const tip = mkTip(host), cur = el("line", {y1: f.y1, y2: f.y0, stroke: "var(--axis)", visibility: "hidden"}, f.svg);
   const hit = el("rect", {x: f.x0, y: f.y1, width: f.x1 - f.x0, height: f.y0 - f.y1, fill: "transparent"}, f.svg);
@@ -1138,7 +1153,9 @@ function drawBack() {
       + (e != null ? `<br>실제 ${fmt(tr)}억 · 오차 <b>${pctf(e)}</b>${Math.abs(e) <= tol ? " (허용 오차 안)" : ""}` : "")
       + `<br><span class="muted">신뢰도 ${GRADE[r[4]] || r[4] || "–"} · 근거 ${r[5]}명</span>`, ...hostXY(host, ev));
   }, () => { tip.hide(); cur.setAttribute("visibility", "hidden"); });
-  note.textContent = R.some(r => r[4] === "D") ? `신뢰도 「참고용」 시점: ${SRV[srv]} 관측 없음` : "";
+  const nOut = tr != null ? R.filter(r => r[1] > yhi || r[1] < ylo).length : 0;
+  note.textContent = [nOut ? `세로축은 실제 컷 ±${B_SPAN}억 · 넘는 예측 ${nOut}개는 가장자리 세모(표에 값)` : "",
+    R.some(r => r[4] === "D") ? `신뢰도 「참고용」 시점: ${SRV[srv]} 관측 없음` : ""].filter(Boolean).join(" · ");
   tbl.innerHTML = `<thead><tr><th>시점</th><th class="l hide-sm">KST</th><th>예측</th><th>80% 구간</th>${tr != null ? "<th>오차</th>" : ""}<th class="l">신뢰도</th><th class="hide-sm">근거</th></tr></thead><tbody>`
     + R.map(r => `<tr><td>${r[0]}시간</td><td class="l hide-sm">${bAt(S, r[0])}</td><td><b>${fmt(r[1])}</b></td><td>${fmt(r[2])}~${fmt(r[3])}</td>`
       + (tr != null ? `<td>${pctf(err(r))}</td>` : "") + `<td class="l">${GRADE[r[4]] || r[4] || "–"}</td><td class="hide-sm">${r[5]}명</td></tr>`).join("") + "</tbody>";
