@@ -9,6 +9,8 @@ predict.py·xval.py·backtest_web.py는 고치지 않는다 (S42 기본 동작).
   python3 -I tools/solo_raid/lab4/e_49.py same A.json B.json [--T 12,24]              # 두 xval 결과의 예측값(가운데·80%)만 견줌 — 정답은 보지 않는다
   python3 -I tools/solo_raid/lab4/e_49.py sigma --target S42 --records SIG/_records.json --out SIG/S42.json   # A2 d 기록으로 맞힐 시즌 σ_c ((i) pdiff)
   python3 -I tools/solo_raid/lab4/e_49.py s42 NAME --res RES --work XW --sigma-dir SIG --T 6,12,... --out F.json   # S42에 얹은 참고 실행 (정답 없음)
+  python3 -I tools/solo_raid/lab4/e_49.py s42sum s42_R0.json [s42_이름.json ...] --out diag49.json   # S42 참고 실행을 R0와 견줘 diag49 「B」.「s42」에 (결과 뒤 더함, sel이 「B」를 새로 쓰므로 sel 뒤에)
+  # sel --extra 이름,이름: 고르지 않은 후보도 report와 같은 표로 (보고만, 결과 뒤 더함)
 
 후보 이름: R0 · R1w{W}n{N} (창 W시간, 서버별 창 안 사람 N명 미만이면 R0) · R2m{M} (σ_c 배수 M) · 덧붙임 +U{α} (미상 줄 무게) · +L2 (수준 갱신 끔) · +L1 (×2 안 줄로 수준).
 고르기 (사전 고정): R 무리 먼저 → 고른 R 위에서 U·L 무리 하나씩 → 둘 다 바뀌면 함께 켬. 10%(ref)는 R0와 고른 R만.
@@ -179,8 +181,11 @@ def load_part(d, part):
         p = os.path.join(d, f)
         x = jl(p)
         ra = x["run"].get("args") or {}
+        lp = x["run"].get("lab_patches")
+        if lp and (lp.get("r2") or {}).get("sigma_dir"):      # 세션 임시 경로는 남기지 않는다 ($S = 세션 임시 lab4/)
+            lp = dict(lp, r2=dict(lp["r2"], sigma_dir="$S/" + "/".join(os.path.normpath(lp["r2"]["sigma_dir"]).split(os.sep)[-2:])))
         src[f[:-5]] = {"sha1": sha1_of(p), "tool_head": x["run"].get("tool_head"), "tools_dirty": x["run"].get("tools_dirty"),
-                       "lab_patches": x["run"].get("lab_patches"), "failures": len(x.get("failures") or []),
+                       "lab_patches": lp, "failures": len(x.get("failures") or []),
                        "args": {k: ra.get(k) for k in ("scheme", "targets", "T", "draws", "seed", "boot", "predict_opt", "level_update")}}
         for r in x["rows"]:
             if r.get("scheme") != "recent5":
@@ -617,6 +622,13 @@ def cmd_sel(argv):
     if a.extra:
         B["report_extra"] = {"about": "보고만 — 고르기와 무관. 4.9 B 결과를 본 뒤 C 재검토용으로 더함: score 최소 후보와 guard를 지나는 것 중 score 최소 후보 (main·ref 모두 그 R)",
                              **{n: report(R, n, n, a.pts, a.work) for n in a.extra.split(",") if R.has(n, "main") and R.has(n, "ref")}}
+        Mm = {n: R.main(n)["M"] for n in R_NAMES if R.has(n, "main")}
+        Mr = {n: R.ref(n)["M"] for n in R_NAMES if R.has(n, "ref")}
+        B["report_extra"]["R_guards_all"] = {"about": "R 후보 모두에 guard 넷을 R0 기준으로 (고르기에서는 0.5%p 규칙으로 R0가 먼저 골라져 잰 적 없음)",
+                                             "main": {n: guards(n, Mm, "R0", "R0") for n in Mm if n != "R0"},
+                                             "ref10": {n: guards(n, Mr, "R0", "R0") for n in Mr if n != "R0"}}
+        B["report_extra"]["ref10_R_table"] = table(R_NAMES, Mr)
+        B["report_extra"]["ref10_R_metrics"] = {n: brief(Mr[n]) for n in Mr}
     B["source"] = R.src
     old = jl(a.out) if os.path.exists(a.out) else {"about": "분석 4.9 B (docs 「4.9 B 사전 고정」·「4.9 B 결과」) — lab4/e_49.py가 씀"}
     old["B"] = B
@@ -779,7 +791,42 @@ def cmd_s42(argv):
     return 0
 
 
-CMDS = {"todo": cmd_todo, "run": cmd_run, "sel": cmd_sel, "same": cmd_same, "sigma": cmd_sigma, "s42": cmd_s42}
+def cmd_s42sum(argv):
+    """S42 참고 실행 파일(s42 결과)을 R0와 견줘 diag49 「B」.「s42」에 적는다 — T마다 세 서버 1·3·10% 가운데의 R0 대비 상대 차이와 80% 폭(M1 뒤). 정답 없음 (4.9 B 결과를 본 뒤 더함)."""
+    ap = argparse.ArgumentParser(prog="e_49.py s42sum")
+    ap.add_argument("files", nargs="+", help="s42_{이름}.json — 첫 파일이 R0")
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args(argv)
+    X = [jl(p) for p in a.files]
+    base = X[0]
+    if base["name"] != "R0":
+        raise SystemExit("첫 파일은 R0")
+    res = {"about": "S42 참고 실행 (정답 없음 — 계획 C 「S42에 얹었을 때의 차이」). model_S42 prior·빌릴 시즌, M1은 그 후보의 xval main 줄로 S42를 맞힐 때의 표 (커밋된 S42 예측의 M1 표와 다르다). "
+                    "d = 가운데의 R0 대비 상대 차이, w = 80% 폭 (hi/lo − 1). 1·3%는 main(그 이름의 U·L 포함), 10%는 ref(그 이름의 R).",
+           "source": {os.path.basename(p): sha1_of(p) for p in a.files}, "model": base.get("model"), "m1": {x["name"]: x["m1"] for x in X}, "T": {}}
+    for T, b in base["T"].items():
+        row = {}
+        for k, e0 in b["points"].items():
+            ent = {"R0": {"median": round(e0["median"], 3), "w": round(e0["i80"][1] / e0["i80"][0] - 1, 5)}}
+            for x in X[1:]:
+                e = x["T"].get(T, {}).get("points", {}).get(k)
+                if e:
+                    ent[x["name"]] = {"median": round(e["median"], 3), "d": round(e["median"] / e0["median"] - 1, 5), "w": round(e["i80"][1] / e["i80"][0] - 1, 5)}
+            row[k] = ent
+        res["T"][T] = {"m1_c": {x["name"]: x["T"].get(T, {}).get("m1_c") for x in X}, "points": row}
+    old = jl(a.out)
+    old["B"]["s42"] = res
+    with open(a.out, "w", encoding="utf-8") as f:
+        json.dump(old, f, ensure_ascii=False, indent=1)
+        f.write("\n")
+    for T, r in res["T"].items():
+        print(f"T{T}", " · ".join(f"{k} " + " ".join(f"{n} {v['d']:+.2%}/w{v['w']:.1%}" for n, v in ent.items() if n != "R0") + f" (R0 w{ent['R0']['w']:.1%})"
+                                  for k, ent in r["points"].items() if k.startswith("KR")))
+    print("→", a.out)
+    return 0
+
+
+CMDS = {"todo": cmd_todo, "run": cmd_run, "sel": cmd_sel, "same": cmd_same, "sigma": cmd_sigma, "s42": cmd_s42, "s42sum": cmd_s42sum}
 
 
 def main():
