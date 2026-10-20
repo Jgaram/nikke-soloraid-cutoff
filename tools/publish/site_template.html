@@ -53,7 +53,7 @@ p { margin: 6px 0; }
 .muted { color: var(--text-muted); font-size: 13px; }
 .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin: 18px 0; }
 .notice { border: 1px solid var(--warn); border-left-width: 4px; border-radius: 8px; background: var(--surface-1);
-  color: var(--text-primary); padding: 10px 14px; margin: 0 0 16px; font-size: 14.5px; }
+  color: var(--text-primary); padding: 10px 14px; margin: 14px 0 10px; font-size: 14.5px; }
 .notice b { color: var(--warn); }
 .srvbar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
   background: var(--surface-0); padding: 10px 0; border-bottom: 1px solid var(--border); }
@@ -239,8 +239,6 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
 </head>
 <body>
 <main>
-  <!-- 상단 주의 문구 (2026-10-20 사용자 요청 — 해결되지 않은 로직 문제) -->
-  <div class="notice" role="note"><b>주의</b> · 예측 로직에 아직 해결되지 않은 문제가 있습니다. 숫자는 참고로만 봐 주세요.<br>(시즌 종료 직전에 산정된 커트라인이 실제 커트라인과 상이할 수 있습니다.)</div>
   <h1>니케 솔로레이드 컷</h1>
   <p class="sub" id="sub"></p>
   <nav class="tabs" role="tablist" aria-label="화면">
@@ -643,6 +641,10 @@ function drawLive() {
   info.textContent = `챌린지 ${isoTxt(S.c_start)} ~ ${isoTxt(S.end)} · ${done ? "끝남" : "진행 중"}`;
   ctl.appendChild(info);
   if (done) note(body, "short", `${isoTxt(S.e_end)}까지 표시 · 그 뒤로는 「지난 시즌」 탭`);
+  // 주의 문구: 「최근 예측」 줄과 컷 칸 바로 위 (2026-10-20 사용자 요청 — 처음 페이지 맨 위였다가 같은 날 옮김)
+  const warn = document.createElement("div"); warn.className = "notice"; warn.setAttribute("role", "note");
+  warn.innerHTML = "<b>주의</b> · 예측 로직에 아직 해결되지 않은 문제가 있습니다. 숫자는 참고로만 봐 주세요.<br>(시즌 종료 직전에 산정된 커트라인이 실제 커트라인과 상이할 수 있습니다.)";
+  body.appendChild(warn);
   renderPred(S, body);
 }
 // 「지난 시즌」 탭: 끝난 시즌에 실제로 낸 예측과 채점 (독립 검증 — 끝나기 전에 커밋된 예측만)
