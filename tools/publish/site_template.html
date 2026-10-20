@@ -52,6 +52,9 @@ p { margin: 6px 0; }
 .sub { color: var(--text-secondary); margin: 0 0 16px; }
 .muted { color: var(--text-muted); font-size: 13px; }
 .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin: 18px 0; }
+.notice { border: 1px solid var(--warn); border-left-width: 4px; border-radius: 8px; background: var(--surface-1);
+  color: var(--text-primary); padding: 10px 14px; margin: 0 0 16px; font-size: 14.5px; }
+.notice b { color: var(--warn); }
 .srvbar { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
   background: var(--surface-0); padding: 10px 0; border-bottom: 1px solid var(--border); }
 .srvlab { font-weight: 600; font-size: 14px; }
@@ -236,6 +239,8 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
 </head>
 <body>
 <main>
+  <!-- 상단 주의 문구 (2026-10-20 사용자 요청 — 해결되지 않은 로직 문제) -->
+  <div class="notice" role="note"><b>주의</b> · 예측 로직에 아직 해결되지 않은 문제가 있습니다. 숫자는 참고로만 봐 주세요.</div>
   <h1>니케 솔로레이드 컷</h1>
   <p class="sub" id="sub"></p>
   <nav class="tabs" role="tablist" aria-label="화면">
