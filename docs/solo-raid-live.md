@@ -82,6 +82,7 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 5. `data/solo-raid/live.json`: `{"season": "S{n}", "trigger": "trig_…", "session": "session_…", "cron": "…", "model": "…", "on": "켠 KST 시각", "by": "세션 id"}`.
    **고정 모델 파일 `data/solo-raid/analysis/model_S{n}.json`이 있는지 본다** — 없으면 첫 칸 예측이 멈춘다. 지난 시즌 채점·수집 끝 뒤 `freeze_model.py`로 만든다
    ([분석 4.5 「S43용 다시 고정」](solo-raid-analysis.md#45-고정과-미래-시험)). 없으면 켜기 전에 사용자에게 알린다.
+   **S43은 다시 고정하지 않고 `model_S42.json`을 그대로 옮긴다** (2026-10-20 사용자 결정 — [분석 5.0](solo-raid-analysis.md#50-운영--f-그대로-사용자-결정-2026-10-20), 만드는 법은 [순서표 8](solo-raid-todo.md#8-s43-모델-파일--f-그대로-마지막-s43-c_start-전)).
 6. 커밋(`S{n} 자동 수집 켬`) → push. `season.json`이 올라가 웹에 「챌린지 진행 중 · 첫 예측은 6시간 뒤」가 뜬다 (시작 뒤부터).
 7. 사용자에게 첫 실행 시각(KST)을 알린다.
 
@@ -180,3 +181,4 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 - 2026-10-17: 미래 시험 규칙 하나로 (사용자 결정 — 모든 새 시즌이 미래 시험, split 판 2). 「사용자 확인 대기」 세 곳을 고침.
 - 2026-10-18: 예측 방법이 시즌 고정 모델 파일(`analysis/model_S{n}.json`)로 바뀜 — S42 T30부터 (사용자 결정, 분석 4.5). 켜기에 모델 파일 확인, 끝난 뒤 채점은 방법별로.
 - 2026-10-18: S42 T6~T24를 F로 다시 내 덮어씀 (사용자 결정 — 웹 시점별 예측을 한 방법으로). 채점은 재산정(T6~T24)·진행 중(T30~)으로 나눔.
+- 2026-10-20: S43도 F 그대로 — 켜기의 모델 파일은 `model_S42.json`을 옮긴 것 (사용자 결정, 분석 5.0 — 피팅 개선 보류).
