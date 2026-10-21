@@ -254,6 +254,10 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
 
   <!-- 「이번 시즌」: 진행 중(끝났으면 이벤트 종료까지) 시즌의 컷 예측과 계산기 (2026-10-18 사용자 결정) -->
   <div id="tab-now" role="tabpanel" aria-labelledby="tabBtn-now">
+  <!-- S42 종료 직전 닫기 (2026-10-21 사용자 요청 — 10-21 17:00 ~ 10-22 05:00 KST, 이 탭만. 수집·예측 커밋은 그대로) -->
+  <section class="card" id="closedCard" hidden>
+    <div class="notice" role="note" style="margin:0">예측 시스템의 정확도 문제로 솔로레이드 종료 직전(종료 12시간 전부터)에는 정보를 제공하지 않습니다.</div>
+  </section>
   <section class="card" id="liveCard">
     <div class="hero"><img class="hero-img" id="liveBoss" alt="" hidden>
       <div class="hero-txt"><div class="ch"><h2 id="liveTitle">최종 컷 예측</h2><a class="how" href="#method-pred">설명</a></div>
@@ -1425,8 +1429,18 @@ function drawAll() {
   drawSrv();
   if (tab === "past") { drawPast(); drawRec(); drawBack(); drawSink(); }
   else if (tab === "method") drawMethod();
-  else { drawLive(); drawKcard(); drawConv(); }
+  else {
+    const c = closedNow();
+    document.getElementById("closedCard").hidden = !c;
+    for (const id of ["liveCard", "calcCard", "srvbar"]) document.getElementById(id).hidden = c;
+    if (!c) { drawLive(); drawKcard(); drawConv(); }
+  }
 }
+// S42만 종료 12시간 전부터 「이번 시즌」 탭을 닫는다 (2026-10-21 사용자 요청). 브라우저 시계로 정하고, 열어 둔 화면도 1분마다 다시 본다
+const CLOSED = [Date.parse("2026-10-21T17:00:00+09:00"), Date.parse("2026-10-22T05:00:00+09:00")];
+function closedNow() { const t = Date.now(); return t >= CLOSED[0] && t < CLOSED[1]; }
+let wasClosed = closedNow();
+setInterval(() => { const c = closedNow(); if (c !== wasClosed) { wasClosed = c; if (tab === "now") drawAll(); } }, 60000);
 document.getElementById("sub").textContent = `자료 기준 ${DATA.asof} KST · 한섭·일섭·글섭`;
 showTab(tab, false);
 if (location.hash.startsWith("#method-")) route();
