@@ -52,7 +52,7 @@ S43도 F 그대로다 ([분석 5.0](solo-raid-analysis.md#50-운영--f-그대로
 4.2b 확신 높은 제안과 합친 **최종 제안 81개(19시즌)**를 시즌마다 `kind` `s3_final` 항목 하나로 모았다. 4.2b 제안 중 조사가 대신한 12줄에는 `superseded`를 붙였다.
 결과 요약·복사본 모의 실행은 [분석 5.1](solo-raid-analysis.md#51-자료--오류를-찾아-뺀다-먼저).
 
-- [ ] **반영 (S42 채점 뒤) — 한 명령.** 2026-10-28: 분석 5.3 계획의 0단계로 계산 전에 한다 (사용자 결정). `python3 -I tools/solo_raid/lab5/s3_apply.py`로 먼저 보고(81개: 더함 80 · 대신함 1), `--write --by "…세션"`으로 `discard.json`에 쓴다.
+- [x] **반영 (S42 채점 뒤) — 한 명령.** (2026-10-28 끝 — 분석 5.3 0단계) 2026-10-28: 분석 5.3 계획의 0단계로 계산 전에 한다 (사용자 결정). `python3 -I tools/solo_raid/lab5/s3_apply.py`로 먼저 보고(81개: 더함 80 · 대신함 1), `--write --by "…세션"`으로 `discard.json`에 쓴다.
   근거 항목의 `decision`을 한 일(`row`·`server`·`discard`, 오류 아님은 `keep`)로 바꾸고, reason·ref를 근거 항목에서 붙인다. 두 번 돌려도 같다. 그다음 5.
   - 판독 오류 칸의 `correct`는 적어 두기만 한다 (지금 `discard.py`는 바른 값을 넣어 주지 않는다).
   - 「대신함 1」: S28 한 줄(10-17 서버 KR 고침)이 이어붙인 그림의 옛 파일 이름 시각 오류로 확인돼 줄 버림이 대신한다.
@@ -105,10 +105,10 @@ S43도 F 그대로다 ([분석 5.0](solo-raid-analysis.md#50-운영--f-그대로
 
 ### 5. 다시 돌리기
 
-- [ ] `git fetch origin main && git merge origin/main` 뒤 `python3 -I tools/solo_raid/analyze_all.py` —
+- [x] (2026-10-28) `git fetch origin main && git merge origin/main` 뒤 `python3 -I tools/solo_raid/analyze_all.py` —
   도장(`post_all_stamp.json`)이 바뀐 `discard.json`·도구를 보고 그 시즌 `post_all.sh`를 다시 돈다 (S41은 도장의 `extra`가 있어야 같아진다 — 손으로 돌리지 않는다).
   끝나면 `registry.json`·`analysis/`·시즌 state 후처리 파일을 커밋한다.
-- [ ] 3에서 고친 줄이 풀렸는지 본다: `lab5/e_premise.py`를 다시 돌려 순서 모순 줄이 줄었는지, 새로 생긴 모순이 없는지.
+- [x] (2026-10-28 — 기대값과 같음, [분석 5.3 계획 0](solo-raid-analysis.md#53-계획-2026-10-28-계산-전--사용자-검토-기다림)) 3에서 고친 줄이 풀렸는지 본다: `lab5/e_premise.py`를 다시 돌려 순서 모순 줄이 줄었는지, 새로 생긴 모순이 없는지.
   4.2b의 |P − g|/σ > 5 목록(`e_flood_cov.py`의 `prep(…, zmax=5)`)은 F의 변환에 기대므로 보조로만 본다.
   **기대값 (2026-10-20 복사본 모의 실행, 도구 고침 없이 3만):** 순서 모순 쌍 한섭 179 → 0 · 일섭 24 → 0, 빼는 줄 27 → 0, 같은 사람 % 역행 2 → 0,
   하한을 정답이 어기는 칸 1·3·10% 7·8·7 → 0·1·0 (남은 1은 S23 표 반올림). 한섭 1·3·10% 정답 값 변화 0. 이와 다르면 그사이 바뀐 것(도구 고침·새 자료)을 먼저 본다.
