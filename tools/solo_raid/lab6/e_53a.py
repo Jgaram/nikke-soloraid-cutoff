@@ -93,7 +93,8 @@ def past_of(s):
 
 def trunc_path(work, s, T):
     p = os.path.join(work, "trunc", s, f"trunc_T{T:g}", "state")
-    return p if os.path.exists(os.path.join(p, "core.jsonl")) else None
+    done = os.path.join(os.path.dirname(p), "DONE")   # backtest.trunc_state가 다 만든 뒤에 쓴다
+    return p if os.path.exists(os.path.join(p, "core.jsonl")) and os.path.exists(done) else None
 
 
 def tr(args):
@@ -130,11 +131,13 @@ def tr(args):
                 c["lb_gap"] = None if lb is None else round(math.log(tv / lb), 5)
                 c["lb_gap_unknown"] = None if lbu is None else round(math.log(tv / lbu), 5)
                 # A1 기준선 B0: 최근 6시간 라벨 닻 중 q에 가장 가까운 %(log) 하나 × 앞 시즌 R 중앙
-                for name, pool in (("b0", rec6), ("b0_unknown", [o for o in unk if T - 6 <= o["h"] <= T])):
+                unk6 = [o for o in unk if T - 6 <= o["h"] <= T]
+                for name, pool, K in (("b0", rec6, "all"), ("b0_k10", rec6, "k10"), ("b0_unknown_k10", unk6, "k10")):
                     if not pool:
                         continue
                     a = min(pool, key=lambda o: (abs(math.log(o["x"] / q)), -o["h"], o["oi"]))
-                    Rs = [v for v in (A.log_r(x, a["x"], A.to_season(a["h"], s, x, "h"), q, dt) for x in past) if v is not None]
+                    ref = past if K == "all" else past[-10:]
+                    Rs = [v for v in (A.log_r(x, a["x"], A.to_season(a["h"], s, x, "h"), q, 24.0, A.R_HOW, A.R_DP) for x in ref) if v is not None]
                     if not Rs:
                         continue
                     d = A.dist([a["s"] * math.exp(v) for v in Rs])
@@ -156,7 +159,7 @@ def tr(args):
                         c["b0_bracket"] = dict(pred=round(d["median"], 3), i80=[round(v, 3) for v in d["i80"]], n_r=len(G), now=round(cc, 3),
                                                err=round(d["median"] / tv - 1, 5), in80=d["i80"][0] <= tv <= d["i80"][1])
                 cells.append(c)
-    return {"about": "5.3 A1·A3·A4·A6 (T 절단 사본, 지난 시즌 비는 앞 시즌만, dt 3시간, 시각 좌표 h)", "missing": dict(missing), "cells": cells}
+    return {"about": "5.3 A1·A3·A4·A6 (T 절단 사본, 지난 시즌 비는 앞 시즌만 — b0* 국소 평면 ±24시간·% ×2, b0_bracket은 c6 꼴 두 점 ±3시간, 시각 좌표 h)", "missing": dict(missing), "cells": cells}
 
 
 def rows_ab_label(rows):

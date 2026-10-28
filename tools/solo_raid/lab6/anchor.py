@@ -21,6 +21,9 @@ import predict as PR  # noqa: E402
 DEV = [f"S{n}" for n in range(19, 43)]
 TARGETS = [f"S{n}" for n in range(21, 43)]
 PCTS = [0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 30.0]
+ADA_DT = (2.0, 4.0, 8.0, 16.0, 24.0)
+# 지난 시즌 비 R을 재는 기본 꼴 (A 탐색 2026-10-28: % ×2 창은 곡선이 휘어 막판 비를 +1.6~4.7% 부풀림 → ×1.5, 시간 창은 좁은 것부터)
+R_HOW, R_DP = "ada", 1.5
 PCT_LO, PCT_HI = 0.005, 0.01   # % 표시 0.01%p — 반올림·버림을 다 덮는 구간 [p − 0.005, p + 0.01)
 
 _info, _truth, _full = {}, None, {}
@@ -155,7 +158,18 @@ def log_r(s, p, t, q, dt, how="seg", dp=2.0):
     _, H, _ = info(s)
     if t < 0 or t > H:
         return None
-    c = cut_at(full(s), p, t, dt) if how == "seg" else cut_fit(full(s), p, t, dt, dp)
+    if how == "seg":
+        c = cut_at(full(s), p, t, dt)
+    elif how == "fit":
+        c = cut_fit(full(s), p, t, dt, dp)
+    else:   # "ada": 좁은 창부터 — 처음 맞춰지는 폭 (2026-10-28, A1: ±24시간 고정 창이 막판 컷을 하루 평균 쪽으로 낮게 읽음)
+        c = None
+        for w in ADA_DT:
+            if w > dt:
+                break
+            c = cut_fit(full(s), p, t, w, dp)
+            if c is not None:
+                break
     if c is None or c <= 0:
         return None
     return math.log(tv / c)
