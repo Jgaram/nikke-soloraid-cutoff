@@ -20,6 +20,8 @@ import anchor as A  # noqa: E402
 GRID_P = [0.3, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 20.0]
 QS = [1.0, 3.0, 10.0]
 DTS = [1.0, 3.0, 6.0]
+# A2 지난 시즌 컷을 잇는 꼴: 두 점 꺾은선(seg, ±dt) · 국소 평면(fit, ±dt시간·% ×dp 안) — 2026-10-28 seg가 거의 못 재 fit을 더함
+VARIANTS = [("seg", dt, 1.5) for dt in DTS] + [("fit", dt, dp) for dt in (12.0, 24.0) for dp in (2.0, 3.0)]
 COORDS = ["h", "rem", "reset"]
 
 
@@ -58,19 +60,19 @@ def a2(args):
     여기서는 시즌 자기 시각 h로 재고(=h 좌표), rem·reset은 길이·시작이 다른 S19·S28·S38 줄만 바뀐다 (따로 적음)."""
     out = {"about": "5.3 A2 — 시즌 자기 점으로 잰 log R(자리 p, t → 최종 q). sd·n은 시즌 간", "cells": {}, "coord_note": {}}
     idx = {s: i for i, s in enumerate(A.DEV)}
-    for dt in DTS:
+    for how, dt, dp in VARIANTS:
         for q in QS:
             for p in GRID_P:
                 for t in range(6, 121, 6):
                     L = {}
                     for s in A.DEV:
-                        v = A.log_r(s, p, float(t), q, dt)
+                        v = A.log_r(s, p, float(t), q, dt, how, dp)
                         if v is not None:
                             L[s] = v
                     if not L:
                         continue
                     vals = list(L.values())
-                    out["cells"][f"dt{dt:g}|q{q:g}|p{p:g}|t{t}"] = dict(
+                    out["cells"][f"{how}|dt{dt:g}|dp{dp:g}|q{q:g}|p{p:g}|t{t}"] = dict(
                         n=len(L), med=round(st.median(vals), 4), sd=None if sd(vals) is None else round(sd(vals), 4),
                         p10=round(A.quant(sorted(vals), 0.1), 4), p90=round(A.quant(sorted(vals), 0.9), 4),
                         rho_order=None if spearman([idx[s] for s in L], vals) is None else round(spearman([idx[s] for s in L], vals), 3),

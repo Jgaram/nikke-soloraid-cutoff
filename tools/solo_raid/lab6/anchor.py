@@ -106,15 +106,56 @@ def cut_at(rows, p, t, dt):
     return a["s"] + (b["s"] - a["s"]) * w
 
 
-def log_r(s, p, t, q, dt):
-    """지난 시즌 s에서 자리 (p, t) → 최종 q%의 log 비. 잴 수 없으면 None."""
+def cut_fit(rows, p, t, dt, dp, min_n=3):
+    """그 시즌 점으로 잇는 컷 C_p(t) — 국소 평면 (2026-10-28, A2: 두 점 꺾은선은 지난 시즌 점이 성겨 거의 못 잰다).
+    |h − t| ≤ dt이고 |log(%/p)| ≤ log dp인 A·B 줄로 log 점수 = a + b·log(%/p) + c·(h − t)를 같은 무게 최소제곱으로 맞추고 a를 읽는다.
+    조건: 점 min_n개 이상, p 위·아래에 점이 하나씩 이상 (밖으로 늘이지 않음), b < 0 (점수가 높으면 %가 좋다).
+    시각 쪽은 한쪽만 있어도 되지만 c < 0이면(컷이 시간에 줄어듦) c = 0으로 다시 맞춘다. 잴 수 없으면 None."""
+    lp = math.log(p)
+    L = [o for o in rows if o["grade"] in "AB" and abs(o["h"] - t) <= dt and abs(math.log(o["x"]) - lp) <= math.log(dp)]
+    if len(L) < min_n or not any(o["x"] <= p for o in L) or not any(o["x"] >= p for o in L):
+        return None
+    X = [(1.0, math.log(o["x"]) - lp, o["h"] - t) for o in L]
+    y = [math.log(o["s"]) for o in L]
+    beta = _ols(X, y)
+    if beta is None:
+        return None
+    if beta[2] < 0:
+        beta = _ols([x[:2] for x in X], y)
+        if beta is None:
+            return None
+    if beta[1] >= 0:
+        return None
+    return math.exp(beta[0])
+
+
+def _ols(X, y):
+    k = len(X[0])
+    A_ = [[sum(X[n][i] * X[n][j] for n in range(len(X))) for j in range(k)] for i in range(k)]
+    b_ = [sum(X[n][i] * y[n] for n in range(len(X))) for i in range(k)]
+    # 가우스 소거
+    M = [row[:] + [b_[i]] for i, row in enumerate(A_)]
+    for c in range(k):
+        piv = max(range(c, k), key=lambda r: abs(M[r][c]))
+        if abs(M[piv][c]) < 1e-12:
+            return None
+        M[c], M[piv] = M[piv], M[c]
+        for r in range(k):
+            if r != c:
+                f = M[r][c] / M[c][c]
+                M[r] = [M[r][j] - f * M[c][j] for j in range(k + 1)]
+    return [M[i][k] / M[i][i] for i in range(k)]
+
+
+def log_r(s, p, t, q, dt, how="seg", dp=2.0):
+    """지난 시즌 s에서 자리 (p, t) → 최종 q%의 log 비. how: seg(두 점 꺾은선) · fit(국소 평면). 잴 수 없으면 None."""
     tv = truth().get((s, "KR", float(q)))
     if tv is None:
         return None
     _, H, _ = info(s)
     if t < 0 or t > H:
         return None
-    c = cut_at(full(s), p, t, dt)
+    c = cut_at(full(s), p, t, dt) if how == "seg" else cut_fit(full(s), p, t, dt, dp)
     if c is None or c <= 0:
         return None
     return math.log(tv / c)
