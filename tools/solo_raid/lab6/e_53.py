@@ -22,7 +22,7 @@ import anchor as A  # noqa: E402
 import e_53a as EA  # noqa: E402
 
 N_MIN_ABS = 3          # 닻 하나의 R을 잴 수 있는 기준 시즌 최소 수
-N_MIN_FRAC = 0.5       # … 와 기준 시즌 수의 이 몫 중 큰 쪽
+N_MIN_FRAC = 0.3       # … 와 기준 시즌 수의 이 몫 중 큰 쪽 (2026-10-28 — 칸 비율만 보고 0.5 → 0.3)
 SIGMA_FLOOR = 0.002    # σ_a 아래 끝 (log, 0.2%)
 SHRINK = 0.5           # N2 공분산 줄임: Σ = (1−λ)S + λ·diag(S)
 PCTS_RUN = [0.5, 1.0, 2.0, 3.0, 5.0, 10.0]
@@ -42,7 +42,7 @@ def rvec(a, s, ref, q):
     """닻 a의 기준 시즌별 log R {시즌: 값}."""
     out = {}
     for x in ref:
-        v = A.log_r(x, a["x"], A.to_season(a["h"], s, x, "h"), q, 24.0, A.R_HOW, A.R_DP)
+        v = A.log_r(x, a["x"], A.to_season(a["h"], s, x, "h"), q, A.R_DT, A.R_HOW, A.R_DP)
         if v is not None:
             out[x] = v
     return out

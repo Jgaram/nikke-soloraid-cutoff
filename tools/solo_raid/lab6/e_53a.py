@@ -137,7 +137,7 @@ def tr(args):
                         continue
                     a = min(pool, key=lambda o: (abs(math.log(o["x"] / q)), -o["h"], o["oi"]))
                     ref = past if K == "all" else past[-10:]
-                    Rs = [v for v in (A.log_r(x, a["x"], A.to_season(a["h"], s, x, "h"), q, 24.0, A.R_HOW, A.R_DP) for x in ref) if v is not None]
+                    Rs = [v for v in (A.log_r(x, a["x"], A.to_season(a["h"], s, x, "h"), q, A.R_DT, A.R_HOW, A.R_DP) for x in ref) if v is not None]
                     if not Rs:
                         continue
                     d = A.dist([a["s"] * math.exp(v) for v in Rs])
