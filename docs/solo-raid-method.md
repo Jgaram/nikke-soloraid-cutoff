@@ -291,7 +291,7 @@ WP0 기반 ─┬─ WP1 오차 재기 (1a~1g 병렬) ───────┐
 | WP | 상태 | 세션 | 맡은 파일 | 커밋 |
 |---|---|---|---|---|
 | G0 계획 | 끝 (2026-10-28) | 계획 세션 | `docs/solo-raid-method.md` | e45ab29 |
-| WP0 기반 | 대기 | — | `tools/solo_raid/lab7/` 뼈대·`obs_table.py`·`score.py`, `r7/{F,B0,Z0}_D0.json` | — |
+| WP0 기반 | 진행 (2026-10-28) | [세션](https://claude.ai/code/session_01MQimn3UGhFxgpV7ALnBSGD) | `tools/solo_raid/lab7/` 뼈대·`obs_table.py`·`score.py`, `r7/{F,B0,Z0}_D0.json` | — |
 | WP1 오차 재기 | 대기 (WP0 뒤) | — | `r7/obs_error.json`, 「WP1 결과」 절 | — |
 | WP3a 명세 | 대기 (WP0 뒤) | — | 「WP3 명세」 절 | — |
 | WP2 도구 고침 | 대기 (WP1·WP3a 뒤) | — | 공용 도구 (잠금) | — |
