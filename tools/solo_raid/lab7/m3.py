@@ -227,6 +227,7 @@ class Stage1Prob:
         self.param = param
         self.n = n_stage1()
         self.it = 1 + NR + NL                     # ln tau_r 위치 (tau_l은 다음)
+        self.off_ix = tuple(range(self.it + 4, self.it + 10))   # 서버 성분 모수 6개 위치
         self.tau_ix = (self.it, self.it + 1) if param == "centered" else ()
         self.start = np.concatenate([[M1.WEAK["a"][0]], np.full(NR, CR_MEAN if param == "centered" else 0.0),
                                      np.full(NL, CL_MEAN if param == "centered" else 0.0), [math.log(0.3)] * 2,
@@ -276,6 +277,7 @@ class CellProb:
         self.pr = pr
         self.K = int(pr["K"])
         self.n = 1 + self.K + 8
+        self.off_ix = tuple(range(1 + self.K + 2, 1 + self.K + 8))
         self.mc = np.asarray(pr["mean_coef"], float)
         self.phi = np.asarray(pr["phi_coef"], float).reshape(self.K, NR + NL)
         self.lam = np.asarray(pr["lambda_scaled"], float).reshape(self.K)
@@ -355,13 +357,17 @@ def model(obs, prob, pre):
         r12, l12 = curves12(th["cr"], th["cl"])
         numpyro.deterministic("r12", r12)
         numpyro.deterministic("l12", l12)
+    if prob.kind == "cell":   # 수렴 판정용: 핵심(a·ξ·lnsig0·lnrho)과 서버 성분 보조 모수를 따로 둔다
+        K_ = prob.K
+        numpyro.deterministic("core", v[:2 + K_ + 1])
+        numpyro.deterministic("aux", v[3 + K_:])
     mu, P = surface(th, obs["y"], obs["u"])
     OM.observe(obs, mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), **eps_phi)
     for q in OM.Q_TARGETS:
         numpyro.deterministic(f"lnC_{q:g}", lnC(th, q))
 
 
-def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), full_ep=False):
+def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), full_ep=False, start=None):
     """MAP + 라플라스 (m1.map_precond 꼴, float64). eps·phi는 사전 평균에 고정. -> dict(loc, chol, info)
     1단계는 평활 ln tau를 고정하고 푼다 — 결합 최빈값은 tau -> 0 (곡선이 직선)으로 달아나 퇴화하기 때문 (2026-10-29 확인).
     tau = 0.3으로 풀고, 구한 곡선의 2차 차분 rms로 tau를 한 번 갱신해 다시 푼다. 라플라스 공분산은 나머지 모수만, tau 둘은 ln 척도 sd 0.7 독립으로 둔다."""
@@ -407,10 +413,14 @@ def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), full_ep=Fa
                 x, nit = res.x, nit + res.nit
             return x, nit, res
 
-        x0 = np.asarray(prob.start, float)[free]
+        st0 = np.asarray(prob.start if start is None else start[:n], float)
+        x0 = st0[free]
         if full_ep:
             from numpyro.distributions.transforms import StickBreakingTransform
-            x0 = np.concatenate([x0, [float(np.log(eps0 / (1 - eps0)))], np.asarray(StickBreakingTransform().inv(phi0)).reshape(-1)])
+            if start is not None and len(start) > n:
+                x0 = np.concatenate([x0, np.asarray(start[n:], float)])
+            else:
+                x0 = np.concatenate([x0, [float(np.log(eps0 / (1 - eps0)))], np.asarray(StickBreakingTransform().inv(phi0)).reshape(-1)])
         x, nit, res = solve(x0, temps, 0)
         if tau_ix:                                   # tau 갱신 후 다시 (앞 답에서 출발, 온도 1)
             v = np.array(full(jnp.asarray(x[:nf])), float)
@@ -453,23 +463,60 @@ def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), full_ep=Fa
                                             "tau_fixed": [math.exp(loc[i]) for i in tau_ix]}}
 
 
-def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True, full_ep=False):
-    """관측 줄 -> MAP -> NUTS (retry False면 한 번만). (samples, info, diag, obs). info에 map·secs·n·N."""
+def multistart_map(obs, prob, full_ep=False, n=8, seed=0, scatter=0.5, tol=0.5):
+    """시작점 n개의 MAP (m1.multistart_map과 같은 꼴): 첫째는 기본 시작, 나머지는 그 해에서 서버 성분 모수(dJP dGL pJP pGL kJP kGL)만
+    N(0, scatter^2)로 흩어 시작한다. 최고 로그 사후(= fun 최소)를 고르고, 그 값에 tol 안으로 닿은 시작점이 2개 미만이면 n개를 더 한다 (한 번만).
+    -> 가장 좋은 pre (info["multistart"]에 시작점 수·최고 로그 사후·닿은 수·기본 시작점과의 차)"""
+    base = map_precond(obs, prob, full_ep=full_ep)
+    out = [base]
+    rng = np.random.default_rng(seed)
+
+    def add(k):
+        for _ in range(k):
+            st = np.array(base["loc"], float)
+            st[list(prob.off_ix)] += rng.normal(0, scatter, len(prob.off_ix))
+            out.append(map_precond(obs, prob, full_ep=full_ep, start=st))
+
+    add(n - 1)
+    best = min(p["info"]["fun"] for p in out)
+    hit = sum(p["info"]["fun"] <= best + tol for p in out)
+    if hit < 2:
+        add(n)
+        best = min(p["info"]["fun"] for p in out)
+        hit = sum(p["info"]["fun"] <= best + tol for p in out)
+    pre = min(out, key=lambda p: p["info"]["fun"])
+    pre["info"] = dict(pre["info"], multistart={"n_starts": len(out), "best_logpost": -best, "n_hit_best": int(hit),
+                                                "gain_vs_single": base["info"]["fun"] - best,
+                                                "funs": sorted(round(p["info"]["fun"], 2) for p in out)})
+    return pre
+
+
+def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True, full_ep=False, multistart=True):
+    """관측 줄 -> MAP(시작점 8개) -> NUTS (retry False면 한 번만). (samples, info, diag, obs). info에 map·secs·n·N."""
     obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1)
     jobs = OM.to_jax(obs)
     t0 = time.time()
-    pre = map_precond(jobs, prob, full_ep=full_ep)
+    pre = multistart_map(jobs, prob, full_ep=full_ep) if multistart else map_precond(jobs, prob, full_ep=full_ep)
     t_map = time.time() - t0
     mdl = functools.partial(model, prob=prob, pre=pre)
     lnames = [f"lnC_{q:g}" for q in (1, 3, 10)]
-    names = (["th24", "r12", "l12"] if stage1 else ["v"]) + lnames
+    if prob.kind == "cell":   # 칸: 핵심 모수 + 모든 목표 lnC로 판정 (서버 성분은 따로 보고, 재시도도 핵심이 못 지날 때만)
+        names = ["core"] + [f"lnC_{q:g}" for q in OM.Q_TARGETS]
+    else:
+        names = (["th24", "r12", "l12"] if stage1 else ["v"]) + lnames
+    init = M1.map_init(len(pre["loc"])) if multistart else None      # 모든 사슬을 MAP(z = 0)에서 시작 (m1과 같다)
     if retry:
         sm, info, dg = OM.fit_with_retry(mdl, {"obs": jobs}, names=names, seed=seed, chains=chains, warmup=warmup, samples=samples,
-                                         target_accept=target_accept)
+                                         target_accept=target_accept, init=init)
     else:
-        sm, info = OM.run_nuts(mdl, {"obs": jobs}, seed=seed, chains=chains, warmup=warmup, samples=samples, target_accept=target_accept)
+        sm, info = OM.run_nuts(mdl, {"obs": jobs}, seed=seed, chains=chains, warmup=warmup, samples=samples, target_accept=target_accept, init=init)
         dg = OM.diagnose(sm, names, divergences=info["divergences"])
         info["retried"] = False
+    if prob.kind == "cell":
+        ax = OM.diagnose(sm, ["aux"], divergences=0)
+        al = OM.diagnose(sm, ["v"] + (["eps"] if "eps" in sm else []), divergences=0)
+        dg["aux"] = {"rhat": ax["rhat_max"], "ess": ax["ess_min"]}
+        dg["all"] = {"rhat": max(al["rhat_max"], dg["rhat_max"]), "ess": min(al["ess_min"], dg["ess_min"])}
     info["map_secs"] = round(t_map, 1)
     info["map"] = pre["info"]
     info["pre"] = {"loc": pre["loc"], "chol": pre["chol"]}
@@ -477,14 +524,14 @@ def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500
     return sm, info, dg, obs
 
 
-def laplace_fit(rows, H, season, err, prob, delay_key, ndraw=4000, seed=0, K=16):
+def laplace_fit(rows, H, season, err, prob, delay_key, ndraw=4000, seed=0, K=16, multistart=True):
     """1단계 라플라스 근사 (명세 6절 C4): 결합 MAP(float64, eps·phi는 사전 평균에 고정) + 역 Hessian 공분산(고윳값 바닥 1e-6) -> v 4000뽑기.
     NUTS 쪽과 같은 모양의 (sm, info, dg, obs)를 돌려준다 (사슬 1개)."""
     import jax
     obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=True)
     jobs = OM.to_jax(obs)
     t0 = time.time()
-    pre = map_precond(jobs, prob)
+    pre = multistart_map(jobs, prob) if multistart else map_precond(jobs, prob)
     t_map = time.time() - t0
     rng = np.random.default_rng(seed)
     v = pre["loc"][None] + rng.standard_normal((ndraw, prob.n)) @ pre["chol"].T
@@ -526,7 +573,7 @@ def stage1_entry(sm, info, dg, obs):
             "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"], "divergences": info["divergences"], "conv": dg["conv"],
             "secs": info["secs"], "secs_total": round(info["secs"] + info.get("secs_first_try", 0.0) + info["map_secs"], 1),
             "map_secs": info["map_secs"], "retried": info["retried"], "tree_cap_frac": info["tree_cap_frac"],
-            "map": info["map"], "n": obs["n"], "N": obs["N"], "counts": obs["counts"],
+            "map": info["map"], "multistart": info["map"].get("multistart"), "n": obs["n"], "N": obs["N"], "counts": obs["counts"],
             "ln_tau_r_mean": float(v[:, it].mean()), "ln_tau_l_mean": float(v[:, it + 1].mean()),
             "tau_rhat": tau_rh["rhat_max"], "tau_ess": tau_rh["ess_min"],
             "eps_mean": float(sm["eps"].mean()), "lnC_q10_50_90": lc}
@@ -713,9 +760,9 @@ def cmd_prior(a):
 
 # ---------- 칸 예측 ----------
 
-def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0, full_ep=False, retry=True):
+def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0, full_ep=False, retry=True, multistart=True):
     prob = CellProb(pr)
-    sm, info, dg, obs = fit(rows, H, s, err, prob, s, chains, warmup, samples, seed, stage1=False, full_ep=full_ep, retry=retry)
+    sm, info, dg, obs = fit(rows, H, s, err, prob, s, chains, warmup, samples, seed, stage1=False, full_ep=full_ep, retry=retry, multistart=multistart)
     return sm, info, dg, obs
 
 
@@ -755,10 +802,11 @@ def cmd_predict(a):
                 out["priors"][s] = prior(s1, s, cache=CACHE)
             pr = out["priors"][s]
             head, rows = obs_table.read_cell(path)
-            sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples, full_ep=a.pre_full)
+            sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples, full_ep=a.pre_full, multistart=not a.no_multistart)
             out["cells"] += OM.pred_cells(s, T, {q: sm[f"lnC_{q:g}"] for q in OM.Q_TARGETS}, dg["conv"])
             out["info"].append({"season": s, "T": T, "secs": info["secs"], "map_secs": info["map_secs"], "conv": dg["conv"], "K": pr["K"],
-                                "k": pr["k"], "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"], "divergences": info["divergences"],
+                                "k": pr["k"], "rhat_max": dg["all"]["rhat"], "ess_min": dg["all"]["ess"], "rhat_core": dg["rhat_max"], "ess_core": dg["ess_min"],
+                                "rhat_aux": dg["aux"]["rhat"], "ess_aux": dg["aux"]["ess"], "divergences": info["divergences"],
                                 "retried": info["retried"], "tree_cap_frac": info["tree_cap_frac"], "n": obs["n"], "N": obs["N"]})
             _atomic_json(a.out, out)
             i = out["info"][-1]
@@ -1154,6 +1202,7 @@ def main():
     q.add_argument("--T", default="all")
     q.add_argument("--out", required=True)
     q.add_argument("--prior-cache", default=None)
+    q.add_argument("--no-multistart", action="store_true", help="MAP 시작점 8개(기본)를 끈다")
     q.add_argument("--pre-full", action="store_true", help="eps·phi도 사전 펴기에 넣는다 (m1과 같은 방식)")
     a = ap.parse_args()
     if a.cmd == "stage1":
