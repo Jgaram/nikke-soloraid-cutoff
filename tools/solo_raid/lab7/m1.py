@@ -494,7 +494,7 @@ def map_init(n):
 
 
 def fit_one(rows, H, season, err, form, x_term, r2, K=16, delay_key=None, stage1=True, prior=None, seed=0,
-            keep_ll=True, retry=True, max_tree_depth=10, multistart=False):
+            keep_ll=True, retry=True, max_tree_depth=10, multistart=True, warmup=1000, samples=1000, retry_warmup=1500):
     """한 칸 맞춤: prepare -> map_precond -> fit_with_retry. -> dict(samples, info, diag, obs, jobs, pre, names)"""
     import obs_table  # noqa: F401
     obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1)
@@ -504,22 +504,32 @@ def fit_one(rows, H, season, err, form, x_term, r2, K=16, delay_key=None, stage1
     t0 = time.time()
     if multistart:
         modes = multistart_map(jobs, prior, form, x_term, r2=r2)
+        rep = sum(1 for p in modes if p["info"]["fun"] - modes[0]["info"]["fun"] < 0.5)
+        if rep < 2:   # 최고 봉우리가 시작점 둘 이상에서 안 나오면 8개 더 (명세 7절 「WP3b M1 세션이 더함」)
+            modes = sorted(modes + multistart_map(jobs, prior, form, x_term, r2=r2, seed=1), key=lambda p: p["info"]["fun"])
+            rep = sum(1 for p in modes if p["info"]["fun"] - modes[0]["info"]["fun"] < 0.5)
         pre = modes[0]
+        pre["n_starts"], pre["n_best_repeat"] = len(modes), rep
         pre["modes"] = [{"fun": p["info"]["fun"], "server": [float(p["loc"][1 + i]) for i, nm in enumerate(names) if nm in OFF]} for p in modes]
     else:
         pre = map_precond(jobs, prior, form, x_term, r2=r2)
     map_secs = time.time() - t0
-    watch = ["a"] + names + [f"lnC_{q:g}" for q in OM.Q_TARGETS]
+    watch = ["a"] + [n for n in names if n not in OFF] + [f"lnC_{q:g}" for q in OM.Q_TARGETS]   # 수렴 판정: core + lnC (서버 보조 모수는 따로 적기만)
     # 모든 사슬을 MAP(z = 0)에서 시작한다: 서버 성분(JP·GL) 모수의 국소 최빈값에 사슬이 갈려 박히는 것(R-hat 1.6, ESS 3)을 막는다
     init = map_init(len(pre["loc"]))
     kw = {"obs": jobs, "prior": prior, "form": form, "x_term": x_term, "keep_ll": keep_ll, "pre": pre, "r2": r2}
     if retry:
-        sm, info, dg = OM.fit_with_retry(model, kw, names=watch, seed=seed, init=init, max_tree_depth=max_tree_depth)
+        sm, info, dg = OM.fit_with_retry(model, kw, names=watch, seed=seed, init=init, max_tree_depth=max_tree_depth,
+                                         warmup=warmup, samples=samples, retry_warmup=retry_warmup)
     else:
-        sm, info = OM.run_nuts(model, kw, seed=seed, init=init, max_tree_depth=max_tree_depth)
+        sm, info = OM.run_nuts(model, kw, seed=seed, init=init, max_tree_depth=max_tree_depth, warmup=warmup, samples=samples)
         dg = OM.diagnose(sm, watch, divergences=info["divergences"])
         info["retried"] = False
+    offs = [n for n in names if n in OFF]
+    if offs:
+        dg["off"] = OM.diagnose(sm, offs, divergences=0)
     info["map_secs"] = round(map_secs, 1)
+    info["n_starts"], info["n_best_repeat"] = pre.get("n_starts"), pre.get("n_best_repeat")
     info["map"] = pre["info"]
     return {"samples": sm, "info": info, "diag": dg, "obs": obs, "jobs": jobs, "pre": pre, "names": names}
 
@@ -534,14 +544,12 @@ def theta_surface_fn(names, form, x_term, r2):
 
 
 def core_diag(dg, names, div):
-    """서버 성분 보조 모수(d·p·k 오프셋: dJP·dGL·pJP·pGL·kJP·kGL)를 뺀 수렴. JP·GL 성분 모수는 사슬이 서로 다른 국소 최빈값에 박히는 일이 있고(2026-10-29),
-    그게 KR 곡면(a·r·lnm·eta·sigma·lnC)에는 안 번지므로 따로 센다. conv_core = 그 이름들 R-hat < 1.01 · ESS >= 400 · 발산 0."""
-    core = [k for k in dg["per"] if k not in OFF]
-    rh = max(dg["per"][k]["rhat"] for k in core)
-    es = min(dg["per"][k]["ess"] for k in core)
-    off = [k for k in dg["per"] if k in OFF]
+    """수렴 판정은 core 모수(a·r·lnm·eta·sigma·[beta·r2])와 lnC_q (서버 보조 모수 d·p·k는 뺌 — 따로 적기만). conv_core = R-hat < 1.01 · ESS >= 400 · 발산 0."""
+    rh = max(v["rhat"] for v in dg["per"].values())
+    es = min(v["ess"] for v in dg["per"].values())
+    off = dg.get("off")
     return {"rhat_max": rh, "ess_min": es, "conv_core": bool(rh < 1.01 and es >= 400 and div == 0),
-            "offsets_rhat_max": max(dg["per"][k]["rhat"] for k in off), "offsets_ess_min": min(dg["per"][k]["ess"] for k in off)}
+            "offsets_rhat_max": off["rhat_max"] if off else None, "offsets_ess_min": off["ess_min"] if off else None}
 
 
 def cmd_stage1(a):
@@ -567,7 +575,8 @@ def cmd_stage1(a):
         t0 = time.time()
         head, rows = O.read_cell(os.path.join(a.obs, f"{s}.jsonl.gz"))
         r = fit_one(rows, head["H"], s, err, form, x_term, r2, K=16, delay_key=delay_key_stage1(s), stage1=True,
-                    retry=not a.no_retry, max_tree_depth=a.max_tree_depth, multistart=a.multistart)
+                    retry=not a.no_retry, max_tree_depth=a.max_tree_depth, multistart=not a.single_map,
+                    warmup=a.warmup, samples=a.samples, retry_warmup=a.retry_warmup)
         sm, obs, jobs = r["samples"], r["obs"], r["jobs"]
         v = np.stack([sm[k].reshape(-1) for k in ["a"] + names], 1)
         # PSIS-LOO
@@ -591,19 +600,19 @@ def cmd_stage1(a):
             "core": core_diag(r["diag"], names, r["info"]["divergences"]),
             "worst": {"rhat": sorted(((v["rhat"], k) for k, v in r["diag"]["per"].items()), reverse=True)[:3],
                       "ess": sorted((v["ess"], k) for k, v in r["diag"]["per"].items())[:3]},
-            "retried": info["retried"], "no_retry_mode": bool(a.no_retry), "srv": a.srv, "srv_scale": a.srv_scale, "multistart": a.multistart,
+            "retried": info["retried"], "no_retry_mode": bool(a.no_retry), "srv": a.srv, "srv_scale": a.srv_scale, "multistart": not a.single_map, "warmup": a.warmup, "samples": a.samples, "retry_warmup": a.retry_warmup,
             "modes": r["pre"].get("modes"), "depth_dist": info.get("depth_dist"), "max_tree_depth": a.max_tree_depth, "info": {k: info[k] for k in info if k != "map"}, "map": info["map"],
             "secs_total": round(secs, 1),
             "loo": {"elpd_loo": float(lo.elpd_loo), "se": float(lo.se), "p_loo": float(lo.p_loo),
                     "pareto_k_gt_0.7": int((pk > 0.7).sum()), "n": int(len(pk))},
-            "n_flags": len(fl), "flags": fl}
+            "n_starts": info.get("n_starts"), "n_best_repeat": info.get("n_best_repeat"), "n_flags": len(fl), "flags": fl}
         with open(a.out + ".tmp", "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=1, default=float)
         os.replace(a.out + ".tmp", a.out)
         d = out["seasons"][s]
         line = (f"stage1 {tag} {s} D1: {secs:.0f}s (map {info['map_secs']}s nuts {info['secs']}s) leapfrog {info['mean_leapfrog']:.0f} "
                 f"div {info['divergences']} rhat {d['diag']['rhat_max']:.3f} ess {d['diag']['ess_min']:.0f} conv {d['diag']['conv']} "
-                f"core rhat {d['core']['rhat_max']:.3f} ess {d['core']['ess_min']:.0f} conv_core {d['core']['conv_core']} offsets rhat {d['core']['offsets_rhat_max']:.2f} worst {d['worst']['rhat'][0][1]}/{d['worst']['ess'][0][1]} retried {info['retried']} elpd {d['loo']['elpd_loo']:.1f}+-{d['loo']['se']:.1f} k>0.7 {d['loo']['pareto_k_gt_0.7']}")
+                f"core rhat {d['core']['rhat_max']:.3f} ess {d['core']['ess_min']:.0f} conv_core {d['core']['conv_core']} offsets rhat {(d['core']['offsets_rhat_max'] or 0):.2f} starts {info.get('n_starts')}/{info.get('n_best_repeat')} worst {d['worst']['rhat'][0][1]}/{d['worst']['ess'][0][1]} retried {info['retried']} elpd {d['loo']['elpd_loo']:.1f}+-{d['loo']['se']:.1f} k>0.7 {d['loo']['pareto_k_gt_0.7']}")
         print(line, flush=True)
         _log_attempt(a.ll_dir, line)
 
@@ -640,6 +649,19 @@ def cmd_compare(a):
     res["diff_over_se"] = tot / se_t if se_t > 0 else None
     res["rule"] = "합 차 > 2 se 일 때만 b"
     res["choice"] = a.b if tot > 2 * se_t else a.a
+    if a.stage1_a and a.stage1_b:   # 수렴 규칙: 복잡한 쪽(b)이 재시도 뒤에도 시즌 2개 넘게 core 수렴 못 하면 단순한 쪽
+        conv = {}
+        for tag, path in (("a", a.stage1_a), ("b", a.stage1_b)):
+            with open(path, encoding="utf-8") as f:
+                sj = json.load(f)["seasons"]
+            conv[tag] = {s: bool(sj[s]["core"]["conv_core"]) for s in ss}
+        res["conv_core"] = conv
+        res["n_nonconv_a"] = sum(not v for v in conv["a"].values())
+        res["n_nonconv_b"] = sum(not v for v in conv["b"].values())
+        res["choice_by_elpd_only"] = res["choice"]
+        if res["n_nonconv_b"] > 2:
+            res["choice"] = a.a
+            res["rule_note"] = "b가 6시즌 중 2시즌 넘게 수렴 못 해 단순한 쪽(a)"
     res["seasons_favoring_b"] = [s for s, v in res["seasons"].items() if v["diff_b_minus_a"] > 0]
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
@@ -665,7 +687,10 @@ def main():
     p.add_argument("--resume", action="store_true")
     p.add_argument("--srv", choices=["full", "delta"], default="full", help="delta: 일·글 성분은 점수 비 δ만 (ψ=κ=0)")
     p.add_argument("--srv-scale", type=float, default=1.0, help="δ·ψ·κ 사전 sd에 곱함")
-    p.add_argument("--multistart", action="store_true", help="MAP 시작점 8개 중 log 사후 가장 높은 최빈값으로 사전 펴기·시작")
+    p.add_argument("--single-map", action="store_true", help="시작점 8개 MAP 대신 단일 MAP (옛 방식, 판정에 안 씀)")
+    p.add_argument("--warmup", type=int, default=1000)
+    p.add_argument("--samples", type=int, default=1000)
+    p.add_argument("--retry-warmup", type=int, default=1500)
     p.add_argument("--max-tree-depth", type=int, default=10, help="NUTS 나무 깊이 상한 (시간 상한용; 7이면 한 번에 127걸음)")
     p.add_argument("--no-retry", action="store_true", help="수렴 못 해도 0.95 재시도를 하지 않는다 (시간 절약; conv 표시는 그대로)")
     p = sp.add_parser("compare")
@@ -674,6 +699,8 @@ def main():
     p.add_argument("--b", required=True)
     p.add_argument("--seasons", required=True)
     p.add_argument("--out", required=True)
+    p.add_argument("--stage1-a")
+    p.add_argument("--stage1-b")
     a = ap.parse_args()
     {"stage1": cmd_stage1, "compare": cmd_compare}[a.cmd](a)
 

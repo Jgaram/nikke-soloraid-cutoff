@@ -458,15 +458,15 @@ def diagnose(samples, names=None, rhat_max=1.01, ess_min=400, divergences=0):
 
 
 def fit_with_retry(model, model_kwargs, names=None, seed=0, chains=4, warmup=500, samples=500, target_accept=0.9,
-                   max_tree_depth=10, dense=True, init=None):
-    """run_nuts → diagnose → 못 지나면 target_accept 0.95·warmup 1000으로 한 번 더. (samples, info, diag) — info["retried"]."""
+                   max_tree_depth=10, dense=True, init=None, retry_warmup=1000):
+    """run_nuts → diagnose → 못 지나면 target_accept 0.95·warmup retry_warmup(기본 1000)으로 한 번 더. (samples, info, diag) — info["retried"]."""
     sm, info = run_nuts(model, model_kwargs, seed, chains, warmup, samples, target_accept, max_tree_depth, dense, init)
     dg = diagnose(sm, names, divergences=info["divergences"])
     info["retried"] = False
     if dg["conv"]:
         return sm, info, dg
     first = info["secs"]
-    sm, info = run_nuts(model, model_kwargs, seed + 1, chains, 1000, samples, 0.95, max_tree_depth, dense, init)
+    sm, info = run_nuts(model, model_kwargs, seed + 1, chains, retry_warmup, samples, 0.95, max_tree_depth, dense, init)
     dg = diagnose(sm, names, divergences=info["divergences"])
     info["retried"] = True
     info["secs_first_try"] = first
