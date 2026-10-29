@@ -315,7 +315,7 @@ def model(obs, prob, pre):
         numpyro.deterministic(f"lnC_{q:g}", lnC(th, q))
 
 
-def map_precond(obs, prob, iters=400, temps=(0.003, 0.03, 0.3, 1.0)):
+def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0)):
     """MAP + 라플라스 (m1.map_precond 꼴, float64). eps·phi는 사전 평균에 고정. -> dict(loc, chol, info)
     1단계는 평활 ln tau를 고정하고 푼다 — 결합 최빈값은 tau -> 0 (곡선이 직선)으로 달아나 퇴화하기 때문 (2026-10-29 확인).
     tau = 0.3으로 풀고, 구한 곡선의 2차 차분 rms로 tau를 한 번 갱신해 다시 푼다. 라플라스 공분산은 나머지 모수만, tau 둘은 ln 척도 sd 0.7 독립으로 둔다."""
@@ -363,7 +363,24 @@ def map_precond(obs, prob, iters=400, temps=(0.003, 0.03, 0.3, 1.0)):
                 v[ti] = math.log(float(np.clip(np.sqrt(np.mean(d2 ** 2)), 0.05, 3.0)))
             fixed[0] = jnp.asarray(v)
             x, nit, res = solve(x, (1.0,), nit)
-        H = np.asarray(jax.jit(jax.hessian(negpost))(jnp.asarray(x), 1.0), float)
+        hf = jax.jit(jax.hessian(negpost))
+        H = np.asarray(hf(jnp.asarray(x), 1.0), float)
+        n_escape = 0
+        for _ in range(4):                           # 안장점이면 음의 고유방향으로 밀어 다시 푼다 (S19·S24에서 필요했다)
+            w0, Q0 = np.linalg.eigh(0.5 * (H + H.T))
+            if w0.min() > 1e-2:
+                break
+            n_escape += 1
+            best = None
+            for sg in (1.0, -1.0):
+                x2, nit, r2 = solve(x + sg * 0.5 * Q0[:, 0], (1.0,), nit)
+                if best is None or r2.fun < best[2].fun:
+                    best = (x2, nit, r2)
+            if best[2].fun < res.fun - 1e-6:
+                x, nit, res = best
+                H = np.asarray(hf(jnp.asarray(x), 1.0), float)
+            else:
+                break
         loc = np.asarray(full(jnp.asarray(x)), float)
     H = 0.5 * (H + H.T)
     w, Q = np.linalg.eigh(H)
@@ -372,12 +389,12 @@ def map_precond(obs, prob, iters=400, temps=(0.003, 0.03, 0.3, 1.0)):
     for i in tau_ix:
         sq[i, i] = 0.7
     return {"loc": loc, "chol": sq, "info": {"fun": float(res.fun), "nit": nit, "ok": bool(res.success),
-                                            "min_eig": float(w.min()), "max_eig": float(w.max()),
+                                            "min_eig": float(w.min()), "max_eig": float(w.max()), "n_floored": int((w < 1e-6).sum()), "n_escape": n_escape,
                                             "tau_fixed": [math.exp(loc[i]) for i in tau_ix]}}
 
 
-def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9):
-    """관측 줄 -> MAP -> NUTS. (samples, info, diag, obs). info에 map·secs·n·N."""
+def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True):
+    """관측 줄 -> MAP -> NUTS (retry False면 한 번만). (samples, info, diag, obs). info에 map·secs·n·N."""
     obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1)
     jobs = OM.to_jax(obs)
     t0 = time.time()
@@ -386,8 +403,13 @@ def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500
     mdl = functools.partial(model, prob=prob, pre=pre)
     lnames = [f"lnC_{q:g}" for q in (1, 3, 10)]
     names = (["th24", "r12", "l12"] if stage1 else ["v"]) + lnames
-    sm, info, dg = OM.fit_with_retry(mdl, {"obs": jobs}, names=names, seed=seed, chains=chains, warmup=warmup, samples=samples,
-                                     target_accept=target_accept)
+    if retry:
+        sm, info, dg = OM.fit_with_retry(mdl, {"obs": jobs}, names=names, seed=seed, chains=chains, warmup=warmup, samples=samples,
+                                         target_accept=target_accept)
+    else:
+        sm, info = OM.run_nuts(mdl, {"obs": jobs}, seed=seed, chains=chains, warmup=warmup, samples=samples, target_accept=target_accept)
+        dg = OM.diagnose(sm, names, divergences=info["divergences"])
+        info["retried"] = False
     info["map_secs"] = round(t_map, 1)
     info["map"] = pre["info"]
     info["pre"] = {"loc": pre["loc"], "chol": pre["chol"]}
@@ -395,14 +417,51 @@ def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500
     return sm, info, dg, obs
 
 
+def laplace_fit(rows, H, season, err, prob, delay_key, ndraw=4000, seed=0, K=16):
+    """1단계 라플라스 근사 (명세 6절 C4): 결합 MAP(float64, eps·phi는 사전 평균에 고정) + 역 Hessian 공분산(고윳값 바닥 1e-6) -> v 4000뽑기.
+    NUTS 쪽과 같은 모양의 (sm, info, dg, obs)를 돌려준다 (사슬 1개)."""
+    import jax
+    obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=True)
+    jobs = OM.to_jax(obs)
+    t0 = time.time()
+    pre = map_precond(jobs, prob)
+    t_map = time.time() - t0
+    rng = np.random.default_rng(seed)
+    v = pre["loc"][None] + rng.standard_normal((ndraw, prob.n)) @ pre["chol"].T
+
+    def one(vv):
+        th = prob.theta(vv)
+        r12, l12 = curves12(th["cr"], th["cl"])
+        return r12, l12, jnp_stack([lnC(th, q) for q in OM.Q_TARGETS])
+
+    import jax.numpy as jnp
+    jnp_stack = jnp.stack
+    r12, l12, lc = jax.jit(jax.vmap(one))(jnp.asarray(v, jnp.float32))
+    sm = {"v": v[None], "r12": np.asarray(r12)[None], "l12": np.asarray(l12)[None],
+          "eps": np.full((1, ndraw), jobs["eps_ab"][0] / (jobs["eps_ab"][0] + jobs["eps_ab"][1]))}
+    for i, q in enumerate(OM.Q_TARGETS):
+        sm[f"lnC_{q:g}"] = np.asarray(lc[:, i])[None]
+    mi = pre["info"]
+    secs = round(time.time() - t0, 1)
+    info = {"secs": secs, "map_secs": round(t_map, 1), "divergences": 0, "retried": False, "tree_cap_frac": 0.0, "map": mi,
+            "n": obs["n"], "N": obs["N"], "counts": obs["counts"], "pre": {"loc": pre["loc"], "chol": pre["chol"]}}
+    dg = {"rhat_max": None, "ess_min": None, "conv": bool(mi["min_eig"] > 0 and mi["n_floored"] == 0)}
+    return sm, info, dg, obs
+
+
 # ---------- 1단계 ----------
+
+def s1_X(sm):
+    v = sm["v"].reshape(-1, sm["v"].shape[-1])
+    it = v.shape[1] - 10
+    return np.concatenate([v[:, [0, it + 2, it + 3]], v[:, it + 4:], sm["r12"].reshape(-1, 12), sm["l12"].reshape(-1, 12)], axis=1)
 
 def stage1_entry(sm, info, dg, obs):
     v = sm["v"].reshape(-1, sm["v"].shape[-1])
     it = v.shape[1] - 10
-    X = np.concatenate([v[:, [0, it + 2, it + 3]], v[:, it + 4:], sm["r12"].reshape(-1, 12), sm["l12"].reshape(-1, 12)], axis=1)
+    X = s1_X(sm)
     lc = {f"{q:g}": np.quantile(sm[f"lnC_{q:g}"].ravel(), [0.1, 0.5, 0.9]).tolist() for q in OM.Q_TARGETS}
-    tau_rh = OM.diagnose({"lt": sm["v"][..., it:it + 2]}, ["lt"])
+    tau_rh = OM.diagnose({"lt": sm["v"][..., it:it + 2]}, ["lt"]) if sm["v"].shape[0] > 1 else {"rhat_max": None, "ess_min": None}
     return {"names": S1_NAMES, "mean": X.mean(0).tolist(), "cov": np.cov(X.T).tolist(),
             "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"], "divergences": info["divergences"], "conv": dg["conv"],
             "secs": info["secs"], "secs_total": round(info["secs"] + info.get("secs_first_try", 0.0) + info["map_secs"], 1),
@@ -448,24 +507,37 @@ def cmd_stage1(a):
             out = json.load(f)
     out["header"] = {"about": "M3 1단계 — 끝난 시즌 전체 표, 약한 사전, P-스플라인 곡선 (정답 표 안 씀)", "method": "M3", "data_ver": C.DATA_VER,
                      "K": 16, "date": datetime.date.today().isoformat(), "names": S1_NAMES, "basis": basis_spec(),
-                     "param": a.param, "cfg": {"chains": a.chains, "warmup": a.warmup, "samples": a.samples, "target_accept": 0.9}}
+                     "param": a.param, "method": a.method,
+                     "cfg": ({"draws": 4000, "note": "라플라스: 결합 MAP + 역 Hessian, eps·phi는 사전 평균에 고정(MAP과 같음)"} if a.method == "laplace"
+                             else {"chains": a.chains, "warmup": a.warmup, "samples": a.samples, "target_accept": a.target_accept, "retry": not a.no_retry})}
     for s in C.parse_seasons(a.seasons):
         if s in out["seasons"]:
             print(s, "건너뜀 (이미 있음)", flush=True)
             continue
         head, rows = obs_table.read_cell(os.path.join(a.obs_dir, f"{s}.jsonl.gz"))
         dk = s if s in err["1a_post_delay"]["expanding"] else None
-        sm, info, dg, obs = fit(rows, head["H"], s, err, Stage1Prob(a.param), dk, a.chains, a.warmup, a.samples, stage1=True,
-                                  target_accept=a.target_accept)
+        if a.method == "laplace":
+            sm, info, dg, obs = laplace_fit(rows, head["H"], s, err, Stage1Prob(a.param), dk)
+        else:
+            sm, info, dg, obs = fit(rows, head["H"], s, err, Stage1Prob(a.param), dk, a.chains, a.warmup, a.samples, stage1=True,
+                                    target_accept=a.target_accept, retry=not a.no_retry)
         out["seasons"][s] = stage1_entry(sm, info, dg, obs)
         out["seasons"][s]["param"] = a.param
+        out["seasons"][s]["method"] = a.method
+        if a.vec_dir:
+            os.makedirs(a.vec_dir, exist_ok=True)
+            np.savez_compressed(os.path.join(a.vec_dir, f"{s}_{a.method}.npz"), X=s1_X(sm).astype(np.float32),
+                                lnC=np.stack([sm[f"lnC_{q:g}"].ravel() for q in OM.Q_TARGETS]).astype(np.float32))
         _atomic_json(a.out, out)
         if a.draws_dir:
             os.makedirs(a.draws_dir, exist_ok=True)
             np.savez_compressed(os.path.join(a.draws_dir, f"{s}.npz"), z=sm["z"], eps=sm["eps"], phi=sm["phi"],
                                 loc=info["pre"]["loc"], chol=info["pre"]["chol"])
         e = out["seasons"][s]
-        print(s, f"n={e['n']} secs={e['secs']} rhat={e['rhat_max']:.3f} ess={e['ess_min']:.0f} div={e['divergences']} conv={e['conv']}", flush=True)
+        if a.method == "laplace":
+            print(s, f"n={e['n']} secs={e['secs']} map_ok={e['map']['ok']} nit={e['map']['nit']} min_eig={e['map']['min_eig']:.3g} floored={e['map']['n_floored']} lnC3={e['lnC_q10_50_90']['3'][1]:.4f}", flush=True)
+        else:
+            print(s, f"n={e['n']} secs={e['secs']} rhat={e['rhat_max']:.3f} ess={e['ess_min']:.0f} div={e['divergences']} conv={e['conv']}", flush=True)
 
 
 # ---------- 2단계 사전 (PCA / PACE) ----------
@@ -776,6 +848,9 @@ def main():
     s.add_argument("--n-basis-r", type=int, default=12)
     s.add_argument("--n-basis-l", type=int, default=12)
     s.add_argument("--r-range-pct", default="0.1,40", help="r 매듭 범위 하한,상한 (%)")
+    s.add_argument("--method", choices=("laplace", "nuts"), default="laplace")
+    s.add_argument("--no-retry", action="store_true")
+    s.add_argument("--vec-dir", default=None, help="33벡터 뽑기 npz (X, lnC) 저장 폴더")
     s.add_argument("--target-accept", type=float, default=0.9)
     s.add_argument("--param", choices=("centered", "noncentered"), default="noncentered")
     p = sub.add_parser("prior")

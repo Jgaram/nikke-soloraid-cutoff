@@ -401,13 +401,15 @@ def row_loglik(obs, mu, P, sigma0, rho, eps, phi, parts=False):
     return {"ll": ll, "p_contam": p_c, "p_server": p_s, "t_mean": t_mean}
 
 
-def observe(obs, mu, P, sigma0, rho, keep_ll=False):
-    """numpyro 모형 안에서: eps·phi 표집 + 관측 가능도 factor."""
+def observe(obs, mu, P, sigma0, rho, keep_ll=False, eps=None, phi=None):
+    """numpyro 모형 안에서: eps·phi 표집 + 관측 가능도 factor. eps·phi를 주면(사전 펴기 쪽에서 따로 다룰 때) 표집하지 않고 그 값을 쓴다."""
     import jax.numpy as jnp
     import numpyro
     import numpyro.distributions as dist
-    eps = numpyro.sample("eps", dist.Beta(*[jnp.float32(v) for v in obs["eps_ab"]]))
-    phi = numpyro.sample("phi", dist.Dirichlet(obs["dirichlet"]))
+    if eps is None:
+        eps = numpyro.sample("eps", dist.Beta(*[jnp.float32(v) for v in obs["eps_ab"]]))
+    if phi is None:
+        phi = numpyro.sample("phi", dist.Dirichlet(obs["dirichlet"]))
     ll = row_loglik(obs, mu, P, sigma0, rho, eps, phi)
     numpyro.factor("obs_ll", ll.sum())
     if keep_ll:
@@ -432,8 +434,10 @@ def run_nuts(model, model_kwargs, seed=0, chains=4, warmup=500, samples=500, tar
     jax.block_until_ready((sm, ex))   # jax는 비동기라 이걸 기다려야 걸린 시간이 맞다
     secs = time.time() - t0
     steps = np.asarray(ex["num_steps"])
+    dep = np.ceil(np.log2(steps + 1)).astype(int)
     info = {"secs": round(secs, 1), "divergences": int(np.asarray(ex["diverging"]).sum()),
             "tree_cap_frac": float((steps >= 2 ** max_tree_depth - 1).mean()), "mean_leapfrog": float(steps.mean()),
+            "depth_dist": {int(d): round(float((dep == d).mean()), 4) for d in np.unique(dep)},   # 나무 깊이별 몫 (뽑기 구간)
             "chains": chains, "warmup": warmup, "samples": samples, "target_accept": target_accept}
     return {k: np.asarray(v) for k, v in sm.items()}, info
 
