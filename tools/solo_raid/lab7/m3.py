@@ -40,7 +40,8 @@ import hier as HR  # noqa: E402
 LN10 = math.log(10.0)
 L10_3 = math.log10(3.0)
 OFF = M1.OFF                                            # dJP dGL pJP pGL kJP kGL
-NUIS = ["lnsig0", "lnrho"] + list(OFF)                  # prior_for에 넘기는 8개
+XTERM = True                                            # x항 β (M1 ②와 같다): P_k *= exp(beta w_fin_k / ln10)
+NUIS = ["lnsig0", "lnrho"] + (["beta"] if XTERM else []) + list(OFF)   # prior_for에 넘기는 모수 (m1 순서)
 NR, NL = 13, 12   # 2026-10-29 7·8 → 12·12 → r 13 (균일 12 + 3% 매듭, 관측만의 PSIS-LOO 규칙): 기저 7개로는 범위만 바꿔도 3% 컷이 0.57% 움직였다 (P-스플라인은 넉넉한 기저 + 벌점, Eilers·Marx 1996)
 W_LO, W_HI = math.log(0.1 / 3), math.log(40 / 3)        # 평가 격자 w12 범위 (고정)
 K_LO, K_HI = W_LO, W_HI                                 # r 매듭 범위 (configure로 바꿈)
@@ -85,9 +86,11 @@ BASIS = build_basis()
 NE_R, S1_NAMES, BAND, OUT, DT = 0, [], [], [], 0
 
 
-def configure(nr=None, nl=None, r_lo_pct=None, r_hi_pct=None, r_extra=None):
+def configure(nr=None, nl=None, r_lo_pct=None, r_hi_pct=None, r_extra=None, x_term=None):
     """기저 개수·r 매듭 범위(% 단위)를 바꾼다 (BASIS를 제자리에서 갱신 — 기본 인자로 묶인 곳도 따라온다). 실험용; 평가 격자 w12·u12는 그대로."""
-    global NR, NL, K_LO, K_HI, K_EXTRA
+    global NR, NL, K_LO, K_HI, K_EXTRA, XTERM
+    if x_term is not None:
+        XTERM = bool(x_term)
     if r_extra is not None:
         K_EXTRA = tuple(r_extra)
     NR = nr or NR
@@ -102,10 +105,11 @@ def configure(nr=None, nl=None, r_lo_pct=None, r_hi_pct=None, r_extra=None):
 
 def _update_layout():
     """평가 격자 길이에서 파생되는 것: 1단계 벡터 이름, 24+ 곡선 벡터의 밴드 위치 (r: 0.3%<=q<=13.5%인 점, l: 인덱스 2..11)."""
-    global NE_R, S1_NAMES, BAND, OUT, DT
+    global NE_R, S1_NAMES, BAND, OUT, DT, NUIS
+    NUIS = ["lnsig0", "lnrho"] + (["beta"] if XTERM else []) + list(OFF)
     w = BASIS["w12"]
     NE_R = len(w)
-    S1_NAMES = ["a", "lnsig0", "lnrho"] + list(OFF) + [f"r{i}" for i in range(NE_R)] + [f"l{i}" for i in range(12)]
+    S1_NAMES = ["a"] + list(NUIS) + [f"r{i}" for i in range(NE_R)] + [f"l{i}" for i in range(12)]
     br = [i for i, x in enumerate(w) if math.log(0.3 / 3) - 0.05 <= x <= math.log(13.5 / 3) + 0.05]
     BAND = br + [NE_R + i for i in range(2, 12)]
     DT = NE_R + 12
@@ -113,11 +117,11 @@ def _update_layout():
 
 
 def n_stage1():
-    return 1 + NR + NL + 10
+    return 1 + NR + NL + 2 + len(NUIS)
 
 
 def basis_spec():
-    return {"r": {"n": NR, "degree": 3, "range_w": [K_LO, K_HI], "extra_knots_w": list(K_EXTRA), "knots": "clamped, 균일", "outside": "끝값 상수"},
+    return {"x_term": XTERM, "r": {"n": NR, "degree": 3, "range_w": [K_LO, K_HI], "extra_knots_w": list(K_EXTRA), "knots": "clamped, 균일", "outside": "끝값 상수"},
             "l": {"n": NL, "degree": 3, "range_s": [S_LO, 1.0], "knots": "clamped, 균일 (s = sqrt(u))"},
             "w_grid": {"n": 160, "lo": float(BASIS["wg"][0]), "hi": float(BASIS["wg"][-1])},
             "u_grid": {"n": 200, "s_lo": S_LO, "s_hi": 1.0},
@@ -173,6 +177,8 @@ def surface(theta, y, u, B=BASIS):
         t = (theta["a"] + dl[k] - y) * jnp.exp(-kp[k])
         wf = w_of_R(t, R, e0, e1, B)
         Pk = jnp.exp(ps[k]) * P
+        if "beta" in theta:       # x항: 그 서버 성분의 최종 w에 따라 침수 크기가 변한다 (m1.surface와 같다)
+            Pk = Pk * jnp.exp(theta["beta"] * wf / LN10)[:, None]
         mus.append((L10_3 + wf / LN10)[:, None] - Pk)
         Ps.append(Pk)
     return jnp.stack(mus), jnp.stack(Ps)
@@ -227,7 +233,7 @@ class Stage1Prob:
         self.param = param
         self.n = n_stage1()
         self.it = 1 + NR + NL                     # ln tau_r 위치 (tau_l은 다음)
-        self.off_ix = tuple(range(self.it + 4, self.it + 10))   # 서버 성분 모수 6개 위치
+        self.off_ix = tuple(self.it + 2 + NUIS.index(n) for n in OFF)   # 서버 성분 모수 6개 위치
         self.tau_ix = (self.it, self.it + 1) if param == "centered" else ()
         self.start = np.concatenate([[M1.WEAK["a"][0]], np.full(NR, CR_MEAN if param == "centered" else 0.0),
                                      np.full(NL, CL_MEAN if param == "centered" else 0.0), [math.log(0.3)] * 2,
@@ -250,8 +256,8 @@ class Stage1Prob:
         cr, cl = v[1:1 + NR], v[1 + NR:1 + NR + NL]
         if self.param == "noncentered":
             cr, cl = self._curve(cr, v[it], "r"), self._curve(cl, v[it + 1], "l")
-        d = {"a": v[0], "cr": cr, "cl": cl, "lnsig0": v[it + 2], "lnrho": v[it + 3]}
-        d.update({n: v[it + 4 + i] for i, n in enumerate(OFF)})
+        d = {"a": v[0], "cr": cr, "cl": cl}
+        d.update({n: v[it + 2 + i] for i, n in enumerate(NUIS)})
         return d
 
     def logprior(self, v):
@@ -276,15 +282,15 @@ class CellProb:
     def __init__(self, pr):
         self.pr = pr
         self.K = int(pr["K"])
-        self.n = 1 + self.K + 8
-        self.off_ix = tuple(range(1 + self.K + 2, 1 + self.K + 8))
+        self.n = 1 + self.K + len(NUIS)
+        self.off_ix = tuple(1 + self.K + NUIS.index(n) for n in OFF)
         self.mc = np.asarray(pr["mean_coef"], float)
         self.phi = np.asarray(pr["phi_coef"], float).reshape(self.K, NR + NL)
         self.lam = np.asarray(pr["lambda_scaled"], float).reshape(self.K)
         nu = pr["nuisance"]
         assert nu["names"] == NUIS
         self.nmean = np.asarray(nu["mean"], float)
-        cov = np.asarray(nu["cov"], float) + 1e-6 * np.eye(8)
+        cov = np.asarray(nu["cov"], float) + 1e-6 * np.eye(len(NUIS))
         self.nch = np.linalg.cholesky(cov)
         self.am, self.av = pr["a"]["mean"], pr["a"]["var"]
         self.start = np.concatenate([[self.am], np.zeros(self.K), self.nmean])
@@ -296,8 +302,8 @@ class CellProb:
         if K:
             c = c + v[1:1 + K] @ jnp.asarray(self.phi)
         o = 1 + K
-        d = {"a": v[0], "cr": c[:NR], "cl": c[NR:], "lnsig0": v[o], "lnrho": v[o + 1]}
-        d.update({n: v[o + 2 + i] for i, n in enumerate(OFF)})
+        d = {"a": v[0], "cr": c[:NR], "cl": c[NR:]}
+        d.update({n: v[o + i] for i, n in enumerate(NUIS)})
         return d
 
     def logprior(self, v):
@@ -310,7 +316,7 @@ class CellProb:
         r = v[1 + K:] - jnp.asarray(self.nmean)
         ch = jnp.asarray(self.nch)
         zz = solve_triangular(ch, r, lower=True)
-        return lp - 0.5 * (zz ** 2).sum() - jnp.log(jnp.diag(ch)).sum() - 4 * math.log(2 * math.pi)
+        return lp - 0.5 * (zz ** 2).sum() - jnp.log(jnp.diag(ch)).sum() - 0.5 * len(NUIS) * math.log(2 * math.pi)
 
 
 # ---------- 모형·MAP ----------
@@ -359,8 +365,8 @@ def model(obs, prob, pre):
         numpyro.deterministic("l12", l12)
     if prob.kind == "cell":   # 수렴 판정용: 핵심(a·ξ·lnsig0·lnrho)과 서버 성분 보조 모수를 따로 둔다
         K_ = prob.K
-        numpyro.deterministic("core", v[:2 + K_ + 1])
-        numpyro.deterministic("aux", v[3 + K_:])
+        numpyro.deterministic("core", v[:-len(OFF)])      # a, ξ, lnsig0, lnrho, (β)
+        numpyro.deterministic("aux", v[-len(OFF):])
     mu, P = surface(th, obs["y"], obs["u"])
     OM.observe(obs, mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), **eps_phi)
     for q in OM.Q_TARGETS:
@@ -560,12 +566,12 @@ def laplace_fit(rows, H, season, err, prob, delay_key, ndraw=4000, seed=0, K=16,
 
 def s1_X(sm):
     v = sm["v"].reshape(-1, sm["v"].shape[-1])
-    it = v.shape[1] - 10
-    return np.concatenate([v[:, [0, it + 2, it + 3]], v[:, it + 4:], sm["r12"].reshape(len(v), -1), sm["l12"].reshape(len(v), -1)], axis=1)
+    it = v.shape[1] - len(NUIS) - 2
+    return np.concatenate([v[:, [0]], v[:, it + 2:], sm["r12"].reshape(len(v), -1), sm["l12"].reshape(len(v), -1)], axis=1)
 
 def stage1_entry(sm, info, dg, obs):
     v = sm["v"].reshape(-1, sm["v"].shape[-1])
-    it = v.shape[1] - 10
+    it = v.shape[1] - len(NUIS) - 2
     X = s1_X(sm)
     lc = {f"{q:g}": np.quantile(sm[f"lnC_{q:g}"].ravel(), [0.1, 0.5, 0.9]).tolist() for q in OM.Q_TARGETS}
     tau_rh = OM.diagnose({"lt": sm["v"][..., it:it + 2]}, ["lt"]) if sm["v"].shape[0] > 1 else {"rhat_max": None, "ess_min": None}
@@ -601,7 +607,7 @@ def load_stage1(path):
     b = d.get("header", {}).get("basis")
     if b:   # 1단계 파일의 기저로 맞춘다 (prior·predict가 같은 곡면을 쓰게)
         configure(b["r"]["n"], b["l"]["n"], 3 * math.exp(b["r"]["range_w"][0]), 3 * math.exp(b["r"]["range_w"][1]),
-                  r_extra=b["r"].get("extra_knots_w", []))
+                  r_extra=b["r"].get("extra_knots_w", []), x_term=b.get("x_term", False))
     return d["seasons"] if "seasons" in d else d
 
 
@@ -1178,6 +1184,7 @@ def main():
     s.add_argument("--r-extra-knots", default="0", help="r에 끼우는 안쪽 매듭 w 값(쉼표). 기본 0 = 3%%, 빈 문자열 = 없음")
     s.add_argument("--n-basis-l", type=int, default=12)
     s.add_argument("--r-range-pct", default="0.1,40", help="r 매듭 범위 하한,상한 (%)")
+    s.add_argument("--no-x-term", action="store_true", help="x항 β를 뺀다 (기본: 넣음)")
     s.add_argument("--method", choices=("laplace", "nuts"), default="laplace")
     s.add_argument("--no-retry", action="store_true")
     s.add_argument("--vec-dir", default=None, help="33벡터 뽑기 npz (X, lnC) 저장 폴더")
@@ -1208,7 +1215,7 @@ def main():
     if a.cmd == "stage1":
         lo, hi = (float(x) for x in a.r_range_pct.split(","))
         ex = [float(x) for x in a.r_extra_knots.split(',') if x.strip() != '']
-        configure(a.n_basis_r or 12 + len(ex), a.n_basis_l, lo, hi, r_extra=ex)
+        configure(a.n_basis_r or 12 + len(ex), a.n_basis_l, lo, hi, r_extra=ex, x_term=not a.no_x_term)
     if getattr(a, "k", None) not in (None, "all"):
         a.k = int(a.k)
     {"selftest": cmd_selftest, "stage1": cmd_stage1, "prior": cmd_prior, "predict": cmd_predict, "check43": cmd_check43}[a.cmd](a)
