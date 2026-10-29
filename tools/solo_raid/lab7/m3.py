@@ -50,7 +50,6 @@ CR_MEAN, CR_SD = math.log(0.3), 1.5
 CL_MEAN, CL_SD = math.log(0.2 / 0.6), 2.0
 TAU_SCALE = 0.5
 CACHE = None                                            # 2단계 창 적합 디스크 캐시 폴더 (CLI --prior-cache)
-S1_NAMES = ["a", "lnsig0", "lnrho"] + list(OFF) + [f"r{i}" for i in range(12)] + [f"l{i}" for i in range(12)]
 
 
 # ---------- 기저·격자 (numpy) ----------
@@ -72,7 +71,7 @@ def _bspl_design(x, lo, hi, n, deg=3, extra=()):
 def build_basis():
     wg = np.linspace(math.log(0.005 / 3), math.log(100 / 3), 160)
     sg = np.linspace(S_LO, 1.0, 200)
-    w12 = np.linspace(W_LO, W_HI, 12)
+    w12 = np.unique(np.concatenate([np.linspace(W_LO, W_HI, 12), [x for x in K_EXTRA if W_LO <= x <= W_HI]]))   # 평가 격자: 균일 12 + 끼운 매듭 (정방 B)
     s12 = np.linspace(S_LO, 1.0, 12)
     i0 = int(np.clip(np.searchsorted(wg, 0.0) - 1, 0, len(wg) - 2))
     f0 = float((0.0 - wg[i0]) / (wg[i0 + 1] - wg[i0]))
@@ -83,6 +82,7 @@ def build_basis():
 
 
 BASIS = build_basis()
+NE_R, S1_NAMES, BAND, OUT, DT = 0, [], [], [], 0
 
 
 def configure(nr=None, nl=None, r_lo_pct=None, r_hi_pct=None, r_extra=None):
@@ -97,6 +97,19 @@ def configure(nr=None, nl=None, r_lo_pct=None, r_hi_pct=None, r_extra=None):
     if r_hi_pct is not None:
         K_HI = math.log(r_hi_pct / 3)
     BASIS.update(build_basis())
+    _update_layout()
+
+
+def _update_layout():
+    """평가 격자 길이에서 파생되는 것: 1단계 벡터 이름, 24+ 곡선 벡터의 밴드 위치 (r: 0.3%<=q<=13.5%인 점, l: 인덱스 2..11)."""
+    global NE_R, S1_NAMES, BAND, OUT, DT
+    w = BASIS["w12"]
+    NE_R = len(w)
+    S1_NAMES = ["a", "lnsig0", "lnrho"] + list(OFF) + [f"r{i}" for i in range(NE_R)] + [f"l{i}" for i in range(12)]
+    br = [i for i, x in enumerate(w) if math.log(0.3 / 3) - 0.05 <= x <= math.log(13.5 / 3) + 0.05]
+    BAND = br + [NE_R + i for i in range(2, 12)]
+    DT = NE_R + 12
+    OUT = [i for i in range(DT) if i not in BAND]
 
 
 def n_stage1():
@@ -108,7 +121,10 @@ def basis_spec():
             "l": {"n": NL, "degree": 3, "range_s": [S_LO, 1.0], "knots": "clamped, 균일 (s = sqrt(u))"},
             "w_grid": {"n": 160, "lo": float(BASIS["wg"][0]), "hi": float(BASIS["wg"][-1])},
             "u_grid": {"n": 200, "s_lo": S_LO, "s_hi": 1.0},
-            "w12": BASIS["w12"].tolist(), "u12": BASIS["u12"].tolist()}
+            "w12": BASIS["w12"].tolist(), "w_eval_note": "r 평가 격자 = 균일 12 + 끼운 매듭, l은 균일 12", "u12": BASIS["u12"].tolist()}
+
+
+_update_layout()
 
 
 # ---------- 곡면 (jax) ----------
@@ -498,7 +514,7 @@ def laplace_fit(rows, H, season, err, prob, delay_key, ndraw=4000, seed=0, K=16)
 def s1_X(sm):
     v = sm["v"].reshape(-1, sm["v"].shape[-1])
     it = v.shape[1] - 10
-    return np.concatenate([v[:, [0, it + 2, it + 3]], v[:, it + 4:], sm["r12"].reshape(-1, 12), sm["l12"].reshape(-1, 12)], axis=1)
+    return np.concatenate([v[:, [0, it + 2, it + 3]], v[:, it + 4:], sm["r12"].reshape(len(v), -1), sm["l12"].reshape(len(v), -1)], axis=1)
 
 def stage1_entry(sm, info, dg, obs):
     v = sm["v"].reshape(-1, sm["v"].shape[-1])
@@ -588,16 +604,13 @@ def cmd_stage1(a):
 # ---------- 2단계 사전 (PCA / PACE) ----------
 
 def _xv(e):
-    ix = [e["names"].index(f"{p}{i}") for p in "rl" for i in range(12)]
+    ix = [e["names"].index(f"{p}{i}") for p, nn in (("r", NE_R), ("l", 12)) for i in range(nn)]
     return np.asarray(e["mean"], float)[ix], np.asarray(e["cov"], float)[np.ix_(ix, ix)]
 
 
 # 가중 함수형 PCA (Ramsay-Silverman 8장, 0/1 가중): 주성분은 BAND(자료가 실제로 있는 구간)에서만 낸다.
 # 끝(r12 0~1·10~11 = 0.1~0.3%·13.5~40%, l12 0~1 = u < 0.089)은 자료가 없어 사후 평균·분산이 사전에 끌려 PC를 지배했다 (2026-10-29).
-BAND_R = list(range(2, 10))
-BAND_L = list(range(2, 12))
-BAND = BAND_R + [12 + i for i in BAND_L]          # 24벡터 안의 위치 (r12 앞 12, l12 뒤 12)
-OUT = [i for i in range(24) if i not in BAND]
+# BAND·OUT는 _update_layout이 평가 격자에서 정한다 (r: 0.3~13.5%인 점들 — 끼운 3% 매듭 포함, l: u >= 0.089).
 
 
 def pca_window(X, V):
@@ -621,7 +634,7 @@ def pca_window(X, V):
     disc = w[K:m] if m > K else np.array([])
     sres = float(disc.mean()) if len(disc) else 1e-4
     e = Q[:, :K].T                                   # [K, band]
-    phi = np.zeros((K, 24))
+    phi = np.zeros((K, DT))
     xi = (Xb - mu[BAND]) @ e.T                       # [J, K]
     for k in range(K):
         phi[k, BAND] = e[k]
@@ -673,8 +686,8 @@ def prior(stage1, target, k_fixed=None, cache=None):
     xv = [_xv(stage1[s]) for s in win]
     p = pca_window(np.array([x for x, _ in xv]), np.array([v for _, v in xv]))
     Br, Bl = BASIS["Br12"], BASIS["Bl12"]
-    mean_coef = np.concatenate([np.linalg.lstsq(Br, p["mu"][:12], rcond=None)[0], np.linalg.lstsq(Bl, p["mu"][12:], rcond=None)[0]])
-    phi_coef = np.array([np.concatenate([np.linalg.lstsq(Br, f[:12], rcond=None)[0], np.linalg.lstsq(Bl, f[12:], rcond=None)[0]])
+    mean_coef = np.concatenate([np.linalg.lstsq(Br, p["mu"][:NE_R], rcond=None)[0], np.linalg.lstsq(Bl, p["mu"][NE_R:], rcond=None)[0]])
+    phi_coef = np.array([np.concatenate([np.linalg.lstsq(Br, f[:NE_R], rcond=None)[0], np.linalg.lstsq(Bl, f[NE_R:], rcond=None)[0]])
                          for f in p["phi"]]).reshape(p["K"], NR + NL)
     mu_loc, mu_scale, tau_scale = M1.hier_args(NUIS)
     pf = HR.prior_for({s: stage1[s] for s in stage1}, target, NUIS, tau_scale, mu_loc, mu_scale, cache=cache, k_fixed=k)
@@ -1074,7 +1087,7 @@ def selftest_recovery(work, season="S30", chains=2, warmup=300, samples=300, par
         lo, hi = np.quantile(v[:, i], [0.05, 0.95])
         par[n_] = {"truth": float(vt[i]), "mean": float(v[:, i].mean()), "inside90": bool(lo <= vt[i] <= hi)}
     for nme, t_ in (("r12", r12t), ("l12", l12t)):
-        lo, hi = np.quantile(sm[nme].reshape(-1, 12), [0.05, 0.95], axis=0)
+        lo, hi = np.quantile(sm[nme].reshape(-1, sm[nme].shape[-1]), [0.05, 0.95], axis=0)
         par[nme + "_inside90"] = int(((lo <= np.asarray(t_)) & (np.asarray(t_) <= hi)).sum())
     return {"rows": len(new), "per_server": nsrv.tolist(), "lnC": rowsq, "lnC_inside90": f"{ins}/{len(OM.Q_TARGETS)}", "params": par,
             "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"], "divergences": info["divergences"], "secs": info["secs"],
