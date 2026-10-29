@@ -52,6 +52,24 @@ top7 시각 구간 (별도 열, 2026-10-16. 등급·t_lo·t_hi·h_lo·h_hi는 �
   h_lo_top7·h_hi_top7 = 그 겹침 (h 단위). top7 = 근거 문자열 "{서버} refs={A 사진 수} raw=[lo,hi]" (열린 끝은 None).
   A 줄·조건이 안 맞는 줄은 셋 다 null. server.jsonl·post_exclude.jsonl이 없거나 줄이 obs와 안 맞으면 모두 null로 두고 알린다.
 
+2026-10-29 WP2 고침 (C 줄만 올린다 — 이미 A·B인 줄은 그대로. 근거는 data/solo-raid/analysis/r7/wp1/1g.md, 가늠 코드는 lab7/err_1g.py)
+- 갱신 타이머 느슨한 꼴 (C → B): 지금 `TIMER`가 못 읽는 「갱신 시간 → N시간 M분 남음」(화살표·기호 사이, TIMER_LOOSE)과, OCR에서 「갱신」 항목
+  다음 항목이 「N시간 M분 남」으로 갈라진 꼴(TIMER_REM). 판독 메모·reads·ocr·ocr2 모두. 지금 규칙으로 읽히는 사진은 지금 것 그대로.
+  남은 시간은 24시간 미만만. basis `B:timer_loose(ocr) '…'`. 시각은 지금 타이머와 같게 풀고 [t−1분, t].
+- 이름 꼴 확장 (C → A): `name_time`이 못 읽는 이름 — 13자리·10자리 epoch(2026-05 앞, 1[67]로 시작)·공백·마침표·세미콜론 날짜시각(X_LOOSE)·맥 한글 스크린샷(X_MAC)·
+  YYMMDDHHMM(SS)(X_YY). 우선순위는 err_1g parse_name과 같다. `gov-`로 시작하는 이름(디시 앱 업로드 이름)은 쓰지 않는다. 기존 `name_time`이 읽는 이름과
+  obs shot_t가 있는 줄은 바꾸지 않고, shot_t가 비어 C가 될 줄에만 쓴다. 출처는 그 사진의 manifest fname. 남의 화면(SECOND) 이름이면 지금처럼 상한으로만.
+  유효 창은 게시−4일 ≤ t ≤ 게시+5분. basis `A:name_ext(manifest)`.
+- 첨부 짝 (C → A): manifest에 fname이 없는 사진은 글의 첨부 이름 목록(STATE/posts_min.jsonl의 files, --posts 파일의 files)에서 이름 시각(기존+확장 꼴)을 찾는다.
+  (a) extpair: 확장자 묶음(jpeg=jpg) 안에서 첨부 수와 그 글의 사진 수(manifest 같은 글 번호·확장자)가 같으면 차례대로 짝지은 이름 하나의 시각, basis `A:name_pair(extpair)`.
+  (b) tight: 첨부 이름 수 ≥ 그 글의 사진 수이고(이름 없는 사진이 남으면 안 씀 — WP2 세션 판단) 글 첨부의 유효 이름 시각이 모두 2분 안에 몰려 있으면 가장 이른 것, basis `A:name_pair(tight)`. 2~10분 묶음은 올리지 않고 C로 두고 센다(`tight_2_10`).
+  애매하면 올리지 않는다. 새 A에도 shot_after_post·late>24h·edit_name 표시 규칙이 그대로 적용된다.
+- 안전장치 (순위표 구간): 위 셋으로 새로 올릴 후보의 시각을 **기존 규칙만으로 정한 A 사진들**을 참조로 한 top7 구간(top7_bracket의 raw 구간, 열린 끝 허용)과 견준다.
+  구간이 있고 후보 시각이 구간 밖(±0.1시간)이면 올리지 않고 C로 두며 basis에 `cand_out_top7:{근거}`를 적는다. 구간이 없으면 올린다.
+  그다음 최종 등급으로 top7 열을 다시 계산한다 (순환 없이 두 단계: 기존 규칙 → 후보 점검·올림 → top7 열).
+- 후보 이름이 SECOND인 manifest 이름이면 C로 두되 t_hi를 그 이름 시각으로 낮출 수 있다 (`secondhand:…` 표시, 지금 obs shot_t 경로와 같다).
+- 요약(표준 출력·--summary)에 `wp2` 항목: 새 근거별 줄 수, 안전장치로 막힌 수, tight 2~10분이라 안 올린 수.
+
 출력: STATE/post_time.jsonl {oi, site, img, row, grade, t, t_lo, t_hi, t_kind, h, h_lo, h_hi, day, day_lo, basis,
 h_lo_top7, h_hi_top7, top7},
 STATE/post_time_claims.jsonl {i, grade, t, t_lo, t_hi, t_kind, h, h_lo, h_hi, day, day_lo, basis}. 표준 출력에 요약(시즌 안 % 관측 기준 등급별 줄 수, A 게시 지연 분위수).
@@ -74,6 +92,17 @@ KST = dt.timezone(dt.timedelta(hours=9))
 # 남의 화면을 다시 찍었거나 옮긴 이름: 그 시각은 관측의 상한일 뿐이다 (com.proximabeta는 게임 자체)
 SECOND = re.compile(r"browser|chrome|gallery|kakao|discord|twitter|instagram|naver|whale|line_|telegram|"
                     r"com\.(?!proximabeta)", re.I)
+# WP2 (2026-10-29): 느슨한 갱신 타이머 · 이름 꼴 확장 (lab7/err_1g.py와 같은 규칙)
+TIMER_LOOSE = re.compile(r"갱신\s*시간?\s*[→>\-–:~=\s]*\s*(?:(\d+)\s*시간)?\s*(?:(\d+)\s*분)?\s*남")
+TIMER_REM = re.compile(r"^\s*(?:(\d+)\s*시간)?\s*(?:(\d+)\s*분)?\s*남")
+X_EPOCH13 = re.compile(r"(?<!\d)(1[67]\d{11})(?!\d)")
+X_EPOCH10 = re.compile(r"(?<!\d)(1[67]\d{8})(?!\d)")
+X_LOOSE = re.compile(r"(20\d{2})[-_. ]+(\d{2})[-_. ]+(\d{2})[ _\-T.]+(\d{2})[-_.:; ]+(\d{2})[-_.:; ]+(\d{2})")
+X_MAC = re.compile(r"(20\d{2})-(\d{2})-(\d{2})\s*(오전|오후)\s*(\d{1,2})_(\d{2})_(\d{2})")
+X_YY = re.compile(r"(?<!\d)(2[3-6])(\d{2})(\d{2})[_\-]?(\d{2})(\d{2})(\d{2})?(?!\d)")
+TIGHT_MAX = dt.timedelta(minutes=2)        # 첨부 짝 tight: 유효 이름 시각이 이 안에 몰려야 올린다
+TIGHT_LOOSE_MAX = dt.timedelta(minutes=10)  # 2~10분 묶음은 올리지 않고 센다
+TOP7_MARGIN_H = 0.1                         # 안전장치 여유 (시간)
 TIMER = re.compile(r"갱신\s*시간\s*(?:(\d+)\s*시간)?\s*(?:(\d+)\s*분)?\s*남")
 RE_TIME = re.compile(   # text_extract.py와 같음
     r"(\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?|\d{1,2}:\d\d|오전|오후|새벽|아침|점심|저녁|밤|지금|현재|방금|아까|어제|오늘|첫날|둘째\s*날|마감|막날|"
@@ -116,6 +145,89 @@ def name_time(name):
     if m:
         return dt.datetime.fromtimestamp(int(m.group(1)) / 1000, KST).replace(tzinfo=None)
     return None
+
+
+def _dtc(*a):
+    try:
+        return dt.datetime(*a)
+    except ValueError:
+        return None
+
+
+def parse_name(name):
+    """이름 → [(시각, 꼴)]. 꼴: std(`name_time`이 읽는 꼴) · ep13·ep10·loose·mac·yy(2026-10-29 확장). err_1g.parse_name과 같다.
+    `gov-`로 시작하는 이름(디시 앱 업로드 이름, 업로드 시각이라 촬영이 아님)은 아무것도 읽지 않는다."""
+    out = []
+    if not name or name.startswith("gov-"):
+        return out
+    m = P1.search(name)
+    if m:
+        t = _dtc(*map(int, m.groups()))
+        if t:
+            out.append((t, "std"))
+    m = P2.search(name)
+    if m:
+        out.append((dt.datetime.fromtimestamp(int(m.group(1)) / 1000, KST).replace(tzinfo=None), "std"))
+    if out:
+        return out
+    m = X_EPOCH13.search(name)
+    if m:
+        out.append((dt.datetime.fromtimestamp(int(m.group(1)) / 1000, KST).replace(tzinfo=None), "ep13"))
+    m = X_EPOCH10.search(name)
+    if m and not out:
+        out.append((dt.datetime.fromtimestamp(int(m.group(1)), KST).replace(tzinfo=None), "ep10"))
+    m = X_MAC.search(name)
+    if m:
+        y, mo, d, ap, hh, mi, ss = m.groups()
+        t = _dtc(int(y), int(mo), int(d), int(hh) % 12 + (12 if ap == "오후" else 0), int(mi), int(ss))
+        if t:
+            out.append((t, "mac"))
+    m = X_LOOSE.search(name)
+    if m and not any(k == "mac" for _, k in out):
+        t = _dtc(*map(int, m.groups()))
+        if t:
+            out.append((t, "loose"))
+    if not out:
+        m = X_YY.search(name)
+        if m:
+            g = m.groups()
+            t = _dtc(2000 + int(g[0]), int(g[1]), int(g[2]), int(g[3]), int(g[4]), int(g[5] or 0))
+            if t:
+                out.append((t, "yy"))
+    return out
+
+
+def valid_times(names, pt, skip_second=True):
+    """이름들 → 유효 창(게시−4일 ≤ t ≤ 게시+5분, shot_time과 같음) 안의 [(t, 꼴, 이름)]. 남의 화면 이름(SECOND)은 기본으로 뺀다."""
+    res = []
+    if pt is None:
+        return res
+    for n in names:
+        if not n or (skip_second and SECOND.search(n)):
+            continue
+        for t, k in parse_name(n):
+            if pt - dt.timedelta(days=4) <= t <= pt + dt.timedelta(minutes=5):
+                res.append((t, k, n))
+    return res
+
+
+def timer_loose_find(text, nxt=None):
+    """느슨한 갱신 타이머 (C → B 후보). 반환 (원문 조각, 남은 분) 또는 None. 24시간 미만만.
+    text 한 줄에서 TIMER_LOOSE, 없으면 text에 「갱신」이 있고 다음 항목(nxt)이 「N시간 M분 남」인 갈라진 꼴(TIMER_REM)."""
+    m = TIMER_LOOSE.search(text or "")
+    frag = m.group(0) if m else None
+    if not (m and (m.group(1) or m.group(2))) and nxt is not None and "갱신" in (text or ""):
+        m = TIMER_REM.search(nxt)
+        frag = (text.strip()[-12:] + " | " + m.group(0).strip()) if m else None
+    if m and (m.group(1) or m.group(2)):
+        mins = int(m.group(1) or 0) * 60 + int(m.group(2) or 0)
+        if mins < 24 * 60:
+            return frag.replace(";", ",").replace("'", ""), mins
+    return None
+
+
+def ext_class(e):
+    return {"jpeg": "jpg"}.get(e, e)
 
 
 class Season:
@@ -430,14 +542,14 @@ def top7_bracket(ranks, refs):
     return min(l for l, _ in good), max(h for _, h in good), best
 
 
-def top7_columns(st, obs, out_rows):
-    """줄마다 (h_lo_top7, h_hi_top7, top7) 또는 None. 위 「top7 시각 구간」."""
+def top7_snaps(st, obs, out_rows):
+    """top7 구간의 재료: ({사진: 순위표 정보}, {서버: [A 사진 (h, 순위 점수)]}) 또는 (None, None) (server.jsonl·post_exclude.jsonl이 없거나 안 맞음).
+    A 참조는 out_rows의 등급을 그대로 쓴다 (WP2: 후보를 올리기 전 단계에는 기존 규칙만의 등급을 준다)."""
     srv = jl(os.path.join(st, "server.jsonl"))
     px = jl(os.path.join(st, "post_exclude.jsonl"))
     ok = lambda rows: len(rows) == len(obs) and all((r["img"], r["row"]) == (o["img"], o["row"]) for r, o in zip(rows, obs))
     if not (ok(srv) and ok(px)):
-        print("top7: server.jsonl·post_exclude.jsonl이 없거나 obs와 줄이 맞지 않아 top7 열을 비운다")
-        return [None] * len(obs), None
+        return None, None
     im = collections.OrderedDict()
     for k, o in enumerate(obs):
         im.setdefault(o["img"], []).append(k)
@@ -458,6 +570,15 @@ def top7_columns(st, obs, out_rows):
     for s in snaps.values():
         if s["server"] and s["grade"] == "A" and s["h"] is not None:
             refs[s["server"]].append((s["h"], s["ranks"]))
+    return snaps, refs
+
+
+def top7_columns(st, obs, out_rows):
+    """줄마다 (h_lo_top7, h_hi_top7, top7) 또는 None. 위 「top7 시각 구간」."""
+    snaps, refs = top7_snaps(st, obs, out_rows)
+    if snaps is None:
+        print("top7: server.jsonl·post_exclude.jsonl이 없거나 obs와 줄이 맞지 않아 top7 열을 비운다")
+        return [None] * len(obs), None
     col = [None] * len(obs)
     st_ = collections.Counter()
     for img, s in snaps.items():
@@ -496,6 +617,17 @@ def main():
     claims = jl(os.path.join(st, "claims.jsonl"))
     route = {r["id"]: r for r in jl(os.path.join(st, "route.jsonl"))}
     by_id, by_post, by_time = load_names(st, a.runs or os.path.join(st, "..", "runs"), a.snap)
+
+    # WP2: 글의 첨부 이름 목록 (STATE/posts_min.jsonl의 files 먼저, 비었으면 --posts 파일의 files)과 글별 manifest 사진 (확장자 짝용)
+    files_of = {}
+    for f in [os.path.join(st, "posts_min.jsonl")] + a.posts:
+        for p in jl(f):
+            fl = [x if isinstance(x, str) else (x.get("name") if isinstance(x, dict) else None) for x in (p.get("files") or [])]
+            if fl and not files_of.get(str(p["no"])):
+                files_of[str(p["no"])] = fl
+    man_of = collections.defaultdict(dict)
+    for m in jl(os.path.join(st, "manifest.jsonl")):
+        man_of[str(m["no"])][m["i"]] = m
 
     # 글 게시 시각 (같은 파일의 더 이른 게시를 찾는 데 쓴다)
     post_t = {}
@@ -544,6 +676,26 @@ def main():
                 m = TIMER.search(it[1] if len(it) > 1 else "")
                 if m and (m.group(1) or m.group(2)):
                     timers.setdefault(r["id"], (m.group(0), "ocr"))
+
+    # WP2: 느슨한 갱신 타이머 (지금 TIMER가 못 읽는 꼴). 지금 규칙으로 읽히는 사진에는 쓰지 않는다 (아래 후보 단계에서 거른다)
+    timers_loose = {}
+    for o in obs:
+        r_ = timer_loose_find(o.get("note") or "")
+        if r_:
+            timers_loose.setdefault(o["img"], (r_[0], "note", r_[1]))
+    for r in jl(os.path.join(st, "reads.jsonl")):
+        for x in r.get("reads") or []:
+            r_ = timer_loose_find(x.get("note") or "")
+            if r_:
+                timers_loose.setdefault(r["id"], (r_[0], "reads", r_[1]))
+    for f in ("ocr.jsonl", "ocr2.jsonl"):
+        for r in jl(os.path.join(st, f)):
+            txt = [it[1] if len(it) > 1 else "" for it in (r.get("items") or [])]
+            for k_, t_ in enumerate(txt):
+                r_ = timer_loose_find(t_, txt[k_ + 1] if k_ + 1 < len(txt) else None)
+                if r_:
+                    timers_loose.setdefault(r["id"], (r_[0], "ocr", r_[1]))
+                    break
 
     # 글 주장 시각
     cres = [resolve_claim_checked(c, se) for c in claims]
@@ -603,7 +755,7 @@ def main():
                 t, _ = resolve_clock(upper or pt, hh, mm, None, None)
                 if t:
                     res = ("B", t, t - dt.timedelta(minutes=1), t + dt.timedelta(minutes=1), "stated", f"B:clock '{o['clock']}'")
-        info[i] = dict(res=res, flags=flags, upper=upper, pt=pt, shot=shot, second=second, nm=nm)
+        info[i] = dict(res=res, flags=flags, upper=upper, pt=pt, shot=shot, second=second, nm=nm, timer=timer, members=members)
 
     # 글 주장 → 사진 잇기 (같은 글, 같은 %, 그 값이 사진 하나에만)
     rows_by_post = collections.defaultdict(list)
@@ -644,6 +796,119 @@ def main():
             lo = min(lo, hi)
         extra = ";claims=" + ",".join(str(x[0]) for x in lst) if len(lst) > 1 else ""
         info[i]["res"] = ("B", t, lo, hi, tk, f"B:claim#{k} {b[2:]}" + extra)
+
+    # WP2 (2026-10-29): C로 남을 사진을 A(이름 꼴 확장·첨부 짝)·B(느슨한 타이머)로 올릴 수 있는지 본다. 이미 A·B인 사진은 건드리지 않는다.
+    # 1단계 = 위의 기존 규칙, 2단계 = 후보 점검(기존 A만 참조한 top7 구간 안전장치) → 올림. 그다음 최종 등급으로 top7 열을 다시 계산한다.
+    cand = collections.OrderedDict()   # 사진 → [(tag, res, flags)] (A 먼저)
+    tight_2_10 = set()                 # 이름 시각이 2~10분에 걸려 올리지 않은 사진
+    for i, x in info.items():
+        if x["res"] is not None or x["pt"] is None:
+            continue
+        pt, o = x["pt"], img[i]
+        cl = []
+        if x["shot"] is None:
+            nm_m = by_id.get(i)
+            if nm_m:
+                # (2) 이름 꼴 확장: manifest 이름이 name_time으로는 못 읽는 꼴일 때만
+                if name_time(nm_m) is None:
+                    vts = valid_times([nm_m], pt, skip_second=False)
+                    if vts:
+                        t = vts[0][0]
+                        if SECOND.search(nm_m):   # 남의 화면: 지금처럼 상한으로만
+                            x["flags"].append(f"secondhand:{SECOND.search(nm_m).group(0)}")
+                            x["upper"] = min(x["upper"], t) if x["upper"] else t
+                            x["second"] = True
+                            x["nm"] = nm_m
+                        else:
+                            fl = []
+                            if t > pt:
+                                fl.append("shot_after_post")
+                            if (pt - t) > dt.timedelta(hours=24):
+                                fl.append("late>24h")
+                            if nm_m.startswith("edit_"):
+                                fl.append("edit_name")
+                            cl.append(("name_ext", ("A", t, t, t, "shot", "A:name_ext(manifest)"), fl))
+            else:
+                # (3) 첨부 짝: manifest에 이름이 없는 사진 → 글의 첨부 이름 목록에서
+                files = files_of.get(str(o["no"])) or []
+                vts = valid_times(files, pt)
+                if vts:
+                    pair = None
+                    mrow = man_of.get(str(o["no"]), {})
+                    idx = int(i.rsplit("_", 1)[1])
+                    fx = collections.defaultdict(list)
+                    for fi, fn in enumerate(files):
+                        fx[ext_class((fn or "").rsplit(".", 1)[-1].lower())].append(fi)
+                    ix = collections.defaultdict(list)
+                    for ii in sorted(mrow):
+                        ix[ext_class((mrow[ii].get("ext") or "").lower())].append(ii)
+                    me = ext_class((mrow.get(idx, {}).get("ext") or "").lower())
+                    if me in fx and len(fx[me]) == len(ix.get(me, [])) and idx in ix[me]:
+                        v1 = valid_times([files[fx[me][ix[me].index(idx)]]], pt)
+                        if v1:
+                            pair = ("extpair", v1[0][0])
+                    if pair is None and len(files) >= len(mrow):   # 이름 없는 사진이 남는 글은 tight 안 씀 (그 사진은 다른 때일 수 있다)
+                        tt = [t for t, _, _ in vts]
+                        spread = max(tt) - min(tt)
+                        if spread <= TIGHT_MAX:
+                            pair = ("tight", min(tt))
+                        elif spread <= TIGHT_LOOSE_MAX:
+                            tight_2_10.add(i)
+                    if pair:
+                        t = pair[1]
+                        fl = []
+                        if t > pt:
+                            fl.append("shot_after_post")
+                        if (pt - t) > dt.timedelta(hours=24):
+                            fl.append("late>24h")
+                        cl.append((pair[0], ("A", t, t, t, "shot", f"A:name_pair({pair[0]})"), fl))
+        # (1) 느슨한 갱신 타이머: 지금 규칙으로 읽히는 타이머가 없는 사진만
+        if x["timer"] is None:
+            tl = timers_loose.get(i) or next((timers_loose[m_] for m_ in x["members"] if m_ in timers_loose), None)
+            if tl:
+                t = timer_time(dt.timedelta(minutes=tl[2]), x["upper"] or pt)
+                if t:
+                    cl.append(("timer_loose", ("B", t, t - dt.timedelta(minutes=1), t, "stated",
+                                               f"B:timer_loose({tl[1]}) '{tl[0]}'"), []))
+        if cl:
+            cand[i] = cl
+    # 안전장치: 기존 규칙만으로 정한 A 사진들을 참조로 한 top7 구간 (열린 끝 허용)과 견준다
+    wp2 = {"blocked": collections.Counter(), "blocked_left_c": 0, "cand": collections.Counter(), "cand_bracket": collections.Counter(),
+           "cand_no_bracket": collections.Counter(), "cand_inside": collections.Counter()}
+    snaps = refs = None
+    if cand:
+        pre = [{"grade": (info[o["img"]]["res"] or ("C",))[0], "h": se.h(info[o["img"]]["res"][1]) if info[o["img"]]["res"] else None}
+               for o in obs]
+        snaps, refs = top7_snaps(st, obs, pre)
+    for i, cl in cand.items():
+        x = info[i]
+        br = None
+        if snaps and i in snaps and snaps[i]["server"] and refs.get(snaps[i]["server"]):
+            lo_, hi_, viol_ = top7_bracket(snaps[i]["ranks"], refs[snaps[i]["server"]])
+            if not viol_:
+                br = (lo_, hi_)
+        blocked = []
+        for tag, res_, fl in cl:
+            h_ = se.h(res_[1])
+            wp2["cand"][tag] += 1
+            if br is None:
+                wp2["cand_no_bracket"][tag] += 1
+            else:
+                wp2["cand_bracket"][tag] += 1
+            if br is not None and (h_ < br[0] - TOP7_MARGIN_H or h_ > br[1] + TOP7_MARGIN_H):
+                blocked.append(tag)
+                continue
+            if br is not None:
+                wp2["cand_inside"][tag] += 1
+            if x.get("wp2") is None:   # 첫 통과 후보만 쓴다 (뒤 후보는 통계로만 센다)
+                x["res"] = res_
+                x["flags"] = x["flags"] + fl
+                x["wp2"] = tag
+        if x.get("wp2") is None and blocked:   # 막혀서 C로 남은 사진만 표시한다
+            for tag in blocked:
+                x["flags"].append(f"cand_out_top7:{tag}")
+                wp2["blocked"][tag] += 1
+            wp2["blocked_left_c"] += 1
 
     # C
     for i, x in info.items():
@@ -739,12 +1004,49 @@ def main():
         "top7_images": t7_stat,
         "top7_core_rows": dict(collections.Counter(out_rows[k]["grade"] for k in core if out_rows[k]["top7"])),
     }
+    # WP2 요약: 새 근거별 줄 수(전체·시즌 안 % 관측), 안전장치로 막힌 수, tight 2~10분이라 안 올린 수
+    core_set = set(core)
+    w_rows = {"all": collections.Counter(), "core": collections.Counter()}
+    for k, o in enumerate(obs):
+        x = info[o["img"]]
+        if x.get("wp2"):
+            tag = {"name_ext": "A:name_ext", "extpair": "A:name_pair(extpair)", "tight": "A:name_pair(tight)"}.get(x["wp2"])
+            if tag is None:
+                tag = "B:timer_loose(" + out_rows[k]["basis"].split("(", 1)[1].split(")", 1)[0] + ")"
+            w_rows["all"][tag] += 1
+            if k in core_set:
+                w_rows["core"][tag] += 1
+    blocked_rows = collections.Counter()
+    t210_rows = collections.Counter()
+    for k, o in enumerate(obs):
+        x = info[o["img"]]
+        for f_ in x["flags"]:
+            if f_.startswith("cand_out_top7:"):
+                blocked_rows["all"] += 1
+                if k in core_set:
+                    blocked_rows["core"] += 1
+        if o["img"] in tight_2_10 and not x.get("wp2"):
+            t210_rows["all"] += 1
+            if k in core_set:
+                t210_rows["core"] += 1
+    summ["wp2"] = {
+        "rows_new_all": dict(w_rows["all"]), "rows_new_core": dict(w_rows["core"]),
+        "images_new": dict(collections.Counter(x["wp2"] for x in info.values() if x.get("wp2"))),
+        "cand_images": dict(wp2["cand"]), "cand_with_bracket": dict(wp2["cand_bracket"]), "cand_no_bracket": dict(wp2["cand_no_bracket"]),
+        "cand_inside_bracket": dict(wp2["cand_inside"]),
+        "blocked_images": dict(wp2["blocked"]), "blocked_images_left_c": wp2["blocked_left_c"],
+        "blocked_rows": dict(blocked_rows), "tight_2_10_images": sum(1 for i in tight_2_10 if not info[i].get("wp2")),
+        "tight_2_10_rows": dict(t210_rows),
+    }
     if a.summary:
         json.dump(summ, open(a.summary, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"obs {len(out_rows)} {summ['obs_all']} | core {len(core)} {dict(cg)} | A delay(min) n={len(delays)} "
           f"q50={q(delays, .5)} q75={q(delays, .75)} q90={q(delays, .9)} | claims {summ['claims_grade']} "
           f"self%time {len(self_t)} {summ['claims_self_pct_time']['grade']} | linked {stats['claim_linked']} | "
           f"top7 사진 {t7_stat} · 시즌 안 % 줄 {summ['top7_core_rows']}")
+    w = summ["wp2"]
+    print(f"WP2 새 근거 줄(전체) {w['rows_new_all']} · 시즌 안 % 줄 {w['rows_new_core']} | 안전장치로 막힌 사진 {w['blocked_images']} "
+          f"(C로 남음 {w['blocked_images_left_c']}, 줄 {w['blocked_rows']}) | tight 2~10분이라 안 올린 사진 {w['tight_2_10_images']} (줄 {w['tight_2_10_rows']})")
 
 
 if __name__ == "__main__":
