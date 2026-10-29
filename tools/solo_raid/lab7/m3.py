@@ -747,6 +747,204 @@ def cmd_predict(a):
             print(s, T, f"n={i['n']} secs={i['secs']} rhat={i['rhat_max']:.3f} ess={i['ess_min']:.0f} div={i['divergences']} conv={i['conv']}", flush=True)
 
 
+# ---------- 4.3 1단계 점검 (명세 7절 ③) ----------
+
+ANSWER_KEY = os.path.join(C.ROOT, "data", "solo-raid", "analysis", "answer_key.json")
+
+
+def _selected_rows(rows, H, err, dk, K=16):
+    """prepare가 meta에 놓는 순서 그대로의 선택 줄 (pct·h_top7 등 meta에 없는 칸을 쓰려고)."""
+    out = []
+    for r in OM.select_rows(rows, H, True):
+        t, w, why = OM.nodes_detail(r, H, err, dk, K)
+        if t is not None:
+            out.append(r)
+    return out
+
+
+def check43_season(rows, H, season, err, ndraw_pp=100, seed=0):
+    import jax
+    import jax.numpy as jnp
+    dk = season if season in err["1a_post_delay"]["expanding"] else None
+    prob = Stage1Prob("noncentered")
+    sm, info, dg, obs = laplace_fit(rows, H, season, err, prob, dk)
+    jobs = OM.to_jax(obs)
+    sel = _selected_rows(rows, H, err, dk)
+    meta = obs["meta"]
+    assert len(sel) == len(meta)
+    pos = np.asarray(obs["pos"])
+    # 라플라스 뽑기에 eps·phi(사전 평균 고정)를 붙인다
+    nd = sm["v"].shape[1]
+    ea, eb = obs["eps_ab"]
+    phi0 = np.asarray(obs["dirichlet"]) / np.asarray(obs["dirichlet"]).sum(1, keepdims=True)
+    smx = dict(sm)
+    smx["phi"] = np.broadcast_to(phi0, (1, nd) + phi0.shape).copy()
+
+    def surf(draw, jb):
+        th = prob.theta(draw["v"])
+        mu, P = surface(th, jb["y"], jb["u"])
+        return mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"])
+
+    rp = OM.row_posteriors(jobs, {k: smx[k] for k in ("v", "eps", "phi")}, surf, max_draws=ndraw_pp)
+    # 뽑기마다 첫 노드의 mu·잔차 sd
+    idx = np.unique(np.linspace(0, nd - 1, ndraw_pp).astype(int))
+    vv = smx["v"][0][idx]
+
+    @jax.jit
+    def one(v):
+        mu, P, s0, rho = surf({"v": v}, jobs)
+        return mu[:, :, 0], jnp.sqrt(s0 ** 2 + (rho * P[:, :, 0]) ** 2)
+
+    MU, SG = [], []
+    for v in vv:
+        m_, s_ = one(jnp.asarray(v, jnp.float32))
+        MU.append(np.asarray(m_))
+        SG.append(np.asarray(s_))
+    MU, SG = np.array(MU), np.array(SG)                       # [D,3,N]
+    ps = rp["p_server"]                                       # [n,3] (meta 순서)
+    n = len(meta)
+    mu_row = np.einsum("dkn,nk->dn", MU[:, :, pos], ps)       # 줄마다 서버 가중 mu
+    sg_row = np.einsum("dkn,nk->dn", SG[:, :, pos], ps)
+    zlo, zhi = np.asarray(obs["zlo"])[pos], np.asarray(obs["zhi"])[pos]
+    kind = np.array([m["kind"] for m in meta])
+    tg = np.array([m["tg"] for m in meta])
+    contam = rp["p_contam"] > 0.5
+    out = {"n": n, "secs_laplace": info["secs"], "map_min_eig": info["map"]["min_eig"]}
+    # A 잔차
+    isA = (kind == "A") & (tg == "A")
+    mb, sb = mu_row.mean(0), sg_row.mean(0)
+    dist = np.maximum(np.maximum(zlo - mb, mb - zhi), 0.0)
+
+    def resid(mask):
+        k = int(mask.sum())
+        return {"n": k, "inside": float((dist[mask] == 0).mean()) if k else None,
+                "out_gt2sigma": float((dist[mask] > 2 * sb[mask]).mean()) if k else None}
+    out["A_resid"] = {"all": resid(isA), "without_contam": resid(isA & ~contam)}
+    out["contam"] = {"n_flag": int(contam.sum()), "mean_p": float(rp["p_contam"].mean())}
+    # 서버 미상 줄의 P(KR)
+    unk = np.array([m["server"] is None for m in meta])
+    pk = ps[unk, 0]
+    out["unknown_server"] = {"n": int(unk.sum()), "p_kr_quantiles": np.quantile(pk, [0.1, 0.25, 0.5, 0.75, 0.9]).round(3).tolist() if len(pk) else None,
+                             "share_gt0.9": float((pk > 0.9).mean()) if len(pk) else None, "share_lt0.1": float((pk < 0.1).mean()) if len(pk) else None,
+                             "share_between": float(((pk >= 0.1) & (pk <= 0.9)).mean()) if len(pk) else None}
+    # C 줄 촬영 시각
+    isC = (kind == "C")
+    hp = np.array([m["hp"] if m["hp"] is not None else np.nan for m in meta])
+    dmin = (hp - rp["t_mean"]) * 60
+    cm = isC & np.isfinite(dmin)
+    t7lo = np.array([r.get("h_lo_top7") if r.get("h_lo_top7") is not None else np.nan for r in sel])
+    t7hi = np.array([r.get("h_hi_top7") if r.get("h_hi_top7") is not None else np.nan for r in sel])
+    has7 = cm & np.isfinite(t7lo) & np.isfinite(t7hi)
+    outside = has7 & ((rp["t_mean"] < t7lo - 1e-9) | (rp["t_mean"] > t7hi + 1e-9))
+    out["C_time"] = {"n": int(cm.sum()), "hp_minus_t_min_median": float(np.median(dmin[cm])) if cm.any() else None,
+                     "hp_minus_t_min_p90": float(np.quantile(dmin[cm], 0.9)) if cm.any() else None,
+                     "n_with_top7": int(has7.sum()), "share_outside_top7": float(outside.sum() / has7.sum()) if has7.any() else None}
+    # PPC: 같은 사람 A 줄 연속 짝의 % 악화 몫
+    rng = np.random.default_rng(seed)
+    pid = np.array([m["pid"] for m in meta])
+    ht = np.array([m["h"] if m["h"] is not None else np.nan for m in meta])
+    pr_real = np.array([r["pct"] for r in sel], float)
+    pairs = []
+    for p_ in np.unique(pid[isA]):
+        ii = np.where(isA & (pid == p_))[0]
+        ii = ii[np.argsort(ht[ii])]
+        pairs += list(zip(ii[:-1], ii[1:]))
+    pairs = [(i, j) for i, j in pairs if ht[j] > ht[i]]
+    if pairs:
+        I, J = np.array(pairs).T
+        real = float((pr_real[J] > pr_real[I]).mean())
+        sims = []
+        cum = np.cumsum(ps, 1)
+        for d in range(len(vv)):
+            kk = (rng.random(n)[:, None] > cum).sum(1).clip(0, 2)
+            z = MU[d, kk, pos] + SG[d, kk, pos] * rng.standard_normal(n)
+            pct = np.round(10 ** z, 2)
+            sims.append(float((pct[J] > pct[I]).mean()))
+        out["ppc_pairs"] = {"n_pairs": len(pairs), "real_worsen_share": real, "sim_mean": float(np.mean(sims)),
+                            "sim_p05_p95": np.quantile(sims, [0.05, 0.95]).round(4).tolist()}
+    else:
+        out["ppc_pairs"] = {"n_pairs": 0}
+    # 정답 곡선과 견줌 (보고만)
+    qs = {f"{q:g}": sm[f"lnC_{q:g}"].ravel() for q in OM.Q_TARGETS}
+    out["lnC"] = {q: np.quantile(d, [0.025, 0.1, 0.5, 0.9, 0.975]).tolist() for q, d in qs.items()}
+    flg = OM.flags(meta, rp, 0.5)
+    return out, flg
+
+
+def cmd_check43(a):
+    import obs_table
+    OM.setup_host(1)
+    err = OM.load_err()
+    with open(ANSWER_KEY, encoding="utf-8") as f:
+        ak = json.load(f)
+    truth = {}
+    for r in ak["rows"]:
+        if r["server"] == "KR" and r.get("truth") is not None:
+            truth[(r["season"], r["pct"])] = (r["truth"], r.get("shaky"))
+    res, flags = {}, {}
+    for s in C.parse_seasons(a.seasons):
+        head, rows = obs_table.read_cell(os.path.join(a.obs_dir, f"{s}.jsonl.gz"))
+        o, flg = check43_season(rows, head["H"], s, err)
+        tr = {}
+        for q, qv in o["lnC"].items():
+            t = truth.get((s, float(q)))
+            if t is None:
+                continue
+            lt = math.log(t[0])
+            lo95, lo80, med, hi80, hi95 = qv
+            tr[q] = {"truth": t[0], "shaky": t[1], "pred": math.exp(med), "abs_e": abs(math.exp(med) / t[0] - 1),
+                     "in80": bool(lo80 <= lt <= hi80), "in95": bool(lo95 <= lt <= hi95)}
+        o["answer"] = tr
+        res[s] = o
+        flags[s] = flg
+        print(s, "n", o["n"], "A inside", o["A_resid"]["all"]["inside"], "flag", o["contam"]["n_flag"], flush=True)
+    meta_ = {"about": "M3 1단계 점검 (4.3) — 라플라스 사후, eps·phi 사전 평균 고정, 정답 곡선은 견주기만", "method": "M3", "data_ver": C.DATA_VER,
+             "date": datetime.date.today().isoformat(), "stage1": "라플라스 재적합 (stage1_M3_D1과 같은 코드)"}
+    _atomic_json(a.out, {"header": meta_, "seasons": res})
+    if a.flags:
+        _atomic_json(a.flags, {"header": {"about": "사후 오염 확률 > 0.5 줄 (key·pid만)", "method": "M3", "data_ver": C.DATA_VER}, "seasons": flags})
+    md = check43_md(meta_, res)
+    with open(os.path.splitext(a.out)[0] + ".md", "w", encoding="utf-8") as f:
+        f.write(md)
+
+
+def check43_md(meta_, res):
+    L = ["# M3 1단계 점검 (4.3, 조정 시즌)", "",
+         "라플라스 사후(결합 MAP + 역 Hessian), eps·phi는 사전 평균에 고정. 정답 곡선은 견주기만 하고 적합에는 안 썼다. 생성: `m3.py check43`.", ""]
+    ss = list(res)
+    f = lambda x, d=3: "-" if x is None else f"{x:.{d}f}"
+    L += ["## A 줄 잔차 (사후 평균 mu 대 % 구간)", "", "| 시즌 | 줄 | A 줄 | 구간 안 | 2σ 밖 | 오염 뺀 구간 안 | 오염 뺀 2σ 밖 |", "|---|---|---|---|---|---|---|"]
+    for s in ss:
+        o = res[s]; A, B = o["A_resid"]["all"], o["A_resid"]["without_contam"]
+        L.append(f"| {s} | {o['n']} | {A['n']} | {f(A['inside'])} | {f(A['out_gt2sigma'])} | {f(B['inside'])} | {f(B['out_gt2sigma'])} |")
+    L += ["", "## 오염 줄과 서버 미상 줄의 P(KR)", "", "| 시즌 | 오염 > 0.5 | 미상 줄 | P(KR) 사분위(10·25·50·75·90%) | > 0.9 | < 0.1 | 사이 |", "|---|---|---|---|---|---|---|"]
+    for s in ss:
+        o = res[s]; u = o["unknown_server"]
+        q = "-" if u["p_kr_quantiles"] is None else " / ".join(f"{x:.2f}" for x in u["p_kr_quantiles"])
+        L.append(f"| {s} | {o['contam']['n_flag']} | {u['n']} | {q} | {f(u['share_gt0.9'], 2)} | {f(u['share_lt0.1'], 2)} | {f(u['share_between'], 2)} |")
+    L += ["", "## C 줄 촬영 시각 (게시 시각 − 사후 평균 촬영 시각, 분)", "", "| 시즌 | C 줄 | 중앙 | 90% | top7 있는 줄 | top7 밖 몫 |", "|---|---|---|---|---|---|"]
+    for s in ss:
+        c = res[s]["C_time"]
+        L.append(f"| {s} | {c['n']} | {f(c['hp_minus_t_min_median'], 1)} | {f(c['hp_minus_t_min_p90'], 1)} | {c['n_with_top7']} | {f(c['share_outside_top7'], 3)} |")
+    L += ["", "## PPC (같은 사람 A 줄 연속 짝에서 % 가 나빠지는 몫)", "", "| 시즌 | 짝 | 실제 | 모의 평균 | 모의 5~95% |", "|---|---|---|---|---|"]
+    for s in ss:
+        p = res[s]["ppc_pairs"]
+        if p["n_pairs"]:
+            L.append(f"| {s} | {p['n_pairs']} | {f(p['real_worsen_share'])} | {f(p['sim_mean'])} | {p['sim_p05_p95'][0]:.3f}~{p['sim_p05_p95'][1]:.3f} |")
+        else:
+            L.append(f"| {s} | 0 | - | - | - |")
+    L += ["", "## 정답 곡선과 견줌 (한섭, 사후 중앙의 상대 오차 |e|, 정답이 80%·95% 구간 안인지)", "",
+          "| 시즌 | " + " | ".join(f"{q}%" for q in ("0.5", "1", "2", "3", "5", "10")) + " |", "|---|" + "---|" * 6]
+    for s in ss:
+        cells = []
+        for q in ("0.5", "1", "2", "3", "5", "10"):
+            t = res[s]["answer"].get(q)
+            cells.append("-" if t is None else f"{100 * t['abs_e']:.1f}% {'●' if t['in80'] else ('○' if t['in95'] else '×')}")
+        L.append(f"| {s} | " + " | ".join(cells) + " |")
+    L += ["", "● 80% 안 · ○ 95% 안(80% 밖) · × 95% 밖.", ""]
+    return "\n".join(L)
+
+
 # ---------- 자체 점검 ----------
 
 def selftest_numeric():
@@ -924,6 +1122,11 @@ def main():
     p.add_argument("--k", default=None)
     p.add_argument("--out", default=None)
     p.add_argument("--prior-cache", default=None)
+    c4 = sub.add_parser("check43")
+    c4.add_argument("--obs-dir", required=True)
+    c4.add_argument("--seasons", required=True)
+    c4.add_argument("--out", required=True)
+    c4.add_argument("--flags", default=None)
     q = sub.add_parser("predict")
     common(q)
     q.add_argument("--stage1", required=True)
@@ -939,7 +1142,7 @@ def main():
         configure(a.n_basis_r, a.n_basis_l, lo, hi)
     if getattr(a, "k", None) not in (None, "all"):
         a.k = int(a.k)
-    {"selftest": cmd_selftest, "stage1": cmd_stage1, "prior": cmd_prior, "predict": cmd_predict}[a.cmd](a)
+    {"selftest": cmd_selftest, "stage1": cmd_stage1, "prior": cmd_prior, "predict": cmd_predict, "check43": cmd_check43}[a.cmd](a)
 
 
 if __name__ == "__main__":
