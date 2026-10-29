@@ -289,7 +289,7 @@ def model(obs, prior, form, x_term=False, keep_ll=False, pre=None, r2=False):
         numpyro.deterministic(f"lnC_{q:g}", lnC(th, q))
 
 
-def map_precond(obs, prior, form, x_term=False, start=None, iters=400, temps=(0.003, 0.03, 0.3, 1.0), r2=False, full=True):
+def map_precond(obs, prior, form, x_term=False, start=None, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), r2=False, full=True):
     """MAP + 라플라스: v = [a, 모수...]의 (사후 최빈값 loc, 공분산의 콜레스키 chol). eps·phi는 사전 평균에 고정해 구한다.
     float32로는 L-BFGS가 일찍 서므로 이 함수 안에서만 float64 (jax enable_x64 문맥). 우도에 온도 t를 곱해 t = 0.003 -> 1 로 차례로 풀어
     (앞 답을 다음 시작점으로) 날카로운 사후에도 닿는다. Hessian의 고윳값은 아래서 1e-6으로 자른다. -> dict(loc, chol, info)
@@ -349,29 +349,52 @@ def map_precond(obs, prior, form, x_term=False, start=None, iters=400, temps=(0.
                 return (v, g) if np.isfinite(v) and np.isfinite(g).all() else (1e12, np.zeros_like(g))
             res = minimize(f, x, jac=True, method="L-BFGS-B", options={"maxiter": iters, "maxfun": 3 * iters})
             x, nit = res.x, nit + res.nit
-        # 뉴턴 다듬기: L-BFGS는 조건수 1e7 넘는 사후에서 일찍 선다 (S38에서 사후 평균과 r1 20 sd 어긋남, 2026-10-29)
         f1 = lambda xx: float(vg(jnp.asarray(xx), 1.0)[0])
-        n_newton = 0
-        for _ in range(60):
-            fv, g = vg(jnp.asarray(x), 1.0)
-            fv, g = float(fv), np.asarray(g, float)
-            Hn = np.asarray(hess(jnp.asarray(x), 1.0), float)
-            Hn = 0.5 * (Hn + Hn.T)
-            wv, Qv = np.linalg.eigh(Hn)
-            step = Qv @ ((Qv.T @ g) / np.maximum(np.abs(wv), 1e-3))
-            t, ok = 1.0, False
-            while t > 1e-4:
-                fn = f1(x - t * step)
-                if np.isfinite(fn) and fn < fv - 1e-9:
-                    ok = True
+
+        def polish(x):
+            """뉴턴 다듬기: L-BFGS는 조건수 1e7 넘는 사후에서 일찍 선다."""
+            n_new = 0
+            for _ in range(60):
+                fv, g = vg(jnp.asarray(x), 1.0)
+                fv, g = float(fv), np.asarray(g, float)
+                Hn = np.asarray(hess(jnp.asarray(x), 1.0), float)
+                Hn = 0.5 * (Hn + Hn.T)
+                wv, Qv = np.linalg.eigh(Hn)
+                step = Qv @ ((Qv.T @ g) / np.maximum(np.abs(wv), 1e-3))
+                t, ok = 1.0, False
+                while t > 1e-4:
+                    fn = f1(x - t * step)
+                    if np.isfinite(fn) and fn < fv - 1e-9:
+                        ok = True
+                        break
+                    t *= 0.5
+                if not ok:
                     break
-                t *= 0.5
-            if not ok:
+                x = x - t * step
+                n_new += 1
+                if fv - fn < 1e-6:
+                    break
+            return x, n_new
+
+        x, n_newton = polish(x)
+        n_saddle = 0
+        for _ in range(3):   # 안장점: Hessian 최소 고윳값 <= 0이면 그 방향으로 +-0.5 밀어 다시 푼다 (2026-10-29 M3 세션 제보)
+            Hs = np.asarray(hess(jnp.asarray(x), 1.0), float)
+            ws, Qs = np.linalg.eigh(0.5 * (Hs + Hs.T))
+            if ws.min() > 1e-6:
                 break
-            x = x - t * step
-            n_newton += 1
-            if fv - fn < 1e-6:
-                break
+            n_saddle += 1
+            best = (f1(x), x)
+            for sgn in (1.0, -1.0):
+                r2_ = minimize(lambda xx: f(xx, temp=1.0), x + sgn * 0.5 * Qs[:, 0], jac=True, method="L-BFGS-B",
+                               options={"maxiter": iters, "maxfun": 3 * iters})
+                nit += r2_.nit
+                xn, nn = polish(r2_.x)
+                n_newton += nn
+                fn_ = f1(xn)
+                if np.isfinite(fn_) and fn_ < best[0]:
+                    best = (fn_, xn)
+            x = best[1]
         res.fun = f1(x)
         H = np.asarray(hess(jnp.asarray(x), 1.0), float)
     H = 0.5 * (H + H.T)
@@ -379,7 +402,7 @@ def map_precond(obs, prior, form, x_term=False, start=None, iters=400, temps=(0.
     cov = (Q / np.maximum(w, 1e-6)) @ Q.T
     chol = np.linalg.cholesky(0.5 * (cov + cov.T) + 1e-12 * np.eye(len(x)))
     return {"loc": x, "chol": chol, "info": {"fun": float(res.fun), "nit": nit, "ok": bool(res.success),
-                                            "min_eig": float(w.min()), "max_eig": float(w.max()), "newton": n_newton}}
+                                            "min_eig": float(w.min()), "max_eig": float(w.max()), "newton": n_newton, "saddle_pushes": n_saddle}}
 
 
 def _prior_logp64(vec, names, prior):
