@@ -293,15 +293,41 @@ class CellProb:
 
 # ---------- 모형·MAP ----------
 
+def _eps_phi(e, obs):
+    """e = [logit eps, stick-breaking 8개] -> (eps, phi[4,3], 사전 로그 밀도 + 야코비안). m1.model과 같은 꼴."""
+    import jax
+    import jax.numpy as jnp
+    import numpyro.distributions as dist
+    from numpyro.distributions.transforms import StickBreakingTransform
+    sbt = StickBreakingTransform()
+    eps_v = jax.nn.sigmoid(e[0])
+    sb = e[1:].reshape(4, 2)
+    phi_v = sbt(sb)
+    a0, b0 = [jnp.asarray(x, e.dtype) for x in obs["eps_ab"]]
+    lp = (dist.Beta(a0, b0).log_prob(eps_v) + jnp.log(eps_v) + jnp.log1p(-eps_v)
+          + dist.Dirichlet(jnp.asarray(obs["dirichlet"], e.dtype)).log_prob(phi_v).sum() + sbt.log_abs_det_jacobian(sb, phi_v).sum())
+    return eps_v, phi_v, lp
+
+
 def model(obs, prob, pre):
     """numpyro 모형 (MAP+라플라스 아핀 재매개화 위 z 표집). 표집 이름 z·eps·phi, deterministic v·th24(1단계)·r12·l12·lnC_q."""
     import jax.numpy as jnp
     import numpyro
     import numpyro.distributions as dist
     from numpyro.distributions import constraints
-    z = numpyro.sample("z", dist.ImproperUniform(constraints.real_vector, (), (prob.n,)))
-    v = jnp.asarray(pre["loc"], jnp.float32) + jnp.asarray(pre["chol"], jnp.float32) @ z
-    numpyro.factor("prior", prob.logprior(v))
+    nfull = len(pre["loc"])
+    z = numpyro.sample("z", dist.ImproperUniform(constraints.real_vector, (), (nfull,)))
+    vf = jnp.asarray(pre["loc"], jnp.float32) + jnp.asarray(pre["chol"], jnp.float32) @ z
+    v = vf[:prob.n]
+    lp = prob.logprior(v)
+    eps_phi = {}
+    if nfull > prob.n:   # eps(logit)·phi(stick-breaking 8개)도 펴서 푼다 (m1과 같은 방식, 야코비안 포함)
+        eps_v, phi_v, lp_ep = _eps_phi(vf[prob.n:], obs)
+        lp = lp + lp_ep
+        numpyro.deterministic("eps", eps_v)
+        numpyro.deterministic("phi", phi_v)
+        eps_phi = {"eps": eps_v, "phi": phi_v}
+    numpyro.factor("prior", lp)
     numpyro.deterministic("v", v)
     th = prob.theta(v)
     if prob.kind == "stage1":
@@ -310,12 +336,12 @@ def model(obs, prob, pre):
         numpyro.deterministic("r12", r12)
         numpyro.deterministic("l12", l12)
     mu, P = surface(th, obs["y"], obs["u"])
-    OM.observe(obs, mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]))
+    OM.observe(obs, mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), **eps_phi)
     for q in OM.Q_TARGETS:
         numpyro.deterministic(f"lnC_{q:g}", lnC(th, q))
 
 
-def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0)):
+def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), full_ep=False):
     """MAP + 라플라스 (m1.map_precond 꼴, float64). eps·phi는 사전 평균에 고정. -> dict(loc, chol, info)
     1단계는 평활 ln tau를 고정하고 푼다 — 결합 최빈값은 tau -> 0 (곡선이 직선)으로 달아나 퇴화하기 때문 (2026-10-29 확인).
     tau = 0.3으로 풀고, 구한 곡선의 2차 차분 rms로 tau를 한 번 갱신해 다시 푼다. 라플라스 공분산은 나머지 모수만, tau 둘은 ln 척도 sd 0.7 독립으로 둔다."""
@@ -337,12 +363,18 @@ def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0)):
         def full(vf):
             return fixed[0].at[free].set(vf)
 
+        nf = len(free)
+
         def negpost(vf, temp):
-            v = full(vf)
+            v = full(vf[:nf])
             th = prob.theta(v)
             mu, P = surface(th, o["y"], o["u"])
-            ll = OM.row_loglik(o, mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), eps0, phi0)
-            return -(temp * ll.sum() + prob.logprior(v))
+            if full_ep:
+                eps_v, phi_v, lp_ep = _eps_phi(vf[nf:], o)
+            else:
+                eps_v, phi_v, lp_ep = eps0, phi0, 0.0
+            ll = OM.row_loglik(o, mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), eps_v, phi_v)
+            return -(temp * ll.sum() + prob.logprior(v) + lp_ep)
 
         def solve(x, tl, nit):
             vg = jax.jit(jax.value_and_grad(negpost))
@@ -355,9 +387,13 @@ def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0)):
                 x, nit = res.x, nit + res.nit
             return x, nit, res
 
-        x, nit, res = solve(np.asarray(prob.start, float)[free], temps, 0)
+        x0 = np.asarray(prob.start, float)[free]
+        if full_ep:
+            from numpyro.distributions.transforms import StickBreakingTransform
+            x0 = np.concatenate([x0, [float(np.log(eps0 / (1 - eps0)))], np.asarray(StickBreakingTransform().inv(phi0)).reshape(-1)])
+        x, nit, res = solve(x0, temps, 0)
         if tau_ix:                                   # tau 갱신 후 다시 (앞 답에서 출발, 온도 1)
-            v = np.array(full(jnp.asarray(x)), float)
+            v = np.array(full(jnp.asarray(x[:nf])), float)
             for ti, (c0, c1) in zip(tau_ix, ((1, 1 + NR), (1 + NR, 1 + NR + NL))):
                 d2 = v[c0 + 2:c1] - 2 * v[c0 + 1:c1 - 1] + v[c0:c1 - 2]
                 v[ti] = math.log(float(np.clip(np.sqrt(np.mean(d2 ** 2)), 0.05, 3.0)))
@@ -381,11 +417,15 @@ def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0)):
                 H = np.asarray(hf(jnp.asarray(x), 1.0), float)
             else:
                 break
-        loc = np.asarray(full(jnp.asarray(x)), float)
+        loc = np.asarray(full(jnp.asarray(x[:nf])), float)
+        if full_ep:
+            loc = np.concatenate([loc, x[nf:]])
     H = 0.5 * (H + H.T)
     w, Q = np.linalg.eigh(H)
-    sq = np.zeros((n, n))
-    sq[np.ix_(free, free)] = Q / np.sqrt(np.maximum(w, 1e-6))   # 공분산의 제곱근 (콜레스키가 아니어도 아핀 재매개화로 충분)
+    nn = n + (9 if full_ep else 0)
+    fr = np.concatenate([free, np.arange(n, nn)]) if full_ep else free
+    sq = np.zeros((nn, nn))
+    sq[np.ix_(fr, fr)] = Q / np.sqrt(np.maximum(w, 1e-6))   # 공분산의 제곱근 (콜레스키가 아니어도 아핀 재매개화로 충분)
     for i in tau_ix:
         sq[i, i] = 0.7
     return {"loc": loc, "chol": sq, "info": {"fun": float(res.fun), "nit": nit, "ok": bool(res.success),
@@ -393,12 +433,12 @@ def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0)):
                                             "tau_fixed": [math.exp(loc[i]) for i in tau_ix]}}
 
 
-def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True):
+def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True, full_ep=False):
     """관측 줄 -> MAP -> NUTS (retry False면 한 번만). (samples, info, diag, obs). info에 map·secs·n·N."""
     obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1)
     jobs = OM.to_jax(obs)
     t0 = time.time()
-    pre = map_precond(jobs, prob)
+    pre = map_precond(jobs, prob, full_ep=full_ep)
     t_map = time.time() - t0
     mdl = functools.partial(model, prob=prob, pre=pre)
     lnames = [f"lnC_{q:g}" for q in (1, 3, 10)]
@@ -655,9 +695,9 @@ def cmd_prior(a):
 
 # ---------- 칸 예측 ----------
 
-def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0):
+def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0, full_ep=False, retry=True):
     prob = CellProb(pr)
-    sm, info, dg, obs = fit(rows, H, s, err, prob, s, chains, warmup, samples, seed, stage1=False)
+    sm, info, dg, obs = fit(rows, H, s, err, prob, s, chains, warmup, samples, seed, stage1=False, full_ep=full_ep, retry=retry)
     return sm, info, dg, obs
 
 
@@ -697,7 +737,7 @@ def cmd_predict(a):
                 out["priors"][s] = prior(s1, s, cache=CACHE)
             pr = out["priors"][s]
             head, rows = obs_table.read_cell(path)
-            sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples)
+            sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples, full_ep=a.pre_full)
             out["cells"] += OM.pred_cells(s, T, {q: sm[f"lnC_{q:g}"] for q in OM.Q_TARGETS}, dg["conv"])
             out["info"].append({"season": s, "T": T, "secs": info["secs"], "map_secs": info["map_secs"], "conv": dg["conv"], "K": pr["K"],
                                 "k": pr["k"], "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"], "divergences": info["divergences"],
@@ -892,6 +932,7 @@ def main():
     q.add_argument("--T", default="all")
     q.add_argument("--out", required=True)
     q.add_argument("--prior-cache", default=None)
+    q.add_argument("--pre-full", action="store_true", help="eps·phi도 사전 펴기에 넣는다 (m1과 같은 방식)")
     a = ap.parse_args()
     if a.cmd == "stage1":
         lo, hi = (float(x) for x in a.r_range_pct.split(","))
