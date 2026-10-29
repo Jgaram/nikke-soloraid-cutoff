@@ -179,17 +179,37 @@ def _lntau_prior(ltau):
 
 
 class Stage1Prob:
-    """끝난 시즌 1단계: v = [a, c_r(7), c_l(8), ln tau_r, ln tau_l, lnsig0, lnrho, 6 offset] (26)."""
+    """끝난 시즌 1단계: v = [a, 곡선 계수 둘(7+8), ln tau_r, ln tau_l, lnsig0, lnrho, 6 offset] (26).
+    param="centered": 계수 c 그대로. 사전 = 계수마다 넓은 정규 x RW2(tau). MAP에서 tau를 고정해야 한다 (결합 MAP이 tau -> 0으로 퇴화).
+    param="noncentered" (기본): c = m + L(tau) zeta, zeta ~ N(0, I), L = U diag((e/tau^2 + 1/s^2)^-1/2) (Q = D2'D2/tau^2 + I/s^2의 고유분해).
+      사전 c ~ N(m, Q^-1) — 깔때기(tau 대 끝 계수)를 없애려는 표준 비중심화 (Betancourt-Girolami 2015). 중심화판과 tau 둘레 정규화 상수가 다르다."""
     kind = "stage1"
     n = 26
-    tau_ix = (16, 17)
 
-    def __init__(self):
-        self.start = np.concatenate([[M1.WEAK["a"][0]], np.full(NR, CR_MEAN), np.full(NL, CL_MEAN), [math.log(0.3)] * 2,
+    def __init__(self, param="noncentered"):
+        self.param = param
+        self.tau_ix = (16, 17) if param == "centered" else ()
+        self.start = np.concatenate([[M1.WEAK["a"][0]], np.full(NR, CR_MEAN if param == "centered" else 0.0),
+                                     np.full(NL, CL_MEAN if param == "centered" else 0.0), [math.log(0.3)] * 2,
                                      [M1.WEAK[n][0] for n in NUIS]])
+        self._eig = {}
+        for key, nn in (("r", NR), ("l", NL)):
+            D2 = np.diff(np.eye(nn), 2, axis=0)
+            e, U = np.linalg.eigh(D2.T @ D2)
+            self._eig[key] = (np.clip(e, 0, None), U)
+
+    def _curve(self, z, ltau, key):
+        import jax.numpy as jnp
+        e, U = self._eig[key]
+        m, sd = (CR_MEAN, CR_SD) if key == "r" else (CL_MEAN, CL_SD)
+        q = jnp.asarray(e) / jnp.exp(ltau) ** 2 + 1.0 / sd ** 2
+        return m + jnp.asarray(U) @ (z / jnp.sqrt(q))
 
     def theta(self, v):
-        d = {"a": v[0], "cr": v[1:1 + NR], "cl": v[1 + NR:1 + NR + NL], "lnsig0": v[18], "lnrho": v[19]}
+        cr, cl = v[1:1 + NR], v[1 + NR:1 + NR + NL]
+        if self.param == "noncentered":
+            cr, cl = self._curve(cr, v[16], "r"), self._curve(cl, v[17], "l")
+        d = {"a": v[0], "cr": cr, "cl": cl, "lnsig0": v[18], "lnrho": v[19]}
         d.update({n: v[20 + i] for i, n in enumerate(OFF)})
         return d
 
@@ -197,8 +217,12 @@ class Stage1Prob:
         import jax.numpy as jnp
         th = self.theta(v)
         lp = _nlp(v[0], M1.WEAK["a"][0], M1.WEAK["a"][1])
-        lp += _nlp(th["cr"], CR_MEAN, CR_SD) + _rw2(th["cr"], v[16]) + _lntau_prior(v[16])
-        lp += _nlp(th["cl"], CL_MEAN, CL_SD) + _rw2(th["cl"], v[17]) + _lntau_prior(v[17])
+        if self.param == "centered":
+            lp += _nlp(th["cr"], CR_MEAN, CR_SD) + _rw2(th["cr"], v[16])
+            lp += _nlp(th["cl"], CL_MEAN, CL_SD) + _rw2(th["cl"], v[17])
+        else:
+            lp += _nlp(v[1:1 + NR + NL], 0.0, 1.0)
+        lp += _lntau_prior(v[16]) + _lntau_prior(v[17])
         mu = jnp.asarray([M1.WEAK[n][0] for n in NUIS])
         sd = jnp.asarray([M1.WEAK[n][1] for n in NUIS])
         return lp + _nlp(v[18:26], mu, sd)
@@ -332,7 +356,7 @@ def map_precond(obs, prob, iters=400, temps=(0.003, 0.03, 0.3, 1.0)):
                                             "tau_fixed": [math.exp(loc[i]) for i in tau_ix]}}
 
 
-def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16):
+def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9):
     """관측 줄 -> MAP -> NUTS. (samples, info, diag, obs). info에 map·secs·n·N."""
     obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1)
     jobs = OM.to_jax(obs)
@@ -342,7 +366,8 @@ def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500
     mdl = functools.partial(model, prob=prob, pre=pre)
     lnames = [f"lnC_{q:g}" for q in (1, 3, 10)]
     names = (["th24", "r12", "l12"] if stage1 else ["v"]) + lnames
-    sm, info, dg = OM.fit_with_retry(mdl, {"obs": jobs}, names=names, seed=seed, chains=chains, warmup=warmup, samples=samples)
+    sm, info, dg = OM.fit_with_retry(mdl, {"obs": jobs}, names=names, seed=seed, chains=chains, warmup=warmup, samples=samples,
+                                     target_accept=target_accept)
     info["map_secs"] = round(t_map, 1)
     info["map"] = pre["info"]
     info["pre"] = {"loc": pre["loc"], "chol": pre["chol"]}
@@ -399,15 +424,17 @@ def cmd_stage1(a):
             out = json.load(f)
     out["header"] = {"about": "M3 1단계 — 끝난 시즌 전체 표, 약한 사전, P-스플라인 곡선 (정답 표 안 씀)", "method": "M3", "data_ver": C.DATA_VER,
                      "K": 16, "date": datetime.date.today().isoformat(), "names": S1_NAMES, "basis": basis_spec(),
-                     "cfg": {"chains": a.chains, "warmup": a.warmup, "samples": a.samples, "target_accept": 0.9}}
+                     "param": a.param, "cfg": {"chains": a.chains, "warmup": a.warmup, "samples": a.samples, "target_accept": 0.9}}
     for s in C.parse_seasons(a.seasons):
         if s in out["seasons"]:
             print(s, "건너뜀 (이미 있음)", flush=True)
             continue
         head, rows = obs_table.read_cell(os.path.join(a.obs_dir, f"{s}.jsonl.gz"))
         dk = s if s in err["1a_post_delay"]["expanding"] else None
-        sm, info, dg, obs = fit(rows, head["H"], s, err, Stage1Prob(), dk, a.chains, a.warmup, a.samples, stage1=True)
+        sm, info, dg, obs = fit(rows, head["H"], s, err, Stage1Prob(a.param), dk, a.chains, a.warmup, a.samples, stage1=True,
+                                  target_accept=a.target_accept)
         out["seasons"][s] = stage1_entry(sm, info, dg, obs)
+        out["seasons"][s]["param"] = a.param
         _atomic_json(a.out, out)
         if a.draws_dir:
             os.makedirs(a.draws_dir, exist_ok=True)
@@ -627,7 +654,7 @@ def selftest_numeric():
     return out
 
 
-def selftest_recovery(work, season="S30", chains=2, warmup=300, samples=300):
+def selftest_recovery(work, season="S30", chains=2, warmup=300, samples=300, param="noncentered"):
     import jax.numpy as jnp
     import obs_table
     err = OM.load_err()
@@ -635,7 +662,7 @@ def selftest_recovery(work, season="S30", chains=2, warmup=300, samples=300):
     H = head["H"]
     dk = season if season in err["1a_post_delay"]["expanding"] else None
     obs0 = OM.to_jax(OM.prepare(rows, H, season, err, K=16, delay_key=dk, stage1=True))
-    prob = Stage1Prob()
+    prob = Stage1Prob(param)
     t0 = time.time()
     pre = map_precond(obs0, prob)
     t_map = time.time() - t0
@@ -696,7 +723,7 @@ def cmd_selftest(a):
     res = {"numeric": selftest_numeric()}
     print(json.dumps(res["numeric"], indent=1), flush=True)
     if not a.skip_recovery:
-        res["recovery"] = selftest_recovery(a.work, chains=a.chains)
+        res["recovery"] = selftest_recovery(a.work, chains=a.chains, param=a.param)
         print(json.dumps(res["recovery"], indent=1, default=_js), flush=True)
     _atomic_json(os.path.join(a.work, "m3_selftest.json"), res)
 
@@ -715,12 +742,15 @@ def main():
     common(t)
     t.add_argument("--work", required=True)
     t.add_argument("--skip-recovery", action="store_true")
+    t.add_argument("--param", choices=("centered", "noncentered"), default="noncentered")
     s = sub.add_parser("stage1")
     common(s)
     s.add_argument("--obs-dir", required=True)
     s.add_argument("--seasons", required=True)
     s.add_argument("--out", required=True)
     s.add_argument("--draws-dir", default=None)
+    s.add_argument("--target-accept", type=float, default=0.9)
+    s.add_argument("--param", choices=("centered", "noncentered"), default="noncentered")
     p = sub.add_parser("prior")
     p.add_argument("--stage1", required=True)
     p.add_argument("--target", required=True)
