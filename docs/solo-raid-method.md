@@ -475,8 +475,8 @@ WP0 기반 ─┬─ WP1 오차 재기 (1a~1g 병렬) ───────┐
 | WP0 기반 | 끝 (2026-10-29) | [세션](https://claude.ai/code/session_01MQimn3UGhFxgpV7ALnBSGD) | `tools/solo_raid/lab7/` 뼈대·`obs_table.py`·`score.py`, `r7/{F,B0,Z0}_D0.json` | bc7408f·83019bd·ec589aa·c81cab5·(이 커밋) |
 | WP1 오차 재기 | 끝 (2026-10-29) | [세션](https://claude.ai/code/session_01MQimn3UGhFxgpV7ALnBSGD) | `r7/obs_error.json`·`r7/wp1/`, 「WP1 결과」 절, `lab7/err_*.py` | err_1a~1g 커밋·(이 커밋) |
 | WP3a 명세 | 끝 (2026-10-29) | [세션](https://claude.ai/code/session_01MQimn4KqiHqxTf5HtQyvuV) | 「WP3 명세」·「G1 보고」 절, `r7/wp3a/bench.json` | 21c0a44·(이 커밋) |
-| WP2 도구 고침 | 대기 (WP1·WP3a 뒤) — 범위 정함: `post_time.py` 한 번 | — | 공용 도구 (잠금) | — |
-| WP3b M1 + 관측 층 | 대기 (WP1·WP3a 뒤) | — | `lab7/obs_model.py`·`lab7/hier.py`·`lab7/m1.py` | — |
+| WP2 도구 고침 | 진행 (2026-10-29) — 범위: `post_time.py` 한 번 | [세션](https://claude.ai/code/session_01MQimn4cGS8nxuwgSowSxtS) | 공용 도구 (잠금) — `post_time.py`, 자료 D1 | — |
+| WP3b M1 + 관측 층 | 진행 (2026-10-29, 자료 판 D0) | [세션](https://claude.ai/code/session_01MQimn32HkrdhgEMfgquXFA) | `lab7/obs_model.py`·`lab7/hier.py`·`lab7/m1.py` | — |
 | WP3b M2 | 대기 (`obs_model.py`·`hier.py` 뒤) | — | `lab7/m2.py` | — |
 | WP3b M3 | 대기 (`obs_model.py`·`hier.py` 뒤) | — | `lab7/m3.py` | — |
 | WP4 빼 보기 | 대기 | — | — | — |
