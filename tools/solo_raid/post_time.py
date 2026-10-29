@@ -62,6 +62,7 @@ top7 시각 구간 (별도 열, 2026-10-16. 등급·t_lo·t_hi·h_lo·h_hi는 �
   유효 창은 게시−4일 ≤ t ≤ 게시+5분. basis `A:name_ext(manifest)`.
 - 첨부 짝 (C → A): manifest에 fname이 없는 사진은 글의 첨부 이름 목록(STATE/posts_min.jsonl의 files, --posts 파일의 files)에서 이름 시각(기존+확장 꼴)을 찾는다.
   (a) extpair: 확장자 묶음(jpeg=jpg) 안에서 첨부 수와 그 글의 사진 수(manifest 같은 글 번호·확장자)가 같으면 차례대로 짝지은 이름 하나의 시각, basis `A:name_pair(extpair)`.
+  extpair는 그 묶음 첨부의 유효 이름 시각이 목록 순서대로 늘어날 때만 쓴다. `edit_` 이름(편집 시각)은 확장 꼴·짝 모두에 쓰지 않는다 (WP2 모순 점검 뒤 더함).
   (b) tight: 첨부 이름 수 ≥ 그 글의 사진 수이고(이름 없는 사진이 남으면 안 씀 — WP2 세션 판단) 글 첨부의 유효 이름 시각이 모두 2분 안에 몰려 있으면 가장 이른 것, basis `A:name_pair(tight)`. 2~10분 묶음은 올리지 않고 C로 두고 센다(`tight_2_10`).
   애매하면 올리지 않는다. 새 A에도 shot_after_post·late>24h·edit_name 표시 규칙이 그대로 적용된다.
 - 안전장치 (순위표 구간): 위 셋으로 새로 올릴 후보의 시각을 **기존 규칙만으로 정한 A 사진들**을 참조로 한 top7 구간(top7_bracket의 raw 구간, 열린 끝 허용)과 견준다.
@@ -203,7 +204,7 @@ def valid_times(names, pt, skip_second=True):
     if pt is None:
         return res
     for n in names:
-        if not n or (skip_second and SECOND.search(n)):
+        if not n or (skip_second and SECOND.search(n)) or n.startswith("edit_"):   # edit_ = 편집한 시각, 촬영이 아님 (S26 모순, WP2)
             continue
         for t, k in parse_name(n):
             if pt - dt.timedelta(days=4) <= t <= pt + dt.timedelta(minutes=5):
@@ -843,7 +844,10 @@ def main():
                     for ii in sorted(mrow):
                         ix[ext_class((mrow[ii].get("ext") or "").lower())].append(ii)
                     me = ext_class((mrow.get(idx, {}).get("ext") or "").lower())
-                    if me in fx and len(fx[me]) == len(ix.get(me, [])) and idx in ix[me]:
+                    # 차례 짝은 그 묶음 첨부의 이름 시각이 목록 순서대로 늘어날 때만 (뒤섞인 목록은 글 속 사진 차례와 다를 수 있다 — S33 모순, WP2)
+                    seq = [valid_times([files[fi]], pt) for fi in fx.get(me, [])]
+                    seq = [v[0][0] for v in seq if v]
+                    if me in fx and len(fx[me]) == len(ix.get(me, [])) and idx in ix[me] and seq == sorted(seq):
                         v1 = valid_times([files[fx[me][ix[me].index(idx)]]], pt)
                         if v1:
                             pair = ("extpair", v1[0][0])
