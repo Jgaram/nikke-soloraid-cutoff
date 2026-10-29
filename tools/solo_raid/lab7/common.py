@@ -12,7 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(TOOLS))
 sys.path.insert(0, TOOLS)
 import predict as PR  # noqa: E402
 
-DATA_VER = "D0"   # 자료 판 (2026-10-28, 커밋 881e9c5 뒤의 자료). WP2가 공용 도구·자료를 고치면 올린다
+DATA_VER = "D1"   # 자료 판 (D0 = 2026-10-28 커밋 881e9c5 뒤, D1 = 2026-10-29 커밋 ab61aa8 뒤 — WP2 post_time.py 고침). WP2가 공용 도구·자료를 고치면 올린다
 DEV = [f"S{n}" for n in range(19, 43)]
 TARGETS = [f"S{n}" for n in range(21, 43)]
 TUNE = ["S22", "S26", "S30", "S34", "S38", "S42"]   # 조정 시즌 (4.4)

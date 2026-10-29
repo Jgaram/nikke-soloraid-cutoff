@@ -38,7 +38,7 @@ import anchor as A  # noqa: E402
 import e_53a as EA  # noqa: E402
 import score as SC  # noqa: E402
 
-DATA_VER = "D0"
+DATA_VER = "D1"
 M1_T = (12.0, 18.0, 24.0, 36.0, 48.0, 72.0, 96.0)
 M1_Q = (0.5, 1.0, 2.0, 3.0)
 REF_Q = (5.0, 10.0)
