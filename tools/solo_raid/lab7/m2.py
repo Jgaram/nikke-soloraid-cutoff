@@ -344,17 +344,17 @@ def model(obs, prior, hyper=None, mean=None, pre=None, keep_ll=False):
         numpyro.deterministic(f"lnC_{q:g}", lnC(th, q, G, mean))
 
 
-def map_precond(obs, prior, hyper=None, mean=None, start=None, iters=400, temps=(0.003, 0.03, 0.3, 1.0), two_step=True):
+def map_precond(obs, prior, hyper=None, mean=None, start=None, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), two_step=True):
     """float64 MAP + 라플라스 (m1.map_precond와 같은 방식, eps·phi는 사전 평균에 고정). -> dict(loc, chol, info)
     hyper=None(초모수 표집)일 때 two_step=True면: (1) 초모수를 사전 중앙값에 고정하고 나머지(a·core·beta)의 MAP + 라플라스를 구하고,
     (2) 초모수 4개는 사전 중앙값 / 대각 사전 sd(0.5, 0.7, 0.5, 0.7)로 이어 붙인다. 초모수를 함께 푼 MAP은 beta-크기 능선 때문에 헤세 행렬이 불정부호가 되었다
     (2026-10-29 첫 시간 재기에서 min_eig -150). 남은 상관은 NUTS의 dense 질량 행렬이 예열에서 배운다."""
     if hyper is None and two_step:
         hc = hyper_center()
-        sub = map_precond(obs, prior, hc, mean, None, iters, temps, two_step=False)
         n_core = 1 + len(CORE)
         n = n_core + 4 + 2 * MB
         keep = list(range(n_core)) + list(range(n_core + 4, n))          # 초모수 자리를 뺀 v 위치
+        sub = map_precond(obs, prior, hc, mean, None if start is None else np.asarray(start, float)[keep], iters, temps, two_step=False)
         hp = [n_core + i for i in range(4)]
         cov = np.zeros((n, n))
         cov[np.ix_(keep, keep)] = sub["cov"]
@@ -397,38 +397,86 @@ def map_precond(obs, prior, hyper=None, mean=None, start=None, iters=400, temps=
                 return (val, g) if np.isfinite(val) and np.isfinite(g).all() else (1e12, np.zeros_like(g))
             res = minimize(f, x, jac=True, method="L-BFGS-B", options={"maxiter": iters, "maxfun": 3 * iters})
             x, nit = res.x, nit + res.nit
+        f1 = lambda xx: float(vg(jnp.asarray(xx), 1.0)[0])
+
+        def polish(x):
+            """뉴턴 다듬기 (m1과 같다): L-BFGS는 조건수가 큰 사후에서 일찍 선다."""
+            n_new = 0
+            for _ in range(60):
+                fv, g = vg(jnp.asarray(x), 1.0)
+                fv, g = float(fv), np.asarray(g, float)
+                Hn = np.asarray(hess(jnp.asarray(x), 1.0), float)
+                Hn = 0.5 * (Hn + Hn.T)
+                wv, Qv = np.linalg.eigh(Hn)
+                step = Qv @ ((Qv.T @ g) / np.maximum(np.abs(wv), 1e-3))
+                t, ok = 1.0, False
+                while t > 1e-4:
+                    fn = f1(x - t * step)
+                    if np.isfinite(fn) and fn < fv - 1e-9:
+                        ok = True
+                        break
+                    t *= 0.5
+                if not ok:
+                    break
+                x = x - t * step
+                n_new += 1
+                if fv - fn < 1e-6:
+                    break
+            return x, n_new
+
+        x, n_newton = polish(x)
+        n_saddle = 0
+        for _ in range(3):   # 안장점: Hessian 최소 고윳값 <= 0이면 그 방향으로 +-0.5 밀어 다시 푼다 (m1과 같다)
+            Hs = np.asarray(hess(jnp.asarray(x), 1.0), float)
+            ws, Qs = np.linalg.eigh(0.5 * (Hs + Hs.T))
+            if ws.min() > 1e-6:
+                break
+            n_saddle += 1
+            best = (f1(x), x)
+            for sgn in (1.0, -1.0):
+                r2_ = minimize(lambda xx: f(xx, temp=1.0), x + sgn * 0.5 * Qs[:, 0], jac=True, method="L-BFGS-B",
+                               options={"maxiter": iters, "maxfun": 3 * iters})
+                nit += r2_.nit
+                xn, nn = polish(r2_.x)
+                n_newton += nn
+                fn_ = f1(xn)
+                if np.isfinite(fn_) and fn_ < best[0]:
+                    best = (fn_, xn)
+            x = best[1]
+        res.fun = f1(x)
         H = np.asarray(hess(jnp.asarray(x), 1.0), float)
     H = 0.5 * (H + H.T)
     w, Q = np.linalg.eigh(H)
     cov = (Q / np.maximum(w, 1e-6)) @ Q.T
     chol = np.linalg.cholesky(0.5 * (cov + cov.T) + 1e-12 * np.eye(len(x)))
     return {"loc": x, "chol": chol, "cov": 0.5 * (cov + cov.T),
-            "info": {"fun": float(res.fun), "nit": nit, "ok": bool(res.success), "min_eig": float(w.min()), "max_eig": float(w.max())}}
+            "info": {"fun": float(res.fun), "nit": nit, "ok": bool(res.success), "min_eig": float(w.min()), "max_eig": float(w.max()),
+                     "n_newton": n_newton, "n_saddle": n_saddle}}
 
 
-# ---------- 실행 도구 (시간 재기용: run_nuts 복사 + 나무 깊이 분포) ----------
+# ---------- 다중 시작 MAP ----------
 
-def run_nuts_depth(model_fn, model_kwargs, seed=0, chains=4, warmup=500, samples=500, target_accept=0.9, max_tree_depth=10):
-    """obs_model.run_nuts와 같은 설정 (dense, parallel, init_to_median) + 나무 깊이 분포. 이 파일에서만 쓴다."""
-    import jax
-    from numpyro.infer import MCMC, NUTS, init_to_median
-    kern = NUTS(model_fn, target_accept_prob=target_accept, max_tree_depth=max_tree_depth, dense_mass=True,
-                init_strategy=init_to_median(num_samples=15))
-    mcmc = MCMC(kern, num_warmup=warmup, num_samples=samples, num_chains=chains, chain_method="parallel", progress_bar=False)
-    t0 = time.time()
-    mcmc.run(jax.random.PRNGKey(seed), extra_fields=("diverging", "num_steps"), **model_kwargs)
-    sm = mcmc.get_samples(group_by_chain=True)
-    ex = mcmc.get_extra_fields(group_by_chain=True)
-    jax.block_until_ready((sm, ex))
-    secs = time.time() - t0
-    steps = np.asarray(ex["num_steps"])                       # [chains, warmup+samples] 또는 [chains, samples]
-    depth = np.ceil(np.log2(steps + 1.0)).astype(int)
-    hist = {int(d): int((depth == d).sum()) for d in np.unique(depth)}
-    info = {"secs": round(secs, 1), "divergences": int(np.asarray(ex["diverging"]).sum()),
-            "tree_cap_frac": float((steps >= 2 ** max_tree_depth - 1).mean()), "mean_leapfrog": float(steps.mean()),
-            "depth_hist_draws": hist, "chains": chains, "warmup": warmup, "samples": samples, "target_accept": target_accept}
-    return {k: np.asarray(v) for k, v in sm.items()}, info
+def multistart_map(obs, prior, hyper=None, mean=None, n=8, seed=0, scatter=0.5):
+    """시작점 n개의 MAP (m1.multistart_map과 같은 꼴): 첫째는 기본 시작, 나머지는 그 해에서 서버 보조 모수(dJP..kGL)만 N(0, scatter^2)로 흩음.
+    -> info.fun 오름차순 [pre dict] (fun = -log 사후 상대값이므로 작을수록 높은 봉우리)."""
+    names, _ = _v_layout(hyper)
+    base = map_precond(obs, prior, hyper, mean)
+    out = [base]
+    rng = np.random.default_rng(seed)
+    idx = [i for i, nm in enumerate(names) if nm in M1.OFF]
+    for _ in range(n - 1):
+        st = np.array(base["loc"], float)
+        st[idx] += rng.normal(0, scatter, len(idx))
+        out.append(map_precond(obs, prior, hyper, mean, start=st))
+    return sorted(out, key=lambda p: p["info"]["fun"])
 
+
+def map_init(n):
+    """NUTS 시작: z는 0(= MAP), 나머지(eps·phi)는 init_to_median (m1.map_init)."""
+    return M1.map_init(n)
+
+
+# ---------- 실행 도구 ----------
 
 def _draws_lnc(vdraws, hyper, mean):
     """v 뽑기 [S, n] -> {q: lnC [S]} (float32 vmap)."""
@@ -456,7 +504,7 @@ def laplace_summary(pre, hyper, mean, n=4000, seed=0):
     return out
 
 
-def bench_case(work, case, season=None, chains=4, warmup=500, samples=500, K=16, target_accept=0.9, probe=False, mean_kind="temp"):
+def bench_case(work, case, season=None, chains=4, warmup=500, samples=500, K=16, target_accept=0.9, probe=False, mean_kind="temp", multistart=True):
     import jax
     import obs_table as O
     OM.setup_host(chains)
@@ -488,21 +536,28 @@ def bench_case(work, case, season=None, chains=4, warmup=500, samples=500, K=16,
     t0 = time.time()
     pre2 = map_precond(jobs, prior, hyper, mean)       # 같은 프로세스에서 두 번째 (jit 캐시가 안 맞으면 컴파일이 또 든다)
     res["map_secs_second_call"] = round(time.time() - t0, 1)
+    if multistart:
+        t0 = time.time()
+        modes = multistart_map(jobs, prior, hyper, mean)
+        res["multistart_secs"] = round(time.time() - t0, 1)
+        res["modes_fun"] = [round(p["info"]["fun"], 3) for p in modes]
+        pre = modes[0]
     res["map_info"] = pre["info"]
     lap = laplace_summary(pre, hyper, mean)
     res["laplace"] = lap
     print("MAP", res["map_secs_incl_compile"], res["map_secs_second_call"], pre["info"], flush=True)
     kw = {"obs": jobs, "prior": prior, "hyper": hyper, "mean": mean, "pre": pre}
+    init = map_init(len(pre["loc"]))
     if probe:
-        _, pi = run_nuts_depth(model, kw, seed=0, chains=chains, warmup=100, samples=50, target_accept=target_accept)
+        _, pi = OM.run_nuts(model, kw, seed=0, chains=chains, warmup=100, samples=50, target_accept=target_accept, init=init)
         print("PROBE", pi, flush=True)
         res["probe"] = pi
         return res
     # 컴파일 시간 추정: 아주 짧은 실행
-    _, ci = run_nuts_depth(model, kw, seed=5, chains=chains, warmup=8, samples=4, target_accept=target_accept)
+    _, ci = OM.run_nuts(model, kw, seed=5, chains=chains, warmup=8, samples=4, target_accept=target_accept, init=init)
     res["compile_est_secs"] = ci["secs"]
     print("COMPILE_EST", ci["secs"], flush=True)
-    sm, info = run_nuts_depth(model, kw, seed=0, chains=chains, warmup=warmup, samples=samples, target_accept=target_accept)
+    sm, info = OM.run_nuts(model, kw, seed=0, chains=chains, warmup=warmup, samples=samples, target_accept=target_accept, init=init)
     res["nuts"] = info
     res["nuts_secs_excl_compile_est"] = round(info["secs"] - ci["secs"], 1)
     th_names = ["a"] + CORE + ([] if hyper is not None else HYP)
@@ -656,7 +711,7 @@ def test_synth(work, season="S30", chains=4, warmup=500, samples=500, free_hyper
     pre = map_precond(jobs, {"kind": "weak"}, hyper, mean)
     t_map = time.time() - t0
     kw = {"obs": jobs, "prior": {"kind": "weak"}, "hyper": hyper, "mean": mean, "pre": pre}
-    sm, info = run_nuts_depth(model, kw, seed=0, chains=chains, warmup=warmup, samples=samples)
+    sm, info = OM.run_nuts(model, kw, seed=0, chains=chains, warmup=warmup, samples=samples)
     G = grids()
     names = ["a"] + CORE + ([] if hyper is not None else HYP)
     truth_v = {n: th[n] for n in ["a"] + CORE}
@@ -717,6 +772,53 @@ def test_synth(work, season="S30", chains=4, warmup=500, samples=500, free_hyper
             "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"], "conv": dg["conv"]}
 
 
+def compare_multistart(work, seasons, chains=4, warmup=500, samples=500, K=16, n=8):
+    """경우 b(초모수 고정, 약한 사전, 임시 평균) 단일 MAP 대 시작점 n개 MAP: 봉우리별 log 사후, 사슬별 dJP·dGL 평균, 진단, 시간.
+    NUTS는 둘 다 MAP(z=0)에서 시작한다 (차이는 MAP뿐)."""
+    import obs_table as O
+    OM.setup_host(chains)
+    err = OM.load_err()
+    hyper, prior, mean = hyper_center(), {"kind": "weak"}, default_mean()
+    out = {"note": "임시 평균 (rbar = ln 0.3 + w, lbar = M1 kuma eta=0), 경우 b: 초모수 고정(사전 중앙값)·약한 사전. 2026-10-29",
+           "chains": chains, "warmup": warmup, "samples": samples, "n_starts": n, "seasons": {}}
+    for season in seasons:
+        head, rows = O.read_cell(os.path.join(work, "obs7", "full", f"{season}.jsonl.gz"))
+        obs = OM.prepare(rows, head["H"], season, err, K=K, stage1=True)
+        jobs = OM.to_jax(obs)
+        names, _ = _v_layout(hyper)
+        off = [i for i, nm in enumerate(names) if nm in M1.OFF]
+        r = {"N": int(obs["N"]), "n_rows": int(obs["n"])}
+        for tag in ("single", "multi"):
+            t0 = time.time()
+            if tag == "single":
+                modes = [map_precond(jobs, prior, hyper, mean)]
+            else:
+                modes = multistart_map(jobs, prior, hyper, mean, n=n)
+            tmap = time.time() - t0
+            pre = modes[0]
+            init = map_init(len(pre["loc"]))
+            kw = {"obs": jobs, "prior": prior, "hyper": hyper, "mean": mean, "pre": pre}
+            sm, info = OM.run_nuts(model, kw, seed=0, chains=chains, warmup=warmup, samples=samples, init=init)
+            watch = ["a"] + CORE + [f"lnC_{q:g}" for q in (1, 3, 10)]
+            dg = OM.diagnose(sm, watch, divergences=info["divergences"])
+            r[tag] = {
+                "map_secs": round(tmap, 1), "nuts_secs": info["secs"],
+                "modes": [{"logpost": round(-p["info"]["fun"], 2), "server": dict(zip([names[i] for i in off], [round(float(p["loc"][i]), 3) for i in off])),
+                          "saddle": p["info"].get("n_saddle"), "ok": p["info"]["ok"]} for p in modes],
+                "chain_mean": {nm: [round(float(sm[nm][c].mean()), 3) for c in range(chains)] for nm in ("dJP", "dGL")},
+                "rhat_max": round(dg["rhat_max"], 3), "ess_min": round(dg["ess_min"], 1), "divergences": info["divergences"],
+                "tree_cap_frac": info["tree_cap_frac"], "depth_dist": info["depth_dist"],
+                "worst": sorted(((k, round(v["rhat"], 3)) for k, v in dg["per"].items()), key=lambda t: -t[1])[:3],
+                "lnC_3_mean": round(float(sm["lnC_3"].mean()), 4)}
+            print(season, tag, json.dumps(r[tag], ensure_ascii=False, default=float), flush=True)
+        out["seasons"][season] = r
+        d = os.path.join(work, "m2")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "multistart_partial.json"), "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=1, default=float)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -731,6 +833,12 @@ def main():
     b.add_argument("--tag", default="")
     b.add_argument("--mean", default="temp", choices=["temp", "m1"])
     b.add_argument("--ta", type=float, default=0.9)
+    b.add_argument("--multistart", type=int, default=1, help="1이면 시작점 8개 MAP(기본), 0이면 단일 MAP")
+    c = sp.add_parser("compare")
+    c.add_argument("--work", required=True)
+    c.add_argument("--seasons", default="S34")
+    c.add_argument("--warmup", type=int, default=500)
+    c.add_argument("--samples", type=int, default=500)
     t = sp.add_parser("test")
     t.add_argument("--work", required=True)
     t.add_argument("--which", required=True, choices=["basis", "synth"])
@@ -741,8 +849,11 @@ def main():
     a = ap.parse_args()
     if a.cmd == "bench":
         OM.setup_host(a.chains)
-        r = bench_case(a.work, a.case, a.season, a.chains, a.warmup, a.samples, target_accept=a.ta, probe=a.probe, mean_kind=a.mean)
+        r = bench_case(a.work, a.case, a.season, a.chains, a.warmup, a.samples, target_accept=a.ta, probe=a.probe, mean_kind=a.mean, multistart=bool(a.multistart))
         name = f"bench_{a.case}{a.tag}.json"
+    elif a.cmd == "compare":
+        r = compare_multistart(a.work, a.seasons.split(","), 4, a.warmup, a.samples)
+        name = "multistart.json"
     else:
         OM.setup_host(4)
         r = test_basis() if a.which == "basis" else test_synth(a.work, a.season, 4, a.warmup, a.samples, a.free_hyper)
