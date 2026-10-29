@@ -6,12 +6,12 @@
   python3 -I tools/solo_raid/lab7/m3.py predict --stage1 STAGE1.json --obs-dir W/obs7 --seasons S22,S26 --T all|24,48 --out PRED.json [--prior-cache DIR]
 
 명세 「WP3 명세」 0·1·2·3·4(M3)·5·6절. 좌표: y = ln 점수, w = ln(q/3), u = h/H.
-  컷 곡선  ln C(w) = a - R(w),  R(w) = ∫_0^w exp(r(v)) dv      r = 3차 B-스플라인 7개, w ∈ [ln(0.1/3), ln(40/3)] (밖은 끝값 상수)
-  침수     P(u) = ∫_u^1 exp(l(v)) dv  (log10 단위, P(1) = 0)   l = 3차 B-스플라인 8개, s = sqrt(u) 등간격 매듭
+  컷 곡선  ln C(w) = a - R(w),  R(w) = ∫_0^w exp(r(v)) dv      r = 3차 B-스플라인 12개, w ∈ [ln(0.1/3), ln(40/3)] (밖은 끝값 상수)
+  침수     P(u) = ∫_u^1 exp(l(v)) dv  (log10 단위, P(1) = 0)   l = 3차 B-스플라인 12개, s = sqrt(u) 등간격 매듭
   서버 k   a_k = a + d_k, r_k = r + kappa_k (R_k = e^kappa R), l_k = l + psi_k (P_k = e^psi P). KR은 0.
   적분 격자: w 160점 [ln(0.005/3), ln(100/3)] (R(0) = 0으로 맞춤), sqrt(u) 200점. 역함수 w_fin(y)는 격자 안은 보간, 밖은 끝 기울기 직선.
 곡면 함수 약속(obs_model): surface(theta, y[N], u[N,K]) -> mu[3,N,K], P[3,N,K].
-  theta: a, cr[7], cl[8], dJP,dGL,pJP,pGL,kJP,kGL.   lnC(theta, q) = KR 최종 컷 ln 점수.
+  theta: a, cr[NR], cl[NL], dJP,dGL,pJP,pGL,kJP,kGL.   lnC(theta, q) = KR 최종 컷 ln 점수.
 1단계 파일: {"header": {...}, "seasons": {시즌: {names, mean, cov, 진단...}}} — hier에는 seasons를 넘긴다 (load_stage1).
 공개 규칙: 글 번호·원문·닉네임·원글 주소는 쓰지 않는다.
 """
@@ -41,8 +41,9 @@ LN10 = math.log(10.0)
 L10_3 = math.log10(3.0)
 OFF = M1.OFF                                            # dJP dGL pJP pGL kJP kGL
 NUIS = ["lnsig0", "lnrho"] + list(OFF)                  # prior_for에 넘기는 8개
-NR, NL = 7, 8
-W_LO, W_HI = math.log(0.1 / 3), math.log(40 / 3)        # r 매듭 범위·평가 격자 w12
+NR, NL = 12, 12   # 2026-10-29 7·8 → 12·12: 기저 7개로는 범위만 바꿔도 3% 컷이 0.57% 움직였다 (P-스플라인은 넉넉한 기저 + 벌점, Eilers·Marx 1996)
+W_LO, W_HI = math.log(0.1 / 3), math.log(40 / 3)        # 평가 격자 w12 범위 (고정)
+K_LO, K_HI = W_LO, W_HI                                 # r 매듭 범위 (configure로 바꿈)
 S_LO = math.sqrt(0.02)
 CR_MEAN, CR_SD = math.log(0.3), 1.5
 CL_MEAN, CL_SD = math.log(0.2 / 0.6), 2.0
@@ -74,16 +75,32 @@ def build_basis():
     i0 = int(np.clip(np.searchsorted(wg, 0.0) - 1, 0, len(wg) - 2))
     f0 = float((0.0 - wg[i0]) / (wg[i0 + 1] - wg[i0]))
     return {"wg": wg, "sg": sg, "w12": w12, "s12": s12, "u12": s12 ** 2,
-            "Brf": _bspl_design(wg, W_LO, W_HI, NR), "Blf": _bspl_design(sg, S_LO, 1.0, NL),
-            "Br12": _bspl_design(w12, W_LO, W_HI, NR), "Bl12": _bspl_design(s12, S_LO, 1.0, NL),
+            "Brf": _bspl_design(wg, K_LO, K_HI, NR), "Blf": _bspl_design(sg, S_LO, 1.0, NL),
+            "Br12": _bspl_design(w12, K_LO, K_HI, NR), "Bl12": _bspl_design(s12, S_LO, 1.0, NL),
             "dw": float(wg[1] - wg[0]), "ds": float(sg[1] - sg[0]), "i0": i0, "f0": f0}
 
 
 BASIS = build_basis()
 
 
+def configure(nr=None, nl=None, r_lo_pct=None, r_hi_pct=None):
+    """기저 개수·r 매듭 범위(% 단위)를 바꾼다 (BASIS를 제자리에서 갱신 — 기본 인자로 묶인 곳도 따라온다). 실험용; 평가 격자 w12·u12는 그대로."""
+    global NR, NL, K_LO, K_HI
+    NR = nr or NR
+    NL = nl or NL
+    if r_lo_pct is not None:
+        K_LO = math.log(r_lo_pct / 3)
+    if r_hi_pct is not None:
+        K_HI = math.log(r_hi_pct / 3)
+    BASIS.update(build_basis())
+
+
+def n_stage1():
+    return 1 + NR + NL + 10
+
+
 def basis_spec():
-    return {"r": {"n": NR, "degree": 3, "range_w": [W_LO, W_HI], "knots": "clamped, 균일", "outside": "끝값 상수"},
+    return {"r": {"n": NR, "degree": 3, "range_w": [K_LO, K_HI], "knots": "clamped, 균일", "outside": "끝값 상수"},
             "l": {"n": NL, "degree": 3, "range_s": [S_LO, 1.0], "knots": "clamped, 균일 (s = sqrt(u))"},
             "w_grid": {"n": 160, "lo": float(BASIS["wg"][0]), "hi": float(BASIS["wg"][-1])},
             "u_grid": {"n": 200, "s_lo": S_LO, "s_hi": 1.0},
@@ -184,11 +201,13 @@ class Stage1Prob:
     param="noncentered" (기본): c = m + L(tau) zeta, zeta ~ N(0, I), L = U diag((e/tau^2 + 1/s^2)^-1/2) (Q = D2'D2/tau^2 + I/s^2의 고유분해).
       사전 c ~ N(m, Q^-1) — 깔때기(tau 대 끝 계수)를 없애려는 표준 비중심화 (Betancourt-Girolami 2015). 중심화판과 tau 둘레 정규화 상수가 다르다."""
     kind = "stage1"
-    n = 26
+    n = None
 
     def __init__(self, param="noncentered"):
         self.param = param
-        self.tau_ix = (16, 17) if param == "centered" else ()
+        self.n = n_stage1()
+        self.it = 1 + NR + NL                     # ln tau_r 위치 (tau_l은 다음)
+        self.tau_ix = (self.it, self.it + 1) if param == "centered" else ()
         self.start = np.concatenate([[M1.WEAK["a"][0]], np.full(NR, CR_MEAN if param == "centered" else 0.0),
                                      np.full(NL, CL_MEAN if param == "centered" else 0.0), [math.log(0.3)] * 2,
                                      [M1.WEAK[n][0] for n in NUIS]])
@@ -206,11 +225,12 @@ class Stage1Prob:
         return m + jnp.asarray(U) @ (z / jnp.sqrt(q))
 
     def theta(self, v):
+        it = self.it
         cr, cl = v[1:1 + NR], v[1 + NR:1 + NR + NL]
         if self.param == "noncentered":
-            cr, cl = self._curve(cr, v[16], "r"), self._curve(cl, v[17], "l")
-        d = {"a": v[0], "cr": cr, "cl": cl, "lnsig0": v[18], "lnrho": v[19]}
-        d.update({n: v[20 + i] for i, n in enumerate(OFF)})
+            cr, cl = self._curve(cr, v[it], "r"), self._curve(cl, v[it + 1], "l")
+        d = {"a": v[0], "cr": cr, "cl": cl, "lnsig0": v[it + 2], "lnrho": v[it + 3]}
+        d.update({n: v[it + 4 + i] for i, n in enumerate(OFF)})
         return d
 
     def logprior(self, v):
@@ -218,14 +238,14 @@ class Stage1Prob:
         th = self.theta(v)
         lp = _nlp(v[0], M1.WEAK["a"][0], M1.WEAK["a"][1])
         if self.param == "centered":
-            lp += _nlp(th["cr"], CR_MEAN, CR_SD) + _rw2(th["cr"], v[16])
-            lp += _nlp(th["cl"], CL_MEAN, CL_SD) + _rw2(th["cl"], v[17])
+            lp += _nlp(th["cr"], CR_MEAN, CR_SD) + _rw2(th["cr"], v[self.it])
+            lp += _nlp(th["cl"], CL_MEAN, CL_SD) + _rw2(th["cl"], v[self.it + 1])
         else:
             lp += _nlp(v[1:1 + NR + NL], 0.0, 1.0)
-        lp += _lntau_prior(v[16]) + _lntau_prior(v[17])
+        lp += _lntau_prior(v[self.it]) + _lntau_prior(v[self.it + 1])
         mu = jnp.asarray([M1.WEAK[n][0] for n in NUIS])
         sd = jnp.asarray([M1.WEAK[n][1] for n in NUIS])
-        return lp + _nlp(v[18:26], mu, sd)
+        return lp + _nlp(v[self.it + 2:], mu, sd)
 
 
 class CellProb:
@@ -285,7 +305,7 @@ def model(obs, prob, pre):
     numpyro.deterministic("v", v)
     th = prob.theta(v)
     if prob.kind == "stage1":
-        numpyro.deterministic("th24", jnp.concatenate([v[:16], v[18:]]))
+        numpyro.deterministic("th24", jnp.concatenate([v[:prob.it], v[prob.it + 2:]]))
         r12, l12 = curves12(th["cr"], th["cl"])
         numpyro.deterministic("r12", r12)
         numpyro.deterministic("l12", l12)
@@ -378,16 +398,17 @@ def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500
 # ---------- 1단계 ----------
 
 def stage1_entry(sm, info, dg, obs):
-    v = sm["v"].reshape(-1, 26)
-    X = np.concatenate([v[:, [0, 18, 19]], v[:, 20:26], sm["r12"].reshape(-1, 12), sm["l12"].reshape(-1, 12)], axis=1)
+    v = sm["v"].reshape(-1, sm["v"].shape[-1])
+    it = v.shape[1] - 10
+    X = np.concatenate([v[:, [0, it + 2, it + 3]], v[:, it + 4:], sm["r12"].reshape(-1, 12), sm["l12"].reshape(-1, 12)], axis=1)
     lc = {f"{q:g}": np.quantile(sm[f"lnC_{q:g}"].ravel(), [0.1, 0.5, 0.9]).tolist() for q in OM.Q_TARGETS}
-    tau_rh = OM.diagnose({"lt": sm["v"][..., 16:18]}, ["lt"])
+    tau_rh = OM.diagnose({"lt": sm["v"][..., it:it + 2]}, ["lt"])
     return {"names": S1_NAMES, "mean": X.mean(0).tolist(), "cov": np.cov(X.T).tolist(),
             "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"], "divergences": info["divergences"], "conv": dg["conv"],
             "secs": info["secs"], "secs_total": round(info["secs"] + info.get("secs_first_try", 0.0) + info["map_secs"], 1),
             "map_secs": info["map_secs"], "retried": info["retried"], "tree_cap_frac": info["tree_cap_frac"],
             "map": info["map"], "n": obs["n"], "N": obs["N"], "counts": obs["counts"],
-            "ln_tau_r_mean": float(v[:, 16].mean()), "ln_tau_l_mean": float(v[:, 17].mean()),
+            "ln_tau_r_mean": float(v[:, it].mean()), "ln_tau_l_mean": float(v[:, it + 1].mean()),
             "tau_rhat": tau_rh["rhat_max"], "tau_ess": tau_rh["ess_min"],
             "eps_mean": float(sm["eps"].mean()), "lnC_q10_50_90": lc}
 
@@ -411,6 +432,9 @@ def _js(o):
 def load_stage1(path):
     with open(path, encoding="utf-8") as f:
         d = json.load(f)
+    b = d.get("header", {}).get("basis")
+    if b:   # 1단계 파일의 기저로 맞춘다 (prior·predict가 같은 곡면을 쓰게)
+        configure(b["r"]["n"], b["l"]["n"], 3 * math.exp(b["r"]["range_w"][0]), 3 * math.exp(b["r"]["range_w"][1]))
     return d["seasons"] if "seasons" in d else d
 
 
@@ -635,7 +659,7 @@ def selftest_numeric():
     out["grad_lnC_finite"] = bool(all(np.isfinite(np.asarray(v)).all() for v in g2.values()))
     # 임의 곡선: scipy 적분과 비교
     cr_n = np.asarray(th2["cr"], float)
-    f_r = lambda w: math.exp(float(np.clip(1, 0, 1) * (_bspl_design([w], W_LO, W_HI, NR) @ cr_n)[0]))
+    f_r = lambda w: math.exp(float(np.clip(1, 0, 1) * (_bspl_design([w], K_LO, K_HI, NR) @ cr_n)[0]))
     errs = []
     Rg = np.asarray(R_grid(th2["cr"])[0])
     for w in (-5.0, -2.0, -0.5, 0.5, 1.5, 3.0):
@@ -679,7 +703,7 @@ def selftest_recovery(work, season="S30", chains=2, warmup=300, samples=300, par
         k = OM.SERVERS.index(r["server"]) if r["server"] in OM.SERVERS else 0
         u = float(np.clip(tt / H, 0.02, 1.0))
         mu, P = surface(th, jnp.asarray([math.log(r["score"])], jnp.float32), jnp.asarray([[u]], jnp.float32))
-        sd = math.sqrt(math.exp(vt[18]) ** 2 + (math.exp(vt[19]) * float(P[k, 0, 0])) ** 2)
+        sd = math.sqrt(math.exp(vt[prob.it + 2]) ** 2 + (math.exp(vt[prob.it + 3]) * float(P[k, 0, 0])) ** 2)
         z = float(mu[k, 0, 0]) + sd * rng.standard_normal()
         p = round(10 ** z, 2)
         if not (0.01 <= p <= 100.0):
@@ -702,9 +726,9 @@ def selftest_recovery(work, season="S30", chains=2, warmup=300, samples=300, par
         rowsq[f"{q:g}"] = {"truth": tr[q], "median": float(med), "lo90": float(lo), "hi90": float(hi), "inside90": ok,
                            "rel_err_C": float(math.exp(med - tr[q]) - 1)}
     r12t, l12t = curves12(th["cr"], th["cl"])
-    v = sm["v"].reshape(-1, 26)
+    v = sm["v"].reshape(-1, prob.n)
     nm = ["a", "lnsig0", "lnrho"] + list(OFF)
-    ix = [0, 18, 19] + list(range(20, 26))
+    ix = [0, prob.it + 2, prob.it + 3] + list(range(prob.it + 4, prob.n))
     par = {}
     for n_, i in zip(nm, ix):
         lo, hi = np.quantile(v[:, i], [0.05, 0.95])
@@ -715,7 +739,7 @@ def selftest_recovery(work, season="S30", chains=2, warmup=300, samples=300, par
     return {"rows": len(new), "per_server": nsrv.tolist(), "lnC": rowsq, "lnC_inside90": f"{ins}/{len(OM.Q_TARGETS)}", "params": par,
             "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"], "divergences": info["divergences"], "secs": info["secs"],
             "map_secs_truth": round(t_map, 1), "map_secs_fit": info["map_secs"], "tree_cap_frac": info["tree_cap_frac"],
-            "tau_true": [math.exp(vt[16]), math.exp(vt[17])], "tau_post_mean": [float(np.exp(v[:, 16]).mean()), float(np.exp(v[:, 17]).mean())]}
+            "tau_true": [math.exp(vt[prob.it]), math.exp(vt[prob.it + 1])], "tau_post_mean": [float(np.exp(v[:, prob.it]).mean()), float(np.exp(v[:, prob.it + 1]).mean())]}
 
 
 def cmd_selftest(a):
@@ -749,6 +773,9 @@ def main():
     s.add_argument("--seasons", required=True)
     s.add_argument("--out", required=True)
     s.add_argument("--draws-dir", default=None)
+    s.add_argument("--n-basis-r", type=int, default=12)
+    s.add_argument("--n-basis-l", type=int, default=12)
+    s.add_argument("--r-range-pct", default="0.1,40", help="r 매듭 범위 하한,상한 (%)")
     s.add_argument("--target-accept", type=float, default=0.9)
     s.add_argument("--param", choices=("centered", "noncentered"), default="noncentered")
     p = sub.add_parser("prior")
@@ -766,6 +793,9 @@ def main():
     q.add_argument("--out", required=True)
     q.add_argument("--prior-cache", default=None)
     a = ap.parse_args()
+    if a.cmd == "stage1":
+        lo, hi = (float(x) for x in a.r_range_pct.split(","))
+        configure(a.n_basis_r, a.n_basis_l, lo, hi)
     if getattr(a, "k", None) not in (None, "all"):
         a.k = int(a.k)
     {"selftest": cmd_selftest, "stage1": cmd_stage1, "prior": cmd_prior, "predict": cmd_predict}[a.cmd](a)
