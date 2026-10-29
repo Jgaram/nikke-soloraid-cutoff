@@ -547,12 +547,25 @@ def _xv(e):
     return np.asarray(e["mean"], float)[ix], np.asarray(e["cov"], float)[np.ix_(ix, ix)]
 
 
+# 가중 함수형 PCA (Ramsay-Silverman 8장, 0/1 가중): 주성분은 BAND(자료가 실제로 있는 구간)에서만 낸다.
+# 끝(r12 0~1·10~11 = 0.1~0.3%·13.5~40%, l12 0~1 = u < 0.089)은 자료가 없어 사후 평균·분산이 사전에 끌려 PC를 지배했다 (2026-10-29).
+BAND_R = list(range(2, 10))
+BAND_L = list(range(2, 12))
+BAND = BAND_R + [12 + i for i in BAND_L]          # 24벡터 안의 위치 (r12 앞 12, l12 뒤 12)
+OUT = [i for i in range(24) if i not in BAND]
+
+
 def pca_window(X, V):
-    """창 안 곡선 벡터 X[J,24], 잡음 공분산 V[J,24,24] -> dict(mu, phi[K,24], lam(스케일 전), lam_scaled, K, sres, share)."""
-    J, D = X.shape
+    """창 안 곡선 벡터 X[J,24], 잡음 공분산 V[J,24,24] -> dict(mu[24], phi[K,24], lam(스케일 전), lam_scaled, K, sres, share(밴드), band_phi).
+    밴드 PACE: S_band = 표본 공분산 - 평균 V_band, K = 양의 고윳값 합의 90%에 처음 닿는 수 (<= 3, <= J-2).
+    밴드 밖 성분은 창 시즌 곡선(평균 뺀 것)을 밴드 점수 xi_jk에 회귀한 값 sum_j d_j,out xi_jk / sum_j xi_jk^2."""
+    J = X.shape[0]
+    D = len(BAND)
     mu = X.mean(0)
-    S = np.cov(X.T, ddof=1).reshape(D, D) if J >= 2 else np.zeros((D, D))
-    S = S - V.mean(0)
+    Xb = X[:, BAND]
+    Vb = V[:, BAND][:, :, BAND]
+    S = np.cov(Xb.T, ddof=1).reshape(D, D) if J >= 2 else np.zeros((D, D))
+    S = S - Vb.mean(0)
     w, Q = np.linalg.eigh(0.5 * (S + S.T))
     o = np.argsort(w)[::-1]
     w, Q = np.clip(w[o], 0, None), Q[:, o]
@@ -562,7 +575,14 @@ def pca_window(X, V):
     m = min(J - 1, D)
     disc = w[K:m] if m > K else np.array([])
     sres = float(disc.mean()) if len(disc) else 1e-4
-    return {"mu": mu, "phi": Q[:, :K].T, "lam": w[:K], "lam_scaled": w[:K] * (1 + 1 / J), "K": K, "sres": sres,
+    e = Q[:, :K].T                                   # [K, band]
+    phi = np.zeros((K, 24))
+    xi = (Xb - mu[BAND]) @ e.T                       # [J, K]
+    for k in range(K):
+        phi[k, BAND] = e[k]
+        den = float((xi[:, k] ** 2).sum())
+        phi[k, OUT] = ((X - mu)[:, OUT] * xi[:, [k]]).sum(0) / den if den > 0 else 0.0
+    return {"mu": mu, "phi": phi, "band_phi": e, "lam": w[:K], "lam_scaled": w[:K] * (1 + 1 / J), "K": K, "sres": sres,
             "share": (w / tot).tolist() if tot > 0 else [0.0] * D, "J": J}
 
 
@@ -586,8 +606,9 @@ def choose_window_pca(stage1, target, ks=(4, 6, 10, "all")):
             prev = [s for s in before if HR.snum(s) < HR.snum(s2)]
             win = prev if k == "all" else prev[-int(k):]
             p = pca_window(np.array([xv[s][0] for s in win]), np.array([xv[s][1] for s in win]))
-            cov = p["phi"].T @ np.diag(p["lam_scaled"]) @ p["phi"] + (p["sres"] + 1e-6) * np.eye(24) + xv[s2][1]
-            tot += _logn(xv[s2][0], p["mu"], cov)
+            e = p["band_phi"]
+            cov = e.T @ np.diag(p["lam_scaled"]) @ e + (p["sres"] + 1e-6) * np.eye(len(BAND)) + xv[s2][1][np.ix_(BAND, BAND)]
+            tot += _logn(xv[s2][0][BAND], p["mu"][BAND], cov)
         scores[str(k)] = tot
     best = max(scores, key=scores.get)
     return (best if best == "all" else int(best)), scores
@@ -613,7 +634,8 @@ def prior(stage1, target, k_fixed=None, cache=None):
     mu_loc, mu_scale, tau_scale = M1.hier_args(NUIS)
     pf = HR.prior_for({s: stage1[s] for s in stage1}, target, NUIS, tau_scale, mu_loc, mu_scale, cache=cache, k_fixed=k)
     return {"target": target, "k": k, "window": win, "J": len(win), "K": p["K"], "lambda": p["lam"], "lambda_scaled": p["lam_scaled"],
-            "sigma2_res": p["sres"], "explained": p["share"][:6], "mean_coef": mean_coef, "phi_coef": phi_coef,
+            "sigma2_res": p["sres"], "explained": p["share"][:6], "band": BAND,
+            "pc_band_loadings": p["band_phi"][:2].round(3), "mean_coef": mean_coef, "phi_coef": phi_coef,
             "scores": scores, "nuisance": {"names": pf["names"], "mean": pf["mean"], "cov": pf["cov"]}, "a": pf["a"],
             "fit_info": pf["fit_info"]}
 
@@ -622,10 +644,13 @@ def cmd_prior(a):
     global CACHE
     CACHE = a.prior_cache
     OM.setup_host(4)
-    p = prior(load_stage1(a.stage1), a.target, a.k, CACHE)
-    if a.out:
-        _atomic_json(a.out, p)
-    print(json.dumps({k: p[k] for k in ("target", "k", "window", "K", "lambda", "explained", "scores", "a")}, default=_js, ensure_ascii=False))
+    s1 = load_stage1(a.stage1)
+    for t in a.target.split(","):
+        p = prior(s1, t, a.k, CACHE)
+        if a.out and "," not in a.target:
+            _atomic_json(a.out, p)
+        print(json.dumps({k: p[k] for k in ("target", "k", "window", "K", "lambda", "explained", "scores", "a", "pc_band_loadings")},
+                         default=_js, ensure_ascii=False), flush=True)
 
 
 # ---------- 칸 예측 ----------
