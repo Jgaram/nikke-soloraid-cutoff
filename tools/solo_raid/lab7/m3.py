@@ -41,9 +41,10 @@ LN10 = math.log(10.0)
 L10_3 = math.log10(3.0)
 OFF = M1.OFF                                            # dJP dGL pJP pGL kJP kGL
 NUIS = ["lnsig0", "lnrho"] + list(OFF)                  # prior_for에 넘기는 8개
-NR, NL = 12, 12   # 2026-10-29 7·8 → 12·12: 기저 7개로는 범위만 바꿔도 3% 컷이 0.57% 움직였다 (P-스플라인은 넉넉한 기저 + 벌점, Eilers·Marx 1996)
+NR, NL = 13, 12   # 2026-10-29 7·8 → 12·12 → r 13 (균일 12 + 3% 매듭, 관측만의 PSIS-LOO 규칙): 기저 7개로는 범위만 바꿔도 3% 컷이 0.57% 움직였다 (P-스플라인은 넉넉한 기저 + 벌점, Eilers·Marx 1996)
 W_LO, W_HI = math.log(0.1 / 3), math.log(40 / 3)        # 평가 격자 w12 범위 (고정)
 K_LO, K_HI = W_LO, W_HI                                 # r 매듭 범위 (configure로 바꿈)
+K_EXTRA = (0.0,)                                        # r 안쪽에 더 끼우는 매듭 (w 값): w=0 = 3% (NR에 센다)
 S_LO = math.sqrt(0.02)
 CR_MEAN, CR_SD = math.log(0.3), 1.5
 CL_MEAN, CL_SD = math.log(0.2 / 0.6), 2.0
@@ -54,10 +55,11 @@ S1_NAMES = ["a", "lnsig0", "lnrho"] + list(OFF) + [f"r{i}" for i in range(12)] +
 
 # ---------- 기저·격자 (numpy) ----------
 
-def _bspl_design(x, lo, hi, n, deg=3):
-    """clamped 균일 매듭 B-스플라인 n개의 설계 행렬 [len(x), n]."""
-    ni = n - deg - 1
-    t = np.concatenate([[lo] * (deg + 1), np.linspace(lo, hi, ni + 2)[1:-1], [hi] * (deg + 1)])
+def _bspl_design(x, lo, hi, n, deg=3, extra=()):
+    """clamped 균일 매듭 B-스플라인 n개의 설계 행렬 [len(x), n]. extra = 균일 매듭에 더 끼우는 안쪽 매듭 (실험용; n에 센다)."""
+    ni = n - deg - 1 - len(extra)
+    inner = np.sort(np.concatenate([np.linspace(lo, hi, ni + 2)[1:-1], np.asarray(extra, float)]))
+    t = np.concatenate([[lo] * (deg + 1), inner, [hi] * (deg + 1)])
     x = np.clip(np.asarray(x, float), lo, hi)
     out = np.zeros((len(x), n))
     for j in range(n):
@@ -75,17 +77,19 @@ def build_basis():
     i0 = int(np.clip(np.searchsorted(wg, 0.0) - 1, 0, len(wg) - 2))
     f0 = float((0.0 - wg[i0]) / (wg[i0 + 1] - wg[i0]))
     return {"wg": wg, "sg": sg, "w12": w12, "s12": s12, "u12": s12 ** 2,
-            "Brf": _bspl_design(wg, K_LO, K_HI, NR), "Blf": _bspl_design(sg, S_LO, 1.0, NL),
-            "Br12": _bspl_design(w12, K_LO, K_HI, NR), "Bl12": _bspl_design(s12, S_LO, 1.0, NL),
+            "Brf": _bspl_design(wg, K_LO, K_HI, NR, extra=K_EXTRA), "Blf": _bspl_design(sg, S_LO, 1.0, NL),
+            "Br12": _bspl_design(w12, K_LO, K_HI, NR, extra=K_EXTRA), "Bl12": _bspl_design(s12, S_LO, 1.0, NL),
             "dw": float(wg[1] - wg[0]), "ds": float(sg[1] - sg[0]), "i0": i0, "f0": f0}
 
 
 BASIS = build_basis()
 
 
-def configure(nr=None, nl=None, r_lo_pct=None, r_hi_pct=None):
+def configure(nr=None, nl=None, r_lo_pct=None, r_hi_pct=None, r_extra=None):
     """기저 개수·r 매듭 범위(% 단위)를 바꾼다 (BASIS를 제자리에서 갱신 — 기본 인자로 묶인 곳도 따라온다). 실험용; 평가 격자 w12·u12는 그대로."""
-    global NR, NL, K_LO, K_HI
+    global NR, NL, K_LO, K_HI, K_EXTRA
+    if r_extra is not None:
+        K_EXTRA = tuple(r_extra)
     NR = nr or NR
     NL = nl or NL
     if r_lo_pct is not None:
@@ -100,7 +104,7 @@ def n_stage1():
 
 
 def basis_spec():
-    return {"r": {"n": NR, "degree": 3, "range_w": [K_LO, K_HI], "knots": "clamped, 균일", "outside": "끝값 상수"},
+    return {"r": {"n": NR, "degree": 3, "range_w": [K_LO, K_HI], "extra_knots_w": list(K_EXTRA), "knots": "clamped, 균일", "outside": "끝값 상수"},
             "l": {"n": NL, "degree": 3, "range_s": [S_LO, 1.0], "knots": "clamped, 균일 (s = sqrt(u))"},
             "w_grid": {"n": 160, "lo": float(BASIS["wg"][0]), "hi": float(BASIS["wg"][-1])},
             "u_grid": {"n": 200, "s_lo": S_LO, "s_hi": 1.0},
@@ -533,7 +537,8 @@ def load_stage1(path):
         d = json.load(f)
     b = d.get("header", {}).get("basis")
     if b:   # 1단계 파일의 기저로 맞춘다 (prior·predict가 같은 곡면을 쓰게)
-        configure(b["r"]["n"], b["l"]["n"], 3 * math.exp(b["r"]["range_w"][0]), 3 * math.exp(b["r"]["range_w"][1]))
+        configure(b["r"]["n"], b["l"]["n"], 3 * math.exp(b["r"]["range_w"][0]), 3 * math.exp(b["r"]["range_w"][1]),
+                  r_extra=b["r"].get("extra_knots_w", []))
     return d["seasons"] if "seasons" in d else d
 
 
@@ -1108,7 +1113,8 @@ def main():
     s.add_argument("--seasons", required=True)
     s.add_argument("--out", required=True)
     s.add_argument("--draws-dir", default=None)
-    s.add_argument("--n-basis-r", type=int, default=12)
+    s.add_argument("--n-basis-r", type=int, default=None, help="r 기저 총수 (기본 12 + 끼운 매듭 수)")
+    s.add_argument("--r-extra-knots", default="0", help="r에 끼우는 안쪽 매듭 w 값(쉼표). 기본 0 = 3%%, 빈 문자열 = 없음")
     s.add_argument("--n-basis-l", type=int, default=12)
     s.add_argument("--r-range-pct", default="0.1,40", help="r 매듭 범위 하한,상한 (%)")
     s.add_argument("--method", choices=("laplace", "nuts"), default="laplace")
@@ -1139,7 +1145,8 @@ def main():
     a = ap.parse_args()
     if a.cmd == "stage1":
         lo, hi = (float(x) for x in a.r_range_pct.split(","))
-        configure(a.n_basis_r, a.n_basis_l, lo, hi)
+        ex = [float(x) for x in a.r_extra_knots.split(',') if x.strip() != '']
+        configure(a.n_basis_r or 12 + len(ex), a.n_basis_l, lo, hi, r_extra=ex)
     if getattr(a, "k", None) not in (None, "all"):
         a.k = int(a.k)
     {"selftest": cmd_selftest, "stage1": cmd_stage1, "prior": cmd_prior, "predict": cmd_predict, "check43": cmd_check43}[a.cmd](a)
