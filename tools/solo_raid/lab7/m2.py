@@ -12,6 +12,19 @@
   m2.py predict --obs W/obs7 --seasons S42 --T 48 --m2-stage1 r7/stage1_M2_D1.json --m1-stage1 r7/stage1_M1_D1.json [--m1-hier r7/hier_M1_D1.json] --out 예측.json [--cache DIR --log FILE --resume]
             # 칸마다 score.py 예측 꼴 cells + fits (칸별 conv·시간·depth_dist). 사전은 맞힐 시즌 앞 시즌의 1단계만.
 
+칸 예측 (라플라스, C4 — 조율 세션 2026-10-30. 기본 방법. 칸당 NUTS가 10분 안에 수렴하지 못해 라플라스로 낸다)
+  python3 -I tools/solo_raid/lab7/m2.py predict --method laplace --obs W/obs7 --seasons S22-S42 --T all --m2-stage1 r7/stage1_M2_D1.json --m1-stage1 r7/stage1_M1_D1.json \
+      [--m1-hier r7/hier_M1_D1.json] --out lap_0.05.json [--cache DIR --log FILE --resume] [--eig-floor 0.05 --lnm-anchor 0.15 --draws 4000 --K 32]
+  # 시작점 8개 MAP 최고 봉우리 + 헤세 고윳값 바닥(--eig-floor, 기본 0.05) + lnm 재매개화(--lnm-anchor, 기본 0.15; none이면 끔) -> v 공간 정규 뽑기 --draws개 -> lnC_q -> score.py 예측 꼴.
+  # 칸 기록(fits)에 method·eig_floor·anchor·map_logpost·hess_min_eig·hess_max_eig(바닥 전)·n_floor(바닥에 걸린 고윳값 수)·secs. cells.conv = 최고 봉우리를 시작점 2개 이상이 되찾고 헤세 최소 고윳값 > 0 (score.py는 conv를 쓰지 않음).
+  # 민감도(견줌 칸 6개만): --eig-floor 0.01 / 0.2 로 따로 내 compare-laplace에 같이 넣는다.
+
+기준 MCMC (도우미 세션용 — 견줌 칸 6개: S30·S42 x T24·48·96, 4사슬 x (2,000 + 2,000))
+  python3 -I tools/solo_raid/lab7/m2.py predict --method nuts --warmup 2000 --samples 2000 --chains 4 --K 32 --obs W/obs7 --seasons S30,S42 --T 24,48,96 \
+      --m2-stage1 r7/stage1_M2_D1.json --m1-stage1 r7/stage1_M1_D1.json [--m1-hier ...] --out ref.json [--cache DIR --log FILE --resume]    # 칸당 수렴 진단(rhat_max·ess_min·conv)이 fits에 적힌다
+  python3 -I tools/solo_raid/lab7/m2.py compare-laplace --ref ref.json --lap lap_0.05.json [lap_0.01.json lap_0.2.json] --out cmp.json
+  # 칸마다 lnC_q 중앙 차(%)·80% 구간 폭 비(라플라스 / 기준)·기준 R-hat/ESS (R-hat >= 1.01이면 「기준 불확실」). 요약에 「라플라스가 구간을 좁히는 쪽인지」.
+
 도우미 세션용 명령 (m2.py·관측 층을 고치지 않고 돌리기만 한다. 코드 판은 조율 세션이 알려 준 커밋 그대로. W = 세션 임시 작업 폴더, 한 컨테이너 4코어)
   pip install -r tools/solo_raid/lab7/requirements.txt                                          # 약 1분 40초
   python3 -I tools/solo_raid/lab7/obs_table.py build --out $W/obs7 --full                       # 끝난 시즌 전체 관측 표, 약 8초 -> $W/obs7/full/S{n}.jsonl.gz
@@ -995,7 +1008,7 @@ def theta_surface_fn(G, mean):
 
 
 def fit_one(rows, H, season, err, mean, mb, K=16, delay_key=None, seed=0, warmup=1000, samples=1000, retry_warmup=1500, max_tree_depth=10,
-            prior=None, hyper=None, stage1=True, keep_ll=True, anchor=None, eig_floor=1e-6):
+            prior=None, hyper=None, stage1=True, keep_ll=True, anchor=None, eig_floor=1e-6, chains=4):
     """한 칸 맞춤: prepare -> 시작점 8개 MAP(최고 봉우리가 둘 미만이면 8개 더) -> fit_with_retry. m1.fit_one과 같은 설정.
     1단계 (기본): prior = 약한 사전, hyper = None (초모수 표집), stage1=True (끝난 시즌 전체 표 — 종료 뒤 화면 줄 포함).
     칸 예측 (cmd_predict): prior = hier.prior_for 꼴, hyper = 고정 초모수 dict, stage1=False, keep_ll=False."""
@@ -1020,10 +1033,40 @@ def fit_one(rows, H, season, err, mean, mb, K=16, delay_key=None, seed=0, warmup
     if anchor is not None:
         kw["anchor"] = anchor
     sm, info, dg = OM.fit_with_retry(model, kw, names=watch, seed=seed, init=init, max_tree_depth=max_tree_depth,
-                                     warmup=warmup, samples=samples, retry_warmup=retry_warmup)
+                                     warmup=warmup, samples=samples, retry_warmup=retry_warmup, chains=chains)
     info["map_secs"] = round(map_secs, 1)
     return {"samples": sm, "info": info, "diag": dg, "obs": obs, "jobs": jobs, "pre": pre, "modes": pre_modes, "n_starts": len(modes),
             "n_best_repeat": rep, "map": pre["info"], "mb": mb, "watch": watch}
+
+
+def laplace_cell(rows, H, season, err, mean, mb, K=32, delay_key=None, prior=None, hyper=None, anchor=None, eig_floor=0.05, draws=4000, seed=0):
+    """칸 예측 라플라스 (조율 세션 C4, 2026-10-30): 시작점 8개 MAP 중 최고 봉우리 + 헤세 고윳값 바닥 eig_floor -> v 공간 정규 뽑기 `draws`개 -> lnC_q.
+    -> dict(draws {q: lnC[draws]}, ok, info, obs). 최고 봉우리 하나만 쓴다 (봉우리 혼합 아님)."""
+    obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=False)
+    jobs = OM.to_jax(obs)
+    prior = prior or {"kind": "weak"}
+    t0 = time.time()
+    modes = multistart_map(jobs, prior, hyper, mean, mb=mb, anchor=anchor, eig_floor=eig_floor)
+    pre = modes[0]
+    map_secs = time.time() - t0
+    n = len(pre["loc"])
+    cw = np.linalg.eigvalsh(pre["cov"])                       # cov 고윳값 = 1 / max(헤세 고윳값, 바닥): 바닥에 걸린 수 = 1/바닥인 것의 수
+    n_floor = int((cw >= (1.0 - 1e-6) / eig_floor).sum())
+    rng = np.random.default_rng(seed)
+    v = pre["loc"] + rng.standard_normal((draws, n)) @ pre["chol"].T
+    t1 = time.time()
+    lc = _draws_lnc(v, hyper, mean, mb, anchor)
+    names, _ = _v_layout(hyper, grids(*mb))
+    info = {"map_secs": round(map_secs, 1), "draw_secs": round(time.time() - t1, 1), "n_starts": len(modes),
+            "map_logpost": -float(pre["info"]["fun"]), "map_ok": bool(pre["info"]["ok"]),
+            "n_best_repeat": sum(1 for p in modes if p["info"]["fun"] - modes[0]["info"]["fun"] < 0.5),
+            "modes_logpost": [round(-float(p["info"]["fun"]), 3) for p in modes],
+            "hess_min_eig": pre["info"]["min_eig"], "hess_max_eig": pre["info"]["max_eig"], "n_floor": n_floor,
+            "n_saddle": pre["info"]["n_saddle"], "n_newton": pre["info"]["n_newton"], "n_v": n,
+            "core": {nm: [float(v[:, i].mean()), float(v[:, i].std())] for i, nm in enumerate(names[:1 + len(CORE)])}}
+    # conv(= cells.conv): 최고 봉우리를 시작점 2개 이상이 되찾았고 헤세 최소 고윳값이 양수 (바닥 전). L-BFGS success 깃발은 마지막 단계가 maxiter에서 끝나도 거짓이라 쓰지 않는다 (map_ok에 따로 적음).
+    ok = bool(info["n_best_repeat"] >= 2 and info["hess_min_eig"] > 0)
+    return {"draws": lc, "ok": ok, "info": info, "obs": obs}
 
 
 def basis_check(sm, mb, G=None):
@@ -1357,7 +1400,10 @@ def _atomic_dump(obj, path):
 
 def cmd_predict(a):
     import obs_table as O
-    OM.setup_host(4)
+    method = a.method
+    if a.eig_floor is None:
+        a.eig_floor = 0.05 if method == "laplace" else 1e-6
+    OM.setup_host(a.chains if method == "nuts" else 4)
     err = OM.load_err()
     with open(a.m1_stage1, encoding="utf-8") as f:
         m1j = json.load(f)
@@ -1367,20 +1413,20 @@ def cmd_predict(a):
     if a.m1_hier:
         with open(a.m1_hier, encoding="utf-8") as f:
             hj = json.load(f)
-    cfg = {"warmup": a.warmup, "samples": a.samples, "retry_warmup": a.retry_warmup, "max_tree_depth": a.max_tree_depth, "K": a.K, "chains": 4,
-           "target_accept": 0.9, "retry_target_accept": 0.95}
-    if a.lnm_anchor is not None:
-        cfg["lnm_anchor"] = a.lnm_anchor     # 선택 인자를 줬을 때만 적는다 (기본 설정 dict는 그대로)
-    if a.eig_floor != 1e-6:
-        cfg["eig_floor"] = a.eig_floor
+    if method == "laplace":
+        cfg = {"method": "laplace", "K": a.K, "draws": a.draws, "n_starts": 8, "lnm_anchor": a.lnm_anchor, "eig_floor": a.eig_floor}
+    else:
+        cfg = {"method": "nuts", "warmup": a.warmup, "samples": a.samples, "retry_warmup": a.retry_warmup, "max_tree_depth": a.max_tree_depth, "K": a.K, "chains": a.chains,
+               "target_accept": 0.9, "retry_target_accept": 0.95, "lnm_anchor": a.lnm_anchor, "eig_floor": a.eig_floor}
     inputs = {"m2_stage1": _sha12(a.m2_stage1), "m1_stage1": _sha12(a.m1_stage1)}
     if a.m1_hier:
         inputs["m1_hier"] = _sha12(a.m1_hier)
     out = {"about": ("M2 HSGP 곡면 칸 예측: 맞힐 시즌 s의 T 절단 관측 표로, 사전은 앞 시즌 1단계만 (M1 2단계 사전 평균 -> 평균 곡선 r̄·ℓ̄, M2 자신의 2단계 -> 모수 사전, "
-                     "초모수는 창 안 시즌 1단계 사후 중앙의 중앙으로 고정). f1·f2 계수 N(0,1) 비중심, 시작점 8개 MAP, NUTS 4 x (예열+뽑기), 수렴 못 하면 0.95·긴 예열로 한 번 더. "
-                     "conv false인 칸도 값은 낸다 (F로 채우지 않음). fits = 칸별 수렴·시간·나무 깊이 분포."),
+                     "초모수는 창 안 시즌 1단계 사후 중앙의 중앙으로 고정). f1·f2 계수 N(0,1) 비중심, lnm 재매개화(lnm_anchor). "
+                     "method=laplace(조율 세션 C4): 시작점 8개 MAP 최고 봉우리 + 헤세 고윳값 바닥 eig_floor -> v 공간 정규 뽑기 draws개 -> lnC_q, cells.conv = 최고 봉우리 되찾음(>=2) + 헤세 최소 고윳값 > 0. "
+                     "method=nuts(기준 MCMC): NUTS chains x (예열+뽑기), 수렴 못 하면 0.95·긴 예열로 한 번 더, conv false인 칸도 값은 낸다 (F로 채우지 않음). fits = 칸별 기록."),
            "method": "M2", "data_ver": C.DATA_VER,
-           "made": {"tool_head": M1._git_head(), "tool_dirty": _git_dirty(), "cmd": "m2.py predict --seasons %s --T %s" % (a.seasons, a.T), "inputs": inputs},
+           "made": {"tool_head": M1._git_head(), "tool_dirty": _git_dirty(), "cmd": "m2.py predict --method %s --seasons %s --T %s" % (method, a.seasons, a.T), "inputs": inputs},
            "config": cfg, "m1_prior_source": "hier 파일" if hj is not None else "M1 1단계 파일에서 hier.prior_for", "cells": [], "fits": []}
     if a.resume and os.path.exists(a.out):
         with open(a.out, encoding="utf-8") as f:
@@ -1426,24 +1472,41 @@ def cmd_predict(a):
             try:
                 head, rows = O.read_cell(path)
                 dk = s if _snum(s) >= 21 else None
-                r = fit_one(rows, head["H"], s, err, pr["mean"], pr["mb"], K=a.K, delay_key=dk, seed=0, warmup=a.warmup, samples=a.samples,
-                            retry_warmup=a.retry_warmup, max_tree_depth=a.max_tree_depth, prior=pr["prior"], hyper=pr["hyper"], stage1=False, keep_ll=False,
-                            anchor=a.lnm_anchor, eig_floor=a.eig_floor)
-                sm, info, dg, obs = r["samples"], r["info"], r["diag"], r["obs"]
-                conv = bool(dg["conv"])
-                cells = OM.pred_cells(s, T, {q: sm[f"lnC_{q:g}"] for q in OM.Q_TARGETS}, conv)
-                for c in cells:
-                    c["secs"] = round(time.time() - t0, 1)
-                rec.update({"n_rows": obs["n"], "N": obs["N"], "counts": obs["counts"], "conv": conv, "secs": round(time.time() - t0, 1), "map_secs": info["map_secs"],
-                            "nuts_secs": info["secs"], "retried": info["retried"], "divergences": info["divergences"], "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"],
-                            "worst": {"rhat": sorted(((v["rhat"], k) for k, v in dg["per"].items()), reverse=True)[:3], "ess": sorted((v["ess"], k) for k, v in dg["per"].items())[:3]},
-                            "depth_dist": info.get("depth_dist"), "tree_cap_frac": info.get("tree_cap_frac"), "mean_leapfrog": info.get("mean_leapfrog"),
-                            "n_starts": r["n_starts"], "n_best_repeat": r["n_best_repeat"],
-                            "lnC_q": {f"{q:g}": np.quantile(sm[f"lnC_{q:g}"].reshape(-1), [0.025, 0.1, 0.5, 0.9, 0.975]).tolist() for q in OM.Q_TARGETS}})
-                out["cells"] = [c for c in out["cells"] if not (c["season"] == s and c["T"] == float(T))] + cells
-                log(f"{s} T{T:g}: {rec['secs']:.0f}초 (map {rec['map_secs']}s nuts {rec['nuts_secs']}s) 줄 {obs['n']} conv {conv} rhat {dg['rhat_max']:.3f} ess {dg['ess_min']:.0f} "
-                    f"div {info['divergences']} retried {info['retried']} depth {info.get('depth_dist')} 컷(1·3·10%) " +
-                    "/".join(f"{math.exp(rec['lnC_q'][q][2]):.1f}" for q in ("1", "3", "10")))
+                if method == "laplace":
+                    r = laplace_cell(rows, head["H"], s, err, pr["mean"], pr["mb"], K=a.K, delay_key=dk, prior=pr["prior"], hyper=pr["hyper"],
+                                     anchor=a.lnm_anchor, eig_floor=a.eig_floor, draws=a.draws, seed=0)
+                    obs, li = r["obs"], r["info"]
+                    cells = OM.pred_cells(s, T, r["draws"], r["ok"])
+                    for c in cells:
+                        c["secs"] = round(time.time() - t0, 1)
+                        c["method"] = "laplace"
+                    rec.update({"method": "laplace", "n_rows": obs["n"], "N": obs["N"], "counts": obs["counts"], "conv": bool(r["ok"]), "secs": round(time.time() - t0, 1),
+                                "eig_floor": a.eig_floor, "anchor": a.lnm_anchor, "draws": a.draws, **li,
+                                "lnC_q": {f"{q:g}": np.quantile(r["draws"][q], [0.025, 0.1, 0.5, 0.9, 0.975]).tolist() for q in OM.Q_TARGETS}})
+                    out["cells"] = [c for c in out["cells"] if not (c["season"] == s and c["T"] == float(T))] + cells
+                    log(f"{s} T{T:g}: {rec['secs']:.0f}초 (map {li['map_secs']}s) 줄 {obs['n']} conv {rec['conv']} logpost {li['map_logpost']:.2f} 같은 봉우리 {li['n_best_repeat']}/{li['n_starts']} "
+                        f"헤세 고윳값 {li['hess_min_eig']:.3g}~{li['hess_max_eig']:.3g} 바닥 {li['n_floor']}개 컷(1·3·10%) " +
+                        "/".join(f"{math.exp(rec['lnC_q'][q][2]):.1f}" for q in ("1", "3", "10")))
+                else:
+                    r = fit_one(rows, head["H"], s, err, pr["mean"], pr["mb"], K=a.K, delay_key=dk, seed=0, warmup=a.warmup, samples=a.samples,
+                                retry_warmup=a.retry_warmup, max_tree_depth=a.max_tree_depth, prior=pr["prior"], hyper=pr["hyper"], stage1=False, keep_ll=False,
+                                anchor=a.lnm_anchor, eig_floor=a.eig_floor, chains=a.chains)
+                    sm, info, dg, obs = r["samples"], r["info"], r["diag"], r["obs"]
+                    conv = bool(dg["conv"])
+                    cells = OM.pred_cells(s, T, {q: sm[f"lnC_{q:g}"] for q in OM.Q_TARGETS}, conv)
+                    for c in cells:
+                        c["secs"] = round(time.time() - t0, 1)
+                        c["method"] = "nuts"
+                    rec.update({"method": "nuts", "n_rows": obs["n"], "N": obs["N"], "counts": obs["counts"], "conv": conv, "secs": round(time.time() - t0, 1), "map_secs": info["map_secs"],
+                                "nuts_secs": info["secs"], "retried": info["retried"], "divergences": info["divergences"], "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"],
+                                "worst": {"rhat": sorted(((v["rhat"], k) for k, v in dg["per"].items()), reverse=True)[:3], "ess": sorted((v["ess"], k) for k, v in dg["per"].items())[:3]},
+                                "depth_dist": info.get("depth_dist"), "tree_cap_frac": info.get("tree_cap_frac"), "mean_leapfrog": info.get("mean_leapfrog"),
+                                "n_starts": r["n_starts"], "n_best_repeat": r["n_best_repeat"],
+                                "lnC_q": {f"{q:g}": np.quantile(sm[f"lnC_{q:g}"].reshape(-1), [0.025, 0.1, 0.5, 0.9, 0.975]).tolist() for q in OM.Q_TARGETS}})
+                    out["cells"] = [c for c in out["cells"] if not (c["season"] == s and c["T"] == float(T))] + cells
+                    log(f"{s} T{T:g}: {rec['secs']:.0f}초 (map {rec['map_secs']}s nuts {rec['nuts_secs']}s) 줄 {obs['n']} conv {conv} rhat {dg['rhat_max']:.3f} ess {dg['ess_min']:.0f} "
+                        f"div {info['divergences']} retried {info['retried']} depth {info.get('depth_dist')} 컷(1·3·10%) " +
+                        "/".join(f"{math.exp(rec['lnC_q'][q][2]):.1f}" for q in ("1", "3", "10")))
             except Exception as e:  # noqa
                 rec["error"] = f"{type(e).__name__}: {e}"
                 rec["secs"] = round(time.time() - t0, 1)
@@ -1452,6 +1515,55 @@ def cmd_predict(a):
             _atomic_dump(out, a.out)
     n = len(out["fits"])
     log(f"predict 끝: 칸 {n}개, 수렴 {sum(1 for f in out['fits'] if f.get('conv'))}/{n}, 오류 {sum(1 for f in out['fits'] if f.get('error'))} -> {a.out}")
+
+
+def cmd_compare_laplace(a):
+    """견줌 (C4): 같은 칸마다 라플라스 대 기준 MCMC의 lnC 중앙 차(%)·80% 구간 폭 비(라플라스 / 기준). 기준 R-hat >= 1.01이면 「기준 불확실」."""
+    def load(path):
+        with open(path, encoding="utf-8") as f:
+            j = json.load(f)
+        return j, {(r["season"], r["T"]): r for r in j["fits"] if not r.get("error") and r.get("lnC_q")}
+    rj, ref = load(a.ref)
+    out = {"about": ("M2 칸 예측 라플라스 대 기준 MCMC (C4 견줌). 중앙 차 = exp(lnC 중앙_라 - 중앙_기) - 1 (%%), 폭 비 = (80%% 구간 lnC 폭 라플라스) / (기준). "
+                     "폭 비 < 1이면 라플라스가 구간을 좁힌다. 기준 R-hat >= %.2f이면 ref_uncertain (기준 자체가 불확실)." % a.rhat_flag),
+           "ref": {"file": os.path.basename(a.ref), "tool_head": rj.get("made", {}).get("tool_head"), "config": rj.get("config")}, "laps": {}}
+    for lp in a.lap:
+        lj, lap = load(lp)
+        cfgl = lj.get("config", {})
+        rows = []
+        for key in sorted(set(ref) & set(lap)):
+            r, l = ref[key], lap[key]
+            for q in r["lnC_q"]:
+                if q not in l["lnC_q"]:
+                    continue
+                rq, lq = r["lnC_q"][q], l["lnC_q"][q]
+                wr, wl = rq[3] - rq[1], lq[3] - lq[1]
+                rows.append({"season": key[0], "T": key[1], "pct": float(q), "med_diff_pct": round(100 * (math.exp(lq[2] - rq[2]) - 1), 3),
+                             "w80_ref_pct": round(100 * (math.exp(wr) - 1), 3), "w80_lap_pct": round(100 * (math.exp(wl) - 1), 3), "w80_ratio": round(wl / wr, 3) if wr > 0 else None,
+                             "ref_rhat": r.get("rhat_max"), "ref_ess": r.get("ess_min"), "ref_conv": r.get("conv"),
+                             "ref_uncertain": bool((r.get("rhat_max") or 9) >= a.rhat_flag), "lap_secs": l.get("secs")})
+
+        def summ(rs):
+            if not rs:
+                return None
+            ratios = [x["w80_ratio"] for x in rs if x["w80_ratio"] is not None]
+            return {"n": len(rs), "med_abs_diff_pct": round(float(np.median([abs(x["med_diff_pct"]) for x in rs])), 3),
+                    "max_abs_diff_pct": round(max(abs(x["med_diff_pct"]) for x in rs), 3),
+                    "w80_ratio_median": round(float(np.median(ratios)), 3), "w80_ratio_min": min(ratios), "w80_ratio_max": max(ratios),
+                    "frac_narrower": round(sum(1 for r_ in ratios if r_ < 1) / len(ratios), 3), "frac_narrower_by_10pct": round(sum(1 for r_ in ratios if r_ < 0.9) / len(ratios), 3)}
+        focus = [x for x in rows if x["pct"] in (1.0, 3.0, 10.0)]
+        verdict = None
+        sm_ = summ(focus)
+        if sm_:
+            verdict = ("라플라스가 구간을 좁히는 쪽" if sm_["w80_ratio_median"] < 0.9 else "라플라스가 구간을 넓히는 쪽" if sm_["w80_ratio_median"] > 1.1 else "구간 폭 비슷함 (0.9~1.1)")
+        out["laps"][os.path.basename(lp)] = {"eig_floor": cfgl.get("eig_floor"), "anchor": cfgl.get("lnm_anchor"), "n_cells": len(set(ref) & set(lap)),
+                                             "summary_1_3_10": sm_, "summary_all_q": summ(rows), "summary_1_3_10_ref_certain": summ([x for x in focus if not x["ref_uncertain"]]),
+                                             "n_ref_uncertain_cells": len({(x["season"], x["T"]) for x in rows if x["ref_uncertain"]}), "verdict_1_3_10": verdict, "rows": rows}
+        print(f"{os.path.basename(lp)} (바닥 {cfgl.get('eig_floor')}): 칸 {out['laps'][os.path.basename(lp)]['n_cells']}개, 1·3·10% {verdict}, 요약 {sm_}, 기준 불확실 칸 {out['laps'][os.path.basename(lp)]['n_ref_uncertain_cells']}")
+        for x in focus:
+            print(f"   {x['season']} T{x['T']:g} {x['pct']:g}%: 중앙 차 {x['med_diff_pct']:+.2f}% 폭(80%) 기준 {x['w80_ref_pct']:.2f}% 라 {x['w80_lap_pct']:.2f}% 비 {x['w80_ratio']} "
+                  f"기준 R-hat {x['ref_rhat']} ESS {x['ref_ess']}{' [기준 불확실]' if x['ref_uncertain'] else ''}")
+    _atomic_dump(out, a.out)
 
 
 def main():
@@ -1501,13 +1613,22 @@ def main():
     pd.add_argument("--cache", default=None, help="hier 창 적합 캐시 폴더 (디스크 npz)")
     pd.add_argument("--log", default=None, help="진행 기록 파일 (덧붙임)")
     pd.add_argument("--resume", action="store_true")
-    pd.add_argument("--warmup", type=int, default=500)
-    pd.add_argument("--samples", type=int, default=500)
+    pd.add_argument("--method", choices=["laplace", "nuts"], default="laplace", help="laplace(기본, C4): 시작점 8개 MAP + 고윳값 바닥 + 정규 뽑기. nuts: 기준 MCMC")
+    pd.add_argument("--draws", type=int, default=4000, help="laplace: 정규 뽑기 수")
+    pd.add_argument("--chains", type=int, default=4, help="nuts: 사슬 수 (기준은 4)")
+    pd.add_argument("--warmup", type=int, default=500, help="nuts: 예열 (기준 MCMC는 2000)")
+    pd.add_argument("--samples", type=int, default=500, help="nuts: 뽑기 (기준 MCMC는 2000)")
     pd.add_argument("--retry-warmup", type=int, default=1000)
     pd.add_argument("--max-tree-depth", type=int, default=10)
     pd.add_argument("--K", type=int, default=32, help="구적 노드 수 (명세 7절 5, M1 세션 kcheck_D1.json: T 절단 칸은 32). stage1의 K=16은 그대로")
-    pd.add_argument("--lnm-anchor", type=float, default=None, help="(선택, 기본 끔) lnm 재매개화 기준 u: v의 lnm 자리가 lnm + ln(dP 가중 평균 exp(f2), u >= 기준)이 된다. 모형은 그대로, NUTS 기하만 바뀐다")
-    pd.add_argument("--eig-floor", type=float, default=1e-6, help="라플라스 헤세 고윳값 바닥 (기본 1e-6 = 옛 동작)")
+    pd.add_argument("--lnm-anchor", type=lambda x: None if x.lower() == "none" else float(x), default=0.15,
+                    help="lnm 재매개화 기준 u (기본 0.15, none이면 끔): v의 lnm 자리가 lnm + ln(dP 가중 평균 exp(f2), u >= 기준)이 된다. 모형 밀도는 그대로, MAP·라플라스·NUTS 기하만 바뀐다")
+    pd.add_argument("--eig-floor", type=float, default=None, help="라플라스 헤세 고윳값 바닥 (기본: laplace 0.05, nuts 1e-6 = 옛 동작)")
+    cl = sp.add_parser("compare-laplace")
+    cl.add_argument("--ref", required=True, help="기준 MCMC 예측 파일 (predict --method nuts)")
+    cl.add_argument("--lap", nargs="+", required=True, help="라플라스 예측 파일들 (predict --method laplace; 바닥 0.05 먼저, 민감도 0.01·0.2는 뒤에)")
+    cl.add_argument("--out", required=True)
+    cl.add_argument("--rhat-flag", type=float, default=1.01, help="기준 R-hat이 이 이상이면 「기준 불확실」")
     t = sp.add_parser("test")
     t.add_argument("--work", default=None)
     t.add_argument("--m1-stage1", default=None)
@@ -1532,6 +1653,9 @@ def main():
         return
     elif a.cmd == "predict":
         cmd_predict(a)
+        return
+    elif a.cmd == "compare-laplace":
+        cmd_compare_laplace(a)
         return
     elif a.cmd == "test" and a.which == "m1match":
         r = test_m1match(a.m1_stage1, a.season)
