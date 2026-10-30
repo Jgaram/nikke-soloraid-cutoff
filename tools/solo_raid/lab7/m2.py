@@ -1566,6 +1566,352 @@ def cmd_compare_laplace(a):
     _atomic_dump(out, a.out)
 
 
+def cmd_merge_pred(a):
+    """칸 예측 파일 합치기 (시즌별 pred_M2_tune_D1_S*.json -> 하나). 코드 판·설정·입력 sha1·자료 판이 같아야 하고 시즌이 겹치면 오류. 요약(칸 수·conv·칸당 시간)을 찍는다."""
+    js = []
+    for p in a.inputs:
+        with open(p, encoding="utf-8") as f:
+            js.append(json.load(f))
+    h = js[0]
+    for p, j in zip(a.inputs, js):
+        for k in ("data_ver", "method", "config", "m1_prior_source"):
+            if j.get(k) != h.get(k):
+                raise SystemExit(f"{p}: {k}가 다르다")
+        if j["made"]["tool_head"] != h["made"]["tool_head"] or j["made"]["inputs"] != h["made"]["inputs"] or j["made"].get("tool_dirty") != h["made"].get("tool_dirty"):
+            raise SystemExit(f"{p}: 코드 판·입력·dirty가 다르다")
+    seen = {}
+    for p, j in zip(a.inputs, js):
+        for c in j["cells"]:
+            seen.setdefault(c["season"], set()).add(os.path.basename(p))
+        for fz in j["fits"]:
+            seen.setdefault(fz["season"], set()).add(os.path.basename(p))
+    dup = {k: sorted(v) for k, v in seen.items() if len(v) > 1}
+    if dup:
+        raise SystemExit(f"시즌이 파일 여러 개에 있다: {dup}")
+    cells = [c for j in js for c in j["cells"]]
+    fits = [x for j in js for x in j["fits"]]
+    if any(x.get("error") for x in fits):
+        raise SystemExit("오류 칸이 있다: %s" % [(x["season"], x["T"]) for x in fits if x.get("error")])
+    out = {"about": h["about"], "method": "M2", "data_ver": h["data_ver"],
+           "made": {"tool_head": h["made"]["tool_head"], "tool_dirty": h["made"].get("tool_dirty"), "inputs": h["made"]["inputs"],
+                    "cmd": "m2.py merge-pred (각 파일 cmd: " + "; ".join(j["made"]["cmd"] for j in js) + ")", "parts": {os.path.basename(p): _sha12(p) for p in a.inputs}},
+           "config": h["config"], "m1_prior_source": h["m1_prior_source"], "cells": cells, "fits": fits}
+    _atomic_dump(out, a.out)
+    sec = np.array([x["secs"] for x in fits], float)
+    nconv = sum(1 for x in fits if x.get("conv"))
+    print(f"합침: 시즌 {sorted(seen)} 칸(시즌 x T) {len(fits)}개, 예측 줄(칸 x %) {len(cells)}개, 코드 판 {h['made']['tool_head']} dirty {h['made'].get('tool_dirty')}")
+    print(f"라플라스 conv 칸 {nconv}/{len(fits)} ({nconv / len(fits):.3f}), 예측 줄 conv {sum(1 for c in cells if c.get('conv'))}/{len(cells)}")
+    print(f"칸당 초: 중앙 {np.median(sec):.0f} 90% {np.quantile(sec, 0.9):.0f} 최대 {sec.max():.0f} 합 {sec.sum():.0f} ({sec.sum() / 3600:.2f}시간)")
+    return out
+
+
+def _filter_cells(path_src, keys, out_path):
+    with open(path_src, encoding="utf-8") as f:
+        j = json.load(f)
+    n0 = len(j["cells"])
+    j["cells"] = [c for c in j["cells"] if (c["season"], float(c["T"]), float(c["pct"])) in keys]
+    j["about"] = (j.get("about") or "") + " [M2 채점용: 예측 칸 키로 거름]"
+    _atomic_dump(j, out_path)
+    return n0, len(j["cells"])
+
+
+def cmd_score_tune(a):
+    """채점 (고르기에 안 씀): 기준선 F·B0·Z0을 M2 예측 칸 (시즌, T, %)과 같은 칸으로 걸러 (M3 diag_tune_D1.json과 같은 방식) score.py 실행. M1·M3 값은 그들 파일에서 읽어 표에 붙인다."""
+    with open(a.pred, encoding="utf-8") as f:
+        pj = json.load(f)
+    keys = {(c["season"], float(c["T"]), float(c["pct"])) for c in pj["cells"]}
+    os.makedirs(a.work, exist_ok=True)
+    fl = {}
+    for nm, src in (("F", a.F), ("B0", a.B0), ("Z0", a.Z0)):
+        dst = os.path.join(a.work, f"{nm}_tune.json")
+        fl[nm] = _filter_cells(src, keys, dst)
+        print(f"{nm}: {fl[nm][0]} -> {fl[nm][1]}칸 (M2 예측 {len(keys)}칸)")
+    import score as SC
+    argv = ["score.py", "--pred", a.pred, "--pred", os.path.join(a.work, "B0_tune.json"), "--pred", os.path.join(a.work, "Z0_tune.json"),
+            "--ref", os.path.join(a.work, "F_tune.json"), "--lb", a.lb, "--out", a.out]
+    old = sys.argv
+    sys.argv = argv
+    try:
+        SC.main()
+    finally:
+        sys.argv = old
+    with open(a.out, encoding="utf-8") as f:
+        d = json.load(f)
+
+    def row(r, name):
+        return {"name": name, "score": round(100 * r["score"], 2), "main": round(100 * r["main"], 2), "end": round(100 * r["end"], 2), "cov_main": round(r["cov_main"], 3), "cov_end": round(r["cov_end"], 3),
+                "w80_main_pct": round(100 * r["w80"]["main"], 2), "w80_end_pct": round(100 * r["w80"]["end"], 2), "g1": r["g1"], "g2": r["g2"], "g2_list": r.get("g2_list"), "worst": round(100 * r["worst"], 2),
+                "worst_season": r.get("worst_season"), "crps": round(100 * r["crps"], 3), "n": r["n"]}
+    tbl = {"1·3%": [], "10%": []}
+    for g in tbl:
+        gg = d["groups"][g]
+        tbl[g].append(row(gg["F"], "F"))
+        for n_, r in gg["cands"].items():
+            tbl[g].append(row(r, n_.split("@")[0]))
+        for nm, path in (("M1", a.m1_diag), ("M3", a.m3_diag)):
+            if path and os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    o = json.load(f)
+                r = o["groups"][g]["cands"].get(nm)
+                if r is not None:
+                    tbl[g].append(row(r, nm + " (그들 파일)"))
+    d["compare_table"] = tbl
+    d["filtered"] = {k: {"before": v[0], "after": v[1]} for k, v in fl.items()}
+    _atomic_dump(d, a.out)
+    for g, rs in tbl.items():
+        print("==", g)
+        for r in rs:
+            print(f"  {r['name']:16s} score {r['score']:.2f} (18~48h {r['main']:.2f} / 끝 {r['end']:.2f}) 포함 {r['cov_main']:.2f}·{r['cov_end']:.2f} 폭 {r['w80_main_pct']}%·{r['w80_end_pct']}% g1 {r['g1']} g2 {r['g2']} 최악 {r['worst']}({r['worst_season']})")
+
+
+def cmd_score_extra(a):
+    """채점 덧붙임 (M1 scoreextra와 같은 틀, 후보 여러 개): (1) 조정 시즌 정답 있는 KR 칸 T 격자 전체 80% 포함·|e|·치우침 (1·3%, 10%, 전체 %)
+    (2) 막판 칸(T = H-12·H-6·H) 따로 (3) 막판 정답·관측 어긋남: T = H 표의 A 줄(KR)이 정하는 q% 컷의 위·아래 한계 (lb = % >= q 인 줄의 최고 점수 — 어느 시각 줄이든 성립, ub = 촬영 >= H - win 이고 % <= q 인 줄의 최저 점수 — win 3·6·12시간으로 따로, 오래된 줄은 컷이 오르기 전 %라 어긋남이 아님)와
+    정답 표가 어긋나는지. answer_key는 읽기만 한다 (고르기에 안 씀).  --pred 이름=경로 (여러 번), 첫 번째가 상세의 대상."""
+    import obs_table as O
+    sys.path.insert(0, os.path.join(C.TOOLS, "lab6"))
+    import anchor as AN
+    truth = AN.truth()
+    tune = set(a.tune.split(","))
+    preds = []
+    for s_ in a.pred:
+        nm, path = s_.split("=", 1)
+        with open(path, encoding="utf-8") as f:
+            preds.append((nm, json.load(f)["cells"]))
+    with open(a.keys, encoding="utf-8") as f:
+        kj = json.load(f)["cells"]
+    keys = {(c["season"], float(c["T"]), float(c["pct"])) for c in kj}
+
+    def endcell(c):
+        _, H = C.info(c["season"])
+        return c["T"] in (H - 12, H - 6, H)
+
+    def stats(cells, sel):
+        rows = []
+        for c in cells:
+            if c["season"] not in tune or c.get("server", "KR") != "KR" or (c["season"], float(c["T"]), float(c["pct"])) not in keys or not sel(c):
+                continue
+            tv = truth.get((c["season"], "KR", float(c["pct"])))
+            if tv is None or not c.get("pred") or not c.get("i80"):
+                continue
+            rows.append((c["pred"] / tv - 1, c["i80"][0] <= tv <= c["i80"][1], c["i80"][1] / c["i80"][0] - 1))
+        if not rows:
+            return {"n": 0}
+        e = np.array([r[0] for r in rows])
+        return {"n": len(rows), "mean_abs_e": float(np.abs(e).mean()), "mean_e": float(e.mean()), "frac_e_neg": float((e < 0).mean()),
+                "cover80": float(np.mean([r[1] for r in rows])), "w80_median": float(np.median([r[2] for r in rows]))}
+    groups = {"1_3": lambda c: c["pct"] in (1.0, 3.0), "10": lambda c: c["pct"] == 10.0, "all_pct": lambda c: True}
+    out = {"about": ("M2 채점 덧붙임 (M1 scoreextra와 같은 틀). 모든 칸 = 조정 6시즌 정답 있는 KR 칸 T 격자 전체 (M2 예측과 같은 (시즌, T, %) 키로 거름). "
+                     "e = 예측/정답 - 1. answer_key는 읽기만, 고르기에 안 씀."), "data_ver": C.DATA_VER, "all_cells": {}, "end_cells": {}, "end_by_T": {}}
+    for nm, cells in preds:
+        out["all_cells"][nm] = {g: stats(cells, f) for g, f in groups.items()}
+        out["end_cells"][nm] = {g: stats(cells, lambda c, f=f: f(c) and endcell(c)) for g, f in groups.items()}
+        byT = {}
+        for pos_ in ("H-12", "H-6", "H"):
+            d_ = {"H-12": 12, "H-6": 6, "H": 0}[pos_]
+            byT[pos_] = {g: stats(cells, lambda c, f=f, d_=d_: f(c) and abs(c["T"] - (C.info(c["season"])[1] - d_)) < 1e-9) for g, f in groups.items() if g != "all_pct"}
+        out["end_by_T"][nm] = byT
+    main_nm, main_cells = preds[0]
+    detail = []
+    summ = {"n_H_cells": 0, "n_H_with_A": 0, "viol_truth_below_lb": 0, "pred_outside_i80_and_truth_below_lb": 0, "pred_outside_i80": 0, "by_win": {}}
+    for c in main_cells:
+        if not (c["season"] in tune and endcell(c) and c.get("server", "KR") == "KR" and (c["season"], float(c["T"]), float(c["pct"])) in keys):
+            continue
+        tv = truth.get((c["season"], "KR", float(c["pct"])))
+        if tv is None:
+            continue
+        _, H = C.info(c["season"])
+        row = {"season": c["season"], "T": c["T"], "T_rel": "H" if c["T"] == H else "H-%g" % (H - c["T"]), "pct": c["pct"], "pred": c["pred"], "truth": tv, "e": c["pred"] / tv - 1,
+               "i80": c["i80"], "in_i80": bool(c["i80"][0] <= tv <= c["i80"][1])}
+        if c["T"] == H:
+            head, rows = O.read_cell(os.path.join(a.obs, c["season"], f"T{c['T']:g}.jsonl.gz"))
+            A = [r for r in OM.select_rows(rows, head["H"], stage1=False) if r["tg"] == "A" and r["pct"] and r.get("server") == "KR"]
+            q = c["pct"]
+            # lb: % >= q 인 줄은 점수 <= 그때 컷 <= 끝 컷 (컷은 오르기만 하므로 어느 시각 줄이든 성립). ub: % <= q 인 줄은 점수 >= 그때 컷이지만 끝 컷은 더 높을 수 있어,
+            # 끝 가까이(촬영 >= H - win) 줄만 쓴다 (오래된 줄은 같은 점수가 더 좋은 %였다 — 어긋남 아님).
+            lb_rows = [r for r in A if r["pct"] >= q]
+            lb = max((r["score"] for r in lb_rows), default=None)
+            r0 = min(A, key=lambda r: abs(np.log(r["pct"] / q))) if A else None
+            row["obs"] = {"n_A": len(A), "lb": lb, "nearest_A": ({"pct": r0["pct"], "score": r0["score"], "score_over_truth_minus_1": r0["score"] / tv - 1} if r0 else None),
+                          "truth_over_lb_minus_1": (tv / lb - 1) if lb else None, "pred_over_lb_minus_1": (c["pred"] / lb - 1) if lb else None, "ub_by_win": {}}
+            summ["n_H_cells"] += 1
+            if A:
+                summ["n_H_with_A"] += 1
+            vb = bool(lb and tv < lb * (1 - a.tol))
+            row["obs"]["truth_below_lb"] = vb
+            summ["viol_truth_below_lb"] += vb
+            for w_ in (3, 6, 12):
+                ub_rows = [r for r in A if r["pct"] <= q and r["h"] >= H - w_]
+                ub = min((r["score"] for r in ub_rows), default=None)
+                va = bool(ub and tv > ub * (1 + a.tol))
+                row["obs"]["ub_by_win"][str(w_)] = {"n_rows": len(ub_rows), "ub": ub, "truth_over_ub_minus_1": (tv / ub - 1) if ub else None, "pred_over_ub_minus_1": (c["pred"] / ub - 1) if ub else None, "truth_above_ub": va}
+                sw = summ["by_win"].setdefault(str(w_), {"n_with_ub": 0, "viol_truth_above_ub": 0, "viol_and_pred_outside_i80": 0, "viol_and_pred_inside_i80": 0})
+                sw["n_with_ub"] += bool(ub)
+                sw["viol_truth_above_ub"] += va
+                sw["viol_and_pred_outside_i80"] += bool(va and not row["in_i80"])
+                sw["viol_and_pred_inside_i80"] += bool(va and row["in_i80"])
+            summ["pred_outside_i80"] += (not row["in_i80"])
+            summ["pred_outside_i80_and_truth_below_lb"] += bool((not row["in_i80"]) and vb)
+        detail.append(row)
+    summ["tol"] = a.tol
+    out["end_cell_detail"] = detail
+    out["mismatch_summary_T_eq_H"] = summ
+    _atomic_dump(out, a.out)
+    for nm, _ in preds:
+        print(nm, "전체 T", {g: (v["n"], round(v.get("cover80", 0), 3), round(v.get("mean_abs_e", 0), 4)) for g, v in out["all_cells"][nm].items()},
+              "막판", {g: (v["n"], round(v.get("mean_abs_e", 0), 4), round(v.get("mean_e", 0), 4), round(v.get("cover80", 0), 3)) for g, v in out["end_cells"][nm].items()})
+    print("어긋남 (T = H, %s):" % main_nm, summ)
+
+
+def laplace_cell_v(rows, H, season, err, mean, mb, K=32, delay_key=None, prior=None, hyper=None, anchor=None, eig_floor=0.05, draws=4000, seed=0):
+    """laplace_cell과 같은 계산(같은 MAP·같은 정규 뽑기)이지만 v 뽑기·jobs·pre를 함께 돌려준다 (LOO-PIT용)."""
+    obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=False)
+    jobs = OM.to_jax(obs)
+    prior = prior or {"kind": "weak"}
+    modes = multistart_map(jobs, prior, hyper, mean, mb=mb, anchor=anchor, eig_floor=eig_floor)
+    pre = modes[0]
+    n = len(pre["loc"])
+    rng = np.random.default_rng(seed)
+    v = pre["loc"] + rng.standard_normal((draws, n)) @ pre["chol"].T
+    return {"obs": obs, "jobs": jobs, "pre": pre, "v": v, "lnc": _draws_lnc(v, hyper, mean, mb, anchor)}
+
+
+def loo_pit_m2(jobs, obs, v, hyper, mean, mb, anchor, T, max_draws=1000):
+    """m1.loo_pit과 같은 틀: T-6 < 촬영 <= T 인 A 줄마다 PSIS-LOO PIT (라플라스 뽑기 v 위). -> (pit 목록, 줄 수)"""
+    import jax
+    import jax.numpy as jnp
+    from arviz.stats import psislw
+    meta, pos = obs["meta"], obs["pos"]
+    rows_i = [i for i, mr in enumerate(meta) if mr["tg"] == "A" and T - 6 < mr["h"] <= T + 1e-9]
+    if not rows_i:
+        return [], 0, []
+    idx = pos[rows_i]
+    G = grids(*mb)
+    names, _ = _v_layout(hyper, G)
+    nh, nb = len(names), G.mw + G.mu
+    S = len(v)
+    sel_s = np.unique(np.linspace(0, S - 1, min(max_draws, S)).astype(int))
+    zmid = 0.5 * (jobs["zlo"][idx] + jobs["zhi"][idx])
+    sub = {k: (jobs[k][idx] if hasattr(jobs[k], "shape") and getattr(jobs[k], "ndim", 0) >= 1 and k not in ("dirichlet",) else jobs[k]) for k in jobs}
+    sub["lw"] = jobs["lw"][idx]
+
+    def one(vv):
+        th = _unpack(vv, hyper, G, mean, anchor)
+        eps_v, phi_v, _ = _ep_unpack(vv[nh + nb:], jobs)
+        mu, P = surface(th, jobs["y"], jobs["u"], G, mean)
+        sg, rh = jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"])
+        ll = OM.row_loglik(jobs, mu, P, sg, rh, eps_v, phi_v)
+        return ll[idx], M1.row_pred_cdf(sub, mu[:, idx], P[:, idx], sg, rh, eps_v, phi_v, zmid)
+    f = jax.jit(jax.vmap(one))
+    LL, F = [], []
+    for i0 in range(0, len(sel_s), 50):
+        ii = sel_s[i0:i0 + 50]
+        l_, f_ = f(jnp.asarray(v[ii], jnp.float32))
+        LL.append(np.asarray(l_))
+        F.append(np.asarray(f_))
+    LL, F = np.concatenate(LL, 0), np.concatenate(F, 0)
+    pits = []
+    for j in range(len(idx)):
+        lw, _ = psislw(-LL[:, j])
+        w = np.exp(lw - lw.max())
+        w /= w.sum()
+        pits.append(float((w * F[:, j]).sum()))
+    return pits, len(idx), [rows_i[j] for j in range(len(idx))]
+
+
+def cmd_loo_pit(a):
+    """지금 컷 LOO-PIT (M1과 같은 방식)을 M2 라플라스 뽑기로, 견줌 칸 6개에서. 칸 예측과 같은 사전·MAP·뽑기(seed 0)."""
+    import obs_table as O
+    OM.setup_host(4)
+    err = OM.load_err()
+    with open(a.m1_stage1, encoding="utf-8") as f:
+        m1j = json.load(f)
+    with open(a.m2_stage1, encoding="utf-8") as f:
+        m2j = json.load(f)
+    hj = None
+    if a.m1_hier:
+        with open(a.m1_hier, encoding="utf-8") as f:
+            hj = json.load(f)
+    with open(a.pred, encoding="utf-8") as f:
+        pj = json.load(f)
+    rec = {(x["season"], x["T"]): x for x in pj["fits"]}
+    cfg = pj["config"]
+    out = {"about": "M2 라플라스 지금 컷 LOO-PIT (m1.loo_pit과 같은 틀: T-6 < 촬영 <= T 인 A 줄, PSIS-LOO). 칸 예측과 같은 MAP·뽑기 위, 뽑기 1000개 부분표본.", "data_ver": C.DATA_VER,
+           "made": {"tool_head": M1._git_head(), "tool_dirty": _git_dirty(), "config": cfg}, "cells": []}
+    if a.resume and os.path.exists(a.out):
+        with open(a.out, encoding="utf-8") as f:
+            out = json.load(f)
+    done = {(c["season"], c["T"]) for c in out["cells"]}
+    want = [(c.split(":")[0], float(t)) for c in a.cells.split(" ") for t in c.split(":")[1].split(",")]
+    priors = {}
+    for s, T in want:
+        if (s, T) in done:
+            continue
+        t0 = time.time()
+        if s not in priors:
+            p1 = m1_prior(m1j, s, hj, a.cache)
+            mean, _ = mean_from_m1_prior(p1, m1j)
+            p2 = m2_prior(m2j, s, a.cache)
+            hy, mb, _ = hyper_for_window(m2j, p2["window"])
+            priors[s] = (mean, p2, hy, mb)
+        mean, p2, hy, mb = priors[s]
+        head, rows = O.read_cell(os.path.join(a.obs, s, f"T{T:g}.jsonl.gz"))
+        r = laplace_cell_v(rows, head["H"], s, err, mean, mb, K=cfg["K"], delay_key=s if _snum(s) >= 21 else None, prior=p2, hyper=hy, anchor=cfg["lnm_anchor"],
+                           eig_floor=cfg["eig_floor"], draws=cfg["draws"], seed=0)
+        med3 = float(np.median(r["lnc"][3.0]))
+        ref3 = rec.get((s, T), {}).get("lnC_q", {}).get("3", [None] * 5)[2]
+        pits, npit, _ = loo_pit_m2(r["jobs"], r["obs"], r["v"], hy, mean, mb, cfg["lnm_anchor"], T)
+        pa = np.array(pits)
+        c = {"season": s, "T": T, "n_pit": npit, "secs": round(time.time() - t0, 1), "lnC3_median_here": med3, "lnC3_median_pred_file": ref3, "pit": pits,
+             "pit_in_0.1_0.9": float(np.mean((pa >= 0.1) & (pa <= 0.9))) if npit else None, "pit_below_0.1": float(np.mean(pa < 0.1)) if npit else None, "pit_above_0.9": float(np.mean(pa > 0.9)) if npit else None}
+        out["cells"].append(c)
+        _atomic_dump(out, a.out)
+        print(f"{s} T{T:g}: {c['secs']}s 줄 {npit} PIT [0.1,0.9] 안 {c['pit_in_0.1_0.9']} 아래 {c['pit_below_0.1']} 위 {c['pit_above_0.9']} lnC3 중앙 {med3:.5f} (예측 파일 {ref3})", flush=True)
+    allp = np.array([p for c in out["cells"] for p in c["pit"]])
+    if len(allp):
+        out["pooled"] = {"n": int(len(allp)), "in_0.1_0.9": float(np.mean((allp >= 0.1) & (allp <= 0.9))), "below_0.1": float(np.mean(allp < 0.1)), "above_0.9": float(np.mean(allp > 0.9)),
+                         "deciles": [float(x) for x in np.histogram(allp, bins=10, range=(0, 1))[0] / len(allp)]}
+        _atomic_dump(out, a.out)
+        print("합산", out["pooled"])
+
+
+
+def cmd_c4_summary(a):
+    """compare-laplace 결과에 덧붙임 (기존 compare-laplace 동작은 그대로): 기준 약함(ref_conv false) 표시, 기준 약한 칸을 뺀 요약, % 별·T 별·시즌 별 요약."""
+    with open(a.cmp, encoding="utf-8") as f:
+        d = json.load(f)
+
+    def summ(rs):
+        if not rs:
+            return None
+        ratios = [x["w80_ratio"] for x in rs if x["w80_ratio"] is not None]
+        md = [x["med_diff_pct"] for x in rs]
+        return {"n": len(rs), "med_diff_pct_median": round(float(np.median(md)), 3), "med_diff_pct_mean": round(float(np.mean(md)), 3), "med_abs_diff_pct_median": round(float(np.median(np.abs(md))), 3),
+                "med_abs_diff_pct_max": round(float(np.max(np.abs(md))), 3), "frac_lap_lower": round(sum(1 for m_ in md if m_ < 0) / len(md), 3),
+                "w80_ratio_median": round(float(np.median(ratios)), 3), "w80_ratio_geomean": round(float(np.exp(np.mean(np.log(ratios)))), 3), "frac_narrower": round(sum(1 for r_ in ratios if r_ < 1) / len(ratios), 3)}
+    for nm, lap in d["laps"].items():
+        rows = lap["rows"]
+        for x in rows:
+            x["ref_weak"] = not bool(x.get("ref_conv"))
+        focus = [x for x in rows if x["pct"] in (1.0, 3.0, 10.0)]
+        ann = {"about": "ref_weak = 기준의 conv가 false (R-hat < 1.01 and ESS >= 400 and 발산 0을 못 지남 — 기준 약함). 중앙 차 = 라플라스 / 기준 - 1 (%), 폭 비 = 라플라스 80% 폭 / 기준 80% 폭 (lnC 척도).",
+               "ref_weak_cells": sorted({(x["season"], x["T"]) for x in rows if x["ref_weak"]}),
+               "all_q": summ(rows), "q_1_3_10": summ(focus), "q_1_3_10_ref_not_weak": summ([x for x in focus if not x["ref_weak"]]),
+               "by_q": {f"{q:g}": summ([x for x in rows if x["pct"] == q]) for q in sorted({x["pct"] for x in rows})},
+               "by_T_q_1_3_10": {f"T{t:g}": summ([x for x in focus if x["T"] == t]) for t in sorted({x["T"] for x in focus})},
+               "by_season_q_1_3_10": {s_: summ([x for x in focus if x["season"] == s_]) for s_ in sorted({x["season"] for x in focus})}}
+        ann["by_cell_q_1_3_10"] = {f"{s_} T{t:g}": summ([x for x in focus if x["season"] == s_ and x["T"] == t]) for s_, t in sorted({(x["season"], x["T"]) for x in focus})}
+        ann["n_cells_narrower_by_cell_median"] = sum(1 for v in ann["by_cell_q_1_3_10"].values() if v["w80_ratio_median"] < 1)
+        lap["annotated"] = ann
+        lap["verdict_1_3_10_ref_not_weak"] = (None if not ann["q_1_3_10_ref_not_weak"] else
+                                              "좁히는 쪽" if ann["q_1_3_10_ref_not_weak"]["w80_ratio_median"] < 0.9 else "넓히는 쪽" if ann["q_1_3_10_ref_not_weak"]["w80_ratio_median"] > 1.1 else "비슷함")
+        print(nm, "기준 약한 칸", ann["ref_weak_cells"], "| 1·3·10%", ann["q_1_3_10"], "| 약한 칸 뺌", ann["q_1_3_10_ref_not_weak"], "| 전체 %", ann["all_q"])
+        for k, v in ann["by_cell_q_1_3_10"].items():
+            print("   ", k, v)
+    _atomic_dump(d, a.cmp)
+
+
+
 def main():
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -1629,6 +1975,38 @@ def main():
     cl.add_argument("--lap", nargs="+", required=True, help="라플라스 예측 파일들 (predict --method laplace; 바닥 0.05 먼저, 민감도 0.01·0.2는 뒤에)")
     cl.add_argument("--out", required=True)
     cl.add_argument("--rhat-flag", type=float, default=1.01, help="기준 R-hat이 이 이상이면 「기준 불확실」")
+    mp_ = sp.add_parser("merge-pred")
+    mp_.add_argument("--in", dest="inputs", nargs="+", required=True)
+    mp_.add_argument("--out", required=True)
+    stn = sp.add_parser("score-tune")
+    stn.add_argument("--pred", required=True)
+    stn.add_argument("--F", required=True)
+    stn.add_argument("--B0", required=True)
+    stn.add_argument("--Z0", required=True)
+    stn.add_argument("--lb", required=True)
+    stn.add_argument("--work", required=True, help="걸러 낸 기준선 파일을 둘 폴더")
+    stn.add_argument("--m1-diag", default=None)
+    stn.add_argument("--m3-diag", default=None)
+    stn.add_argument("--out", required=True)
+    sx = sp.add_parser("score-extra")
+    sx.add_argument("--pred", action="append", required=True, help="이름=경로 (여러 번; 첫째가 상세 대상)")
+    sx.add_argument("--keys", required=True, help="칸 키 (시즌, T, %) 기준 예측 파일 (M2 pred)")
+    sx.add_argument("--obs", required=True)
+    sx.add_argument("--tune", default="S22,S26,S30,S34,S38,S42")
+    sx.add_argument("--tol", type=float, default=0.002, help="정답과 관측 한계 어긋남 허용 (상대)")
+    sx.add_argument("--out", required=True)
+    c4s = sp.add_parser("c4-summary")
+    c4s.add_argument("--cmp", required=True, help="compare-laplace 결과 (제자리에서 덧붙임)")
+    lp_ = sp.add_parser("loo-pit")
+    lp_.add_argument("--obs", required=True)
+    lp_.add_argument("--pred", required=True, help="합친 M2 칸 예측 (config·견줌용 lnC)")
+    lp_.add_argument("--m2-stage1", required=True)
+    lp_.add_argument("--m1-stage1", required=True)
+    lp_.add_argument("--m1-hier", default=None)
+    lp_.add_argument("--cells", required=True, help="예: 'S30:24,48,96 S42:24,48,96'")
+    lp_.add_argument("--cache", default=None)
+    lp_.add_argument("--out", required=True)
+    lp_.add_argument("--resume", action="store_true")
     t = sp.add_parser("test")
     t.add_argument("--work", default=None)
     t.add_argument("--m1-stage1", default=None)
@@ -1656,6 +2034,21 @@ def main():
         return
     elif a.cmd == "compare-laplace":
         cmd_compare_laplace(a)
+        return
+    elif a.cmd == "merge-pred":
+        cmd_merge_pred(a)
+        return
+    elif a.cmd == "score-tune":
+        cmd_score_tune(a)
+        return
+    elif a.cmd == "score-extra":
+        cmd_score_extra(a)
+        return
+    elif a.cmd == "c4-summary":
+        cmd_c4_summary(a)
+        return
+    elif a.cmd == "loo-pit":
+        cmd_loo_pit(a)
         return
     elif a.cmd == "test" and a.which == "m1match":
         r = test_m1match(a.m1_stage1, a.season)
