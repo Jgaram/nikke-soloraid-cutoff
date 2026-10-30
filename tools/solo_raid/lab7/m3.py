@@ -279,11 +279,27 @@ class CellProb:
     """맞힐 시즌 칸: v = [a, xi_1..xi_K, lnsig0, lnrho, 6 offset]. 곡선 계수 = 평균 + sum xi_k phi_k."""
     kind = "cell"
 
-    def __init__(self, pr):
+    def __init__(self, pr, ppca=False):
         self.pr = pr
         self.K = int(pr["K"])
-        self.n = 1 + self.K + len(NUIS)
-        self.off_ix = tuple(1 + self.K + NUIS.index(n) for n in OFF)
+        self.ppca = ppca
+        # ppca: 밴드 격자에 전계수 잔차 eps = sqrt(sigma2_res) eta (eta ~ N(0, I)) 를 더한다 (확률 PCA의 등방 잔차; 밴드 밖은 0).
+        # 격자 편차 -> 계수는 정방 B의 정확한 해.
+        self.ne = len(BAND) if ppca else 0
+        if ppca:
+            s2 = float(pr.get("sigma2_res") or 0.0)
+            if s2 <= 1e-8:
+                s2 = float(pr.get("disc_pos_mean") or 1e-4)
+            self.s2res = s2
+            Br, Bl = np.asarray(BASIS["Br12"]), np.asarray(BASIS["Bl12"])
+            assert Br.shape[0] == Br.shape[1] and Bl.shape[0] == Bl.shape[1]
+            Mfull = np.zeros((NR + NL, DT))
+            Mfull[:NR, :NE_R] = np.linalg.inv(Br)
+            Mfull[NR:, NE_R:] = np.linalg.inv(Bl)
+            self.M = math.sqrt(s2) * Mfull[:, BAND]          # [NR+NL, ne]
+        o = 1 + self.K + self.ne
+        self.n = o + len(NUIS)
+        self.off_ix = tuple(o + NUIS.index(n) for n in OFF)
         self.mc = np.asarray(pr["mean_coef"], float)
         self.phi = np.asarray(pr["phi_coef"], float).reshape(self.K, NR + NL)
         self.lam = np.asarray(pr["lambda_scaled"], float).reshape(self.K)
@@ -293,7 +309,7 @@ class CellProb:
         cov = np.asarray(nu["cov"], float) + 1e-6 * np.eye(len(NUIS))
         self.nch = np.linalg.cholesky(cov)
         self.am, self.av = pr["a"]["mean"], pr["a"]["var"]
-        self.start = np.concatenate([[self.am], np.zeros(self.K), self.nmean])
+        self.start = np.concatenate([[self.am], np.zeros(self.K + self.ne), self.nmean])
 
     def theta(self, v):
         import jax.numpy as jnp
@@ -301,7 +317,9 @@ class CellProb:
         c = jnp.asarray(self.mc)
         if K:
             c = c + v[1:1 + K] @ jnp.asarray(self.phi)
-        o = 1 + K
+        if self.ne:
+            c = c + jnp.asarray(self.M) @ v[1 + K:1 + K + self.ne]
+        o = 1 + K + self.ne
         d = {"a": v[0], "cr": c[:NR], "cl": c[NR:]}
         d.update({n: v[o + i] for i, n in enumerate(NUIS)})
         return d
@@ -313,7 +331,9 @@ class CellProb:
         lp = _nlp(v[0], self.am, math.sqrt(self.av))
         if K:
             lp += _nlp(v[1:1 + K], 0.0, jnp.sqrt(jnp.asarray(self.lam)))
-        r = v[1 + K:] - jnp.asarray(self.nmean)
+        if self.ne:
+            lp += _nlp(v[1 + K:1 + K + self.ne], 0.0, 1.0)
+        r = v[1 + K + self.ne:] - jnp.asarray(self.nmean)
         ch = jnp.asarray(self.nch)
         zz = solve_triangular(ch, r, lower=True)
         return lp - 0.5 * (zz ** 2).sum() - jnp.log(jnp.diag(ch)).sum() - 0.5 * len(NUIS) * math.log(2 * math.pi)
@@ -365,7 +385,7 @@ def model(obs, prob, pre):
         numpyro.deterministic("l12", l12)
     if prob.kind == "cell":   # 수렴 판정용: 핵심(a·ξ·lnsig0·lnrho)과 서버 성분 보조 모수를 따로 둔다
         K_ = prob.K
-        numpyro.deterministic("core", v[:-len(OFF)])      # a, ξ, lnsig0, lnrho, (β)
+        numpyro.deterministic("core", jnp.concatenate([v[:1 + K_], v[1 + K_ + prob.ne:-len(OFF)]]))      # a, ξ, lnsig0, lnrho, (β); ppca의 η는 뺀다
         numpyro.deterministic("aux", v[-len(OFF):])
     mu, P = surface(th, obs["y"], obs["u"])
     OM.observe(obs, mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), **eps_phi)
@@ -766,8 +786,8 @@ def cmd_prior(a):
 
 # ---------- 칸 예측 ----------
 
-def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0, full_ep=False, retry=True, multistart=True):
-    prob = CellProb(pr)
+def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0, full_ep=False, retry=True, multistart=True, ppca=False):
+    prob = CellProb(pr, ppca)
     sm, info, dg, obs = fit(rows, H, s, err, prob, s, chains, warmup, samples, seed, stage1=False, full_ep=full_ep, retry=retry, multistart=multistart)
     return sm, info, dg, obs
 
@@ -808,7 +828,7 @@ def cmd_predict(a):
                 out["priors"][s] = prior(s1, s, cache=CACHE)
             pr = out["priors"][s]
             head, rows = obs_table.read_cell(path)
-            sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples, full_ep=a.pre_full, multistart=not a.no_multistart)
+            sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples, full_ep=a.pre_full, multistart=not a.no_multistart, ppca=a.ppca)
             out["cells"] += OM.pred_cells(s, T, {q: sm[f"lnC_{q:g}"] for q in OM.Q_TARGETS}, dg["conv"])
             out["info"].append({"season": s, "T": T, "secs": info["secs"], "map_secs": info["map_secs"], "conv": dg["conv"], "K": pr["K"],
                                 "k": pr["k"], "rhat_max": dg["all"]["rhat"], "ess_min": dg["all"]["ess"], "rhat_core": dg["rhat_max"], "ess_core": dg["ess_min"],
@@ -1209,6 +1229,7 @@ def main():
     q.add_argument("--T", default="all")
     q.add_argument("--out", required=True)
     q.add_argument("--prior-cache", default=None)
+    q.add_argument("--ppca", action="store_true", help="확률 PCA 잔차: 밴드 격자에 등방 잔차 sqrt(sigma2_res) η를 더한다 (주성분이 못 담는 시즌 사이 변동)")
     q.add_argument("--no-multistart", action="store_true", help="MAP 시작점 8개(기본)를 끈다")
     q.add_argument("--pre-full", action="store_true", help="eps·phi도 사전 펴기에 넣는다 (m1과 같은 방식)")
     a = ap.parse_args()
