@@ -6,6 +6,22 @@
   python3 -I tools/solo_raid/lab7/m2.py bench --work W --case a|b|c [--season S30] [--chains 4 --warmup 500 --samples 500]      # 시간 재기 (임시 평균, 옛 방식)
   python3 -I tools/solo_raid/lab7/m2.py test --work W --which basis|synth
 
+명령 요약 (2026-10-30 더함 — 시즌 묶음 1단계·합치기·칸 예측):
+  m2.py stage1 --seasons S19-S24 (범위·쉼표 모두) --out 시즌 묶음 파일 ...      # 코드 판(git head)·설정·M1 1단계 sha1이 파일에 적힌다
+  m2.py merge-stage1 --in a.json b.json ... --out r7/stage1_M2_D1.json         # 코드 판·설정·M1 파일이 같아야 하고 시즌이 겹치면 오류
+  m2.py predict --obs W/obs7 --seasons S42 --T 48 --m2-stage1 r7/stage1_M2_D1.json --m1-stage1 r7/stage1_M1_D1.json [--m1-hier r7/hier_M1_D1.json] --out 예측.json [--cache DIR --log FILE --resume]
+            # 칸마다 score.py 예측 꼴 cells + fits (칸별 conv·시간·depth_dist). 사전은 맞힐 시즌 앞 시즌의 1단계만.
+
+도우미 세션용 명령 (m2.py·관측 층을 고치지 않고 돌리기만 한다. 코드 판은 조율 세션이 알려 준 커밋 그대로. W = 세션 임시 작업 폴더, 한 컨테이너 4코어)
+  pip install -r tools/solo_raid/lab7/requirements.txt                                          # 약 1분 40초
+  python3 -I tools/solo_raid/lab7/obs_table.py build --out $W/obs7 --full                       # 끝난 시즌 전체 관측 표, 약 8초 -> $W/obs7/full/S{n}.jsonl.gz
+  nohup python3 -I tools/solo_raid/lab7/m2.py stage1 --obs $W/obs7/full --seasons S19-S24 \
+      --m1-stage1 data/solo-raid/analysis/r7/stage1_M1_D1.json \
+      --out $W/m2/stage1_M2_D1_S19-S24.json --ll-dir $W/m2/ll --resume > $W/m2/S19-S24.log 2>&1 &   # 시즌당 약 45분, 끊기면 같은 명령을 다시 (--resume)
+  결과 파일 이름: stage1_M2_D1_{첫 시즌}-{끝 시즌}.json (예: S19-S24, S25-S30, S31-S36, S37-S42). 돌려준 파일 + attempts.log(= $W/m2/attempts.log). 합치기는 조율 세션이:
+  python3 -I tools/solo_raid/lab7/m2.py merge-stage1 --in stage1_M2_D1_S19-S24.json stage1_M2_D1_S25-S30.json ... --out data/solo-raid/analysis/r7/stage1_M2_D1.json
+  (같은 --out으로 시즌 묶음을 달리 돌리면 안 된다. 묶음마다 --out이 다르다. 한 묶음이 한 프로세스, 같은 컨테이너에서 두 묶음을 동시에 돌리지 않는다.)
+
 M1 최종 꼴(kuma 침수 + x항 beta + 2차 컷 기울기 r2)에 맞춤 (2026-10-29): 평균 r̄(w) = r0 + r1 w + r2 w^2, 침수 평균 = M1.flood(m = 1) (P(0.4) = 1), x항 P * exp(beta (z_fin - log10 3)).
   침수 평균은 u 격자 구간별 P의 정확한 감소분 dP로 들고 (M1 kuma의 beta < 1이면 -dP/du가 u = 1에서 발산해 점값 사다리꼴은 틀린다), 구간 질량 = dP * m * (구간 양끝 exp(f2) 평균).
   u 격자는 코사인 간격 (끝 간격 1e-4): 옛 제곱 간격은 u = 1 쪽이 0.0098로 성겨 P 보간이 막판 1%에서 틀렸다. eps·phi도 v에 붙여 MAP과 NUTS가 함께 다룬다 (m1 full=True: 오염 많은 시즌에서 MAP이 어긋났던 것).
@@ -47,6 +63,7 @@ import argparse
 import json
 import math
 import os
+import subprocess
 import sys
 import time
 
@@ -57,6 +74,7 @@ sys.path.insert(0, HERE)
 import obs_model as OM  # noqa: E402
 import m1 as M1  # noqa: E402
 import common as C  # noqa: E402
+import hier as H  # noqa: E402
 
 LN10 = math.log(10.0)
 L10_3 = math.log10(3.0)
@@ -959,18 +977,21 @@ def theta_surface_fn(G, mean):
     return fn
 
 
-def fit_one(rows, H, season, err, mean, mb, K=16, delay_key=None, seed=0, warmup=1000, samples=1000, retry_warmup=1500, max_tree_depth=10):
-    """한 칸 맞춤 (초모수 표집): prepare -> 시작점 8개 MAP(최고 봉우리가 둘 미만이면 8개 더) -> fit_with_retry. m1.fit_one과 같은 설정."""
-    obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=True)
+def fit_one(rows, H, season, err, mean, mb, K=16, delay_key=None, seed=0, warmup=1000, samples=1000, retry_warmup=1500, max_tree_depth=10,
+            prior=None, hyper=None, stage1=True, keep_ll=True):
+    """한 칸 맞춤: prepare -> 시작점 8개 MAP(최고 봉우리가 둘 미만이면 8개 더) -> fit_with_retry. m1.fit_one과 같은 설정.
+    1단계 (기본): prior = 약한 사전, hyper = None (초모수 표집), stage1=True (끝난 시즌 전체 표 — 종료 뒤 화면 줄 포함).
+    칸 예측 (cmd_predict): prior = hier.prior_for 꼴, hyper = 고정 초모수 dict, stage1=False, keep_ll=False."""
+    obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1)
     jobs = OM.to_jax(obs)
-    prior = {"kind": "weak"}
+    prior = prior or {"kind": "weak"}
     G = grids(*mb)
-    names, _ = _v_layout(None, G)
+    names, _ = _v_layout(hyper, G)
     t0 = time.time()
-    modes = multistart_map(jobs, prior, None, mean, mb=mb)
+    modes = multistart_map(jobs, prior, hyper, mean, mb=mb)
     rep = sum(1 for p in modes if p["info"]["fun"] - modes[0]["info"]["fun"] < 0.5)
     if rep < 2:
-        modes = sorted(modes + multistart_map(jobs, prior, None, mean, seed=1, mb=mb), key=lambda p: p["info"]["fun"])
+        modes = sorted(modes + multistart_map(jobs, prior, hyper, mean, seed=1, mb=mb), key=lambda p: p["info"]["fun"])
         rep = sum(1 for p in modes if p["info"]["fun"] - modes[0]["info"]["fun"] < 0.5)
     pre = modes[0]
     idx_off = [i for i, nm in enumerate(names) if nm in M1.OFF]
@@ -978,7 +999,7 @@ def fit_one(rows, H, season, err, mean, mb, K=16, delay_key=None, seed=0, warmup
     map_secs = time.time() - t0
     watch = ["a"] + [n for n in CORE if n not in M1.OFF] + [f"lnC_{q:g}" for q in OM.Q_TARGETS]
     init = map_init(len(pre["loc"]))
-    kw = {"obs": jobs, "prior": prior, "hyper": None, "mean": mean, "pre": pre, "keep_ll": True, "mb": mb}
+    kw = {"obs": jobs, "prior": prior, "hyper": hyper, "mean": mean, "pre": pre, "keep_ll": keep_ll, "mb": mb}
     sm, info, dg = OM.fit_with_retry(model, kw, names=watch, seed=seed, init=init, max_tree_depth=max_tree_depth,
                                      warmup=warmup, samples=samples, retry_warmup=retry_warmup)
     info["map_secs"] = round(map_secs, 1)
@@ -1093,24 +1114,51 @@ def _season_record(r, season, mean_theta, m1_json, G, mean, ll_dir, tag):
     }
 
 
+def _git_dirty():
+    """lab7 도구가 커밋과 다르면 True (도우미 세션은 고치지 않고 돌려야 한다)."""
+    try:
+        return bool(subprocess.check_output(["git", "-C", HERE, "status", "--porcelain", "--", HERE], text=True).strip())
+    except Exception:
+        return None
+
+
+def _sha12(path):
+    import hashlib
+    with open(path, "rb") as f:
+        return hashlib.sha1(f.read()).hexdigest()[:12]
+
+
+STAGE1_CFG_KEYS = ("warmup", "samples", "retry_warmup", "max_tree_depth", "refit_limit_secs", "K", "basis_start", "target_accept")
+
+
 def cmd_stage1(a):
     import obs_table as O
     OM.setup_host(4)
     err = OM.load_err()
     with open(a.m1_stage1, encoding="utf-8") as f:
         m1j = json.load(f)
+    seasons = C.parse_seasons(a.seasons)
+    miss = [s for s in seasons if s not in m1j["seasons"]]
+    if miss:
+        raise SystemExit(f"--m1-stage1에 없는 시즌: {miss}")
+    cfg = {"warmup": a.warmup, "samples": a.samples, "retry_warmup": a.retry_warmup, "max_tree_depth": a.max_tree_depth,
+           "refit_limit_secs": a.refit_limit_secs, "K": 16, "basis_start": MB, "target_accept": 0.9}
+    if _git_dirty():
+        print("경고: lab7 도구가 커밋과 다르다 (git status). 합치기가 같은 코드 판인지 git head만 본다.", flush=True)
     out = {"about": ("M2 1단계 (조정 시즌): 끝난 시즌 전체 표를 약한 사전으로 맞춘 사후. 평균 함수 r̄·ℓ̄ = 그 시즌 M1(kuma + x항 β + 2차 컷 기울기 r2) 1단계 사후 평균 theta_hat에서 만든 것 "
                      "(명세에 1단계 평균이 적혀 있지 않아 사용자가 정함 — 2단계 평균을 1단계 theta_hat에서 만드는 것과 맞춤). a·lnm·β·lnsig0·lnrho·서버 모수: 약한 사전 (m1.WEAK), "
                      "f1·f2 길이 역감마·크기 반정규 표집, 계수 N(0,1) 비중심. 시작점 8개 MAP, NUTS 4사슬 x (예열 1000 + 뽑기 1000), target_accept 0.9, 재시도 0.95·예열 1500, 나무 깊이 상한 10. "
                      "hier에 넘길 mean/cov = names(= a, lnm, lnsig0, lnrho, beta, dJP, dGL, pJP, pGL, kJP, kGL) 사후 평균·공분산 (f1·f2 계수는 2단계에서 N(0,1)로 다시 맞추고 길이·크기는 창 안 중앙을 그대로 쓰므로 뺌). "
                      "mean_with_hyper/cov_with_hyper = 위에 초모수 로그 길이·로그 크기 4개를 더한 것. 정답 표 안 씀."),
-           "data_ver": C.DATA_VER, "model": "M2", "m1_stage1": os.path.basename(a.m1_stage1), "mean_source": "M1 kuma + beta + r2 1단계 사후 평균 theta_hat (같은 시즌)",
-           "names": HYP_NAMES_HIER, "hyper_names": HYP, "delay_key_rule": M1.DELAY_RULE_NOTE, "grid_u": "코사인 간격 200점 [0.02, 1]", "tool_head": M1._git_head(), "seasons": {}}
+           "data_ver": C.DATA_VER, "model": "M2", "m1_stage1": os.path.basename(a.m1_stage1), "m1_stage1_sha1": _sha12(a.m1_stage1), "config": cfg, "mean_source": "M1 kuma + beta + r2 1단계 사후 평균 theta_hat (같은 시즌)",
+           "names": HYP_NAMES_HIER, "hyper_names": HYP, "delay_key_rule": M1.DELAY_RULE_NOTE, "grid_u": "코사인 간격 200점 [0.02, 1]", "tool_head": M1._git_head(), "tool_dirty": _git_dirty(), "seasons": {}}
     if a.resume and os.path.exists(a.out):
         with open(a.out, encoding="utf-8") as f:
             out = json.load(f)
+        if out.get("tool_head") != M1._git_head() or out.get("config") != cfg or out.get("m1_stage1_sha1") != _sha12(a.m1_stage1):
+            raise SystemExit("--resume: 기존 --out의 코드 판·설정·M1 1단계 파일이 지금과 다르다. 다른 --out을 쓰거나 지우고 다시 돌린다.")
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
-    tag = "M2_tune"
+    tag = a.tag
     log_dir = os.path.dirname(os.path.abspath(a.ll_dir.rstrip("/")))
     os.makedirs(log_dir, exist_ok=True)
 
@@ -1120,7 +1168,7 @@ def cmd_stage1(a):
         with open(os.path.join(log_dir, "attempts.log"), "a", encoding="utf-8") as fh:
             fh.write(line + "\n")
 
-    for s in a.seasons.split(","):
+    for s in seasons:
         if s in out["seasons"] and a.resume:
             continue
         t0 = time.time()
@@ -1179,6 +1227,209 @@ def cmd_stage1(a):
             f"dlnC1/3/10 " + "/".join(f"{d['vs_M1']['lnC'][q]['pct']:+.2f}%" for q in ("1", "3", "10")))
 
 
+# ---------- 1단계 합치기 ----------
+
+def cmd_merge_stage1(a):
+    """시즌 묶음 1단계 파일들을 하나로. 같은 코드 판(git head)·같은 설정·같은 M1 1단계 파일이어야 하고, 시즌이 겹치면 오류."""
+    js = []
+    for p in a.inputs:
+        with open(p, encoding="utf-8") as f:
+            js.append((p, json.load(f)))
+    base_p, base = js[0]
+    same = ("data_ver", "model", "m1_stage1", "m1_stage1_sha1", "config", "names", "hyper_names", "delay_key_rule", "grid_u", "tool_head", "mean_source")
+    errs = []
+    for p, j in js:
+        if j.get("tool_dirty"):
+            errs.append(f"{p}: tool_dirty = True (lab7 도구가 커밋과 다른 채 돌린 결과)")
+        if j.get("first_fit_partial"):
+            errs.append(f"{p}: first_fit_partial이 남아 있다 ({sorted(j['first_fit_partial'])}) — 다시 맞추다 멈춘 시즌. --resume으로 마저 돌린다")
+        for k in same:
+            if j.get(k) != base.get(k):
+                errs.append(f"{p}: '{k}'가 {base_p}와 다르다 ({j.get(k)!r} vs {base.get(k)!r})")
+    seen = {}
+    for p, j in js:
+        for s in j["seasons"]:
+            if s in seen:
+                errs.append(f"시즌 {s}이 {seen[s]}와 {p}에 겹친다")
+            seen[s] = p
+    if errs:
+        raise SystemExit("합칠 수 없다:\n  " + "\n  ".join(errs))
+    out = {k: v for k, v in base.items() if k not in ("seasons", "first_fit_partial", "run_notes", "tool_dirty")}
+    out["seasons"] = {s: seen_j["seasons"][s] for seen_j in (j for _, j in js) for s in seen_j["seasons"]}
+    out["seasons"] = dict(sorted(out["seasons"].items(), key=lambda kv: int(kv[0].lstrip("S"))))
+    out["merged_from"] = [{"file": os.path.basename(p), "sha1": _sha12(p), "seasons": sorted(j["seasons"], key=lambda x: int(x.lstrip("S")))} for p, j in js]
+    notes = {os.path.basename(p): j["run_notes"] for p, j in js if j.get("run_notes")}
+    if notes:
+        out["run_notes"] = notes
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    with open(a.out + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=1, default=float)
+    os.replace(a.out + ".tmp", a.out)
+    nconv = sum(1 for v in out["seasons"].values() if v["diag"]["conv"])
+    print(f"merge-stage1: {len(js)}개 파일 -> {a.out}: 시즌 {len(out['seasons'])}개 ({', '.join(out['seasons'])}), conv {nconv}/{len(out['seasons'])}, tool_head {out['tool_head']}")
+
+
+# ---------- 칸 예측 (명세 3절 2단계 + 4절 M2) ----------
+# 맞힐 시즌 s의 칸 (s, T)마다:
+#   M1 2단계 사전 평균 theta -> 평균 곡선 r̄·ℓ̄ (mean_from_m1 — M1이 쓰는 함수 그대로)
+#   M2 1단계 theta_hat_j (a 제외 모수 CORE) -> hier.prior_for (창 k 고르기 + NUTS 정규-정규) -> 정규 사전, a는 hier.fit_level·level_prior (prior_for 안)
+#   초모수 = 창 안 시즌 1단계 사후 중앙(로그)의 중앙, 기저 수 = 그 길이로 Riutort-Mayol 진단을 지나는 최소 (20 -> 40)
+#   f1·f2 계수 N(0,1) 비중심, 시작점 8개 MAP -> NUTS 4 x (500 + 500), 수렴 판정·재시도는 명세 6절 (R-hat < 1.01 · 발산 0 · ESS >= 400, 못 지나면 0.95·예열 1000으로 한 번 더)
+
+def _snum(s):
+    return int(s.lstrip("S"))
+
+
+def stage1_dict(j):
+    """1단계 파일 -> hier 입력 {시즌: {"names","mean","cov"}}."""
+    return {s: {"names": j["names"], "mean": v["mean"], "cov": v["cov"]} for s, v in j["seasons"].items()}
+
+
+def _pick_prior(hj, season):
+    """M1 세션이 낸 hier 결과 파일에서 그 시즌의 사전 (hier.prior_for 꼴 dict: names·mean·a). {"seasons": {s: ..}}, {"priors": {s: ..}}, {s: ..} 어느 꼴이든, 값이 {"prior": ..}로 싸여 있어도 받는다."""
+    for top in (hj.get("seasons"), hj.get("priors"), hj):
+        if isinstance(top, dict) and season in top:
+            v = top[season]
+            return v["prior"] if isinstance(v, dict) and "prior" in v else v
+    raise KeyError(f"M1 hier 파일에 시즌 {season}이 없다")
+
+
+def m1_prior(m1j, season, hier_json=None, cache=None):
+    """맞힐 시즌의 M1 2단계 사전. hier_json이 있으면 거기서, 없으면 M1 1단계 파일로 hier.prior_for를 M1과 같은 인자로 부른다."""
+    if hier_json is not None:
+        return _pick_prior(hier_json, season)
+    names = list(m1j["names"][1:])
+    mu_loc, mu_scale, tau = M1.hier_args(names)
+    return H.prior_for(stage1_dict(m1j), season, names, tau, mu_loc, mu_scale, cache)
+
+
+def mean_from_m1_prior(prior, m1j, G=None):
+    """M1 사전 평균 theta(= prior mean + a 평균)로 평균 곡선. M1 최종 꼴(kuma + x항 + r2)만 받는다. -> (mean, theta dict)."""
+    assert m1j["form"] == "kuma" and m1j["x_term"] and m1j["r2"], "M1 최종 꼴(kuma + beta + r2)이 아님"
+    th = dict(zip(prior["names"], (float(x) for x in prior["mean"])))
+    th["a"] = float(prior["a"]["mean"])
+    return mean_from_m1({"r0": th["r0"], "r1": th["r1"], "r2": th["r2"], "eta": [th["eta0"], th["eta1"]]}, "kuma", G), th
+
+
+def m2_prior(m2j, season, cache=None):
+    """맞힐 시즌의 M2 2단계 사전 (a 제외 모수 CORE는 정규, a는 국소 수준)."""
+    mu_loc, mu_scale, tau = M1.hier_args(CORE)
+    return H.prior_for(stage1_dict(m2j), season, CORE, tau, mu_loc, mu_scale, cache)
+
+
+def hyper_for_window(m2j, window):
+    """창 안 시즌들의 1단계 초모수 사후 중앙(로그)의 중앙 -> (hyper dict, mb). 기저 수는 그 길이가 Riutort-Mayol 최소 길이 이상인 최소 (20 -> 40, 40도 모자라면 40 + short 표시)."""
+    med = {h: float(np.median([m2j["seasons"][j]["hyper"][h]["median"] for j in window])) for h in HYP}
+    hy = {"ell1": math.exp(med["lnell1"]), "alpha1": math.exp(med["lnalp1"]), "ell2": math.exp(med["lnell2"]), "alpha2": math.exp(med["lnalp2"])}
+    Ww, Wu = W_HI - W_LO, 1.0 - U_LO
+    pick, short = [], {}
+    for tag, W, ell in (("f1", Ww, hy["ell1"]), ("f2", Wu, hy["ell2"])):
+        M = next((m for m in (MB, 2 * MB) if ell >= min_len(W, m)), 2 * MB)
+        short[tag] = bool(ell < min_len(W, M))
+        pick.append(M)
+    return hy, (pick[0], pick[1]), short
+
+
+def _atomic_dump(obj, path):
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=1, default=float)
+    os.replace(path + ".tmp", path)
+
+
+def cmd_predict(a):
+    import obs_table as O
+    OM.setup_host(4)
+    err = OM.load_err()
+    with open(a.m1_stage1, encoding="utf-8") as f:
+        m1j = json.load(f)
+    with open(a.m2_stage1, encoding="utf-8") as f:
+        m2j = json.load(f)
+    hj = None
+    if a.m1_hier:
+        with open(a.m1_hier, encoding="utf-8") as f:
+            hj = json.load(f)
+    cfg = {"warmup": a.warmup, "samples": a.samples, "retry_warmup": a.retry_warmup, "max_tree_depth": a.max_tree_depth, "K": 16, "chains": 4,
+           "target_accept": 0.9, "retry_target_accept": 0.95}
+    inputs = {"m2_stage1": _sha12(a.m2_stage1), "m1_stage1": _sha12(a.m1_stage1)}
+    if a.m1_hier:
+        inputs["m1_hier"] = _sha12(a.m1_hier)
+    out = {"about": ("M2 HSGP 곡면 칸 예측: 맞힐 시즌 s의 T 절단 관측 표로, 사전은 앞 시즌 1단계만 (M1 2단계 사전 평균 -> 평균 곡선 r̄·ℓ̄, M2 자신의 2단계 -> 모수 사전, "
+                     "초모수는 창 안 시즌 1단계 사후 중앙의 중앙으로 고정). f1·f2 계수 N(0,1) 비중심, 시작점 8개 MAP, NUTS 4 x (예열+뽑기), 수렴 못 하면 0.95·긴 예열로 한 번 더. "
+                     "conv false인 칸도 값은 낸다 (F로 채우지 않음). fits = 칸별 수렴·시간·나무 깊이 분포."),
+           "method": "M2", "data_ver": C.DATA_VER,
+           "made": {"tool_head": M1._git_head(), "tool_dirty": _git_dirty(), "cmd": "m2.py predict --seasons %s --T %s" % (a.seasons, a.T), "inputs": inputs},
+           "config": cfg, "m1_prior_source": "hier 파일" if hj is not None else "M1 1단계 파일에서 hier.prior_for", "cells": [], "fits": []}
+    if a.resume and os.path.exists(a.out):
+        with open(a.out, encoding="utf-8") as f:
+            old = json.load(f)
+        if old.get("made", {}).get("inputs") != inputs or old.get("config") != cfg or old.get("made", {}).get("tool_head") != out["made"]["tool_head"]:
+            raise SystemExit("--resume: 기존 --out의 입력 파일·설정·코드 판이 지금과 다르다.")
+        out = old
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    done = {(f["season"], f["T"]) for f in out["fits"] if not f.get("error")}
+    want_T = None if a.T == "all" else [float(x) for x in a.T.split(",")]
+    priors = {}
+
+    def log(text):
+        line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {text}"
+        print(line, flush=True)
+        if a.log:
+            with open(a.log, "a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+
+    for s in C.parse_seasons(a.seasons):
+        if s not in priors:
+            t0 = time.time()
+            p1 = m1_prior(m1j, s, hj, a.cache)
+            mean, m1th = mean_from_m1_prior(p1, m1j)
+            p2 = m2_prior(m2j, s, a.cache)
+            hy, mb, short = hyper_for_window(m2j, p2["window"])
+            priors[s] = {"mean": mean, "prior": p2, "hyper": hy, "mb": mb,
+                         "info": {"m1_window_k": p1["k"], "m1_window": p1["window"], "m2_window_k": p2["k"], "m2_window": p2["window"], "hyper": hy,
+                                  "mb": list(mb), "basis_short_at_max": short, "m1_theta_mean": {k: round(v, 5) for k, v in m1th.items() if k in ("a", "r0", "r1", "r2", "lnm", "eta0", "eta1", "beta")},
+                                  "prior_secs": round(time.time() - t0, 1)}}
+            log(f"{s} 사전: M1 창 k={p1['k']} M2 창 k={p2['k']} 초모수 {{{', '.join(f'{k} {v:.3f}' for k, v in hy.items())}}} 기저 {mb} ({time.time() - t0:.0f}초)")
+        pr = priors[s]
+        Ts = want_T if want_T is not None else C.t_grid(s)
+        for T in Ts:
+            if (s, float(T)) in done:
+                continue
+            path = os.path.join(a.obs, s, f"T{T:g}.jsonl.gz")
+            if not os.path.exists(path):
+                log(f"{s} T{T:g}: 관측 표 없음 ({path}) — 건너뜀")
+                continue
+            t0 = time.time()
+            rec = {"season": s, "T": float(T), "window": pr["info"]}
+            try:
+                head, rows = O.read_cell(path)
+                dk = s if _snum(s) >= 21 else None
+                r = fit_one(rows, head["H"], s, err, pr["mean"], pr["mb"], K=16, delay_key=dk, seed=0, warmup=a.warmup, samples=a.samples,
+                            retry_warmup=a.retry_warmup, max_tree_depth=a.max_tree_depth, prior=pr["prior"], hyper=pr["hyper"], stage1=False, keep_ll=False)
+                sm, info, dg, obs = r["samples"], r["info"], r["diag"], r["obs"]
+                conv = bool(dg["conv"])
+                cells = OM.pred_cells(s, T, {q: sm[f"lnC_{q:g}"] for q in OM.Q_TARGETS}, conv)
+                for c in cells:
+                    c["secs"] = round(time.time() - t0, 1)
+                rec.update({"n_rows": obs["n"], "N": obs["N"], "counts": obs["counts"], "conv": conv, "secs": round(time.time() - t0, 1), "map_secs": info["map_secs"],
+                            "nuts_secs": info["secs"], "retried": info["retried"], "divergences": info["divergences"], "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"],
+                            "worst": {"rhat": sorted(((v["rhat"], k) for k, v in dg["per"].items()), reverse=True)[:3], "ess": sorted((v["ess"], k) for k, v in dg["per"].items())[:3]},
+                            "depth_dist": info.get("depth_dist"), "tree_cap_frac": info.get("tree_cap_frac"), "mean_leapfrog": info.get("mean_leapfrog"),
+                            "n_starts": r["n_starts"], "n_best_repeat": r["n_best_repeat"],
+                            "lnC_q": {f"{q:g}": np.quantile(sm[f"lnC_{q:g}"].reshape(-1), [0.025, 0.1, 0.5, 0.9, 0.975]).tolist() for q in OM.Q_TARGETS}})
+                out["cells"] = [c for c in out["cells"] if not (c["season"] == s and c["T"] == float(T))] + cells
+                log(f"{s} T{T:g}: {rec['secs']:.0f}초 (map {rec['map_secs']}s nuts {rec['nuts_secs']}s) 줄 {obs['n']} conv {conv} rhat {dg['rhat_max']:.3f} ess {dg['ess_min']:.0f} "
+                    f"div {info['divergences']} retried {info['retried']} depth {info.get('depth_dist')} 컷(1·3·10%) " +
+                    "/".join(f"{math.exp(rec['lnC_q'][q][2]):.1f}" for q in ("1", "3", "10")))
+            except Exception as e:  # noqa
+                rec["error"] = f"{type(e).__name__}: {e}"
+                rec["secs"] = round(time.time() - t0, 1)
+                log(f"{s} T{T:g}: 오류 {rec['error']}")
+            out["fits"] = [f for f in out["fits"] if not (f["season"] == s and f["T"] == float(T))] + [rec]
+            _atomic_dump(out, a.out)
+    n = len(out["fits"])
+    log(f"predict 끝: 칸 {n}개, 수렴 {sum(1 for f in out['fits'] if f.get('conv'))}/{n}, 오류 {sum(1 for f in out['fits'] if f.get('error'))} -> {a.out}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -1201,16 +1452,35 @@ def main():
     c.add_argument("--samples", type=int, default=500)
     s1 = sp.add_parser("stage1")
     s1.add_argument("--obs", required=True)
-    s1.add_argument("--seasons", required=True)
+    s1.add_argument("--seasons", required=True, help="S19-S24 · S19,S25 · S19-S24,S30 꼴")
     s1.add_argument("--m1-stage1", required=True)
     s1.add_argument("--out", required=True)
     s1.add_argument("--ll-dir", required=True)
     s1.add_argument("--resume", action="store_true")
+    s1.add_argument("--tag", default="M2", help="ll-dir 안 줄별 LOO 파일 이름 앞부분")
     s1.add_argument("--warmup", type=int, default=1000)
     s1.add_argument("--samples", type=int, default=1000)
     s1.add_argument("--retry-warmup", type=int, default=1500)
     s1.add_argument("--max-tree-depth", type=int, default=10)
     s1.add_argument("--refit-limit-secs", type=int, default=1800, help="첫 맞춤이 이보다 오래 걸렸으면 기저를 늘려 다시 맞추지 않는다 (시즌 60분 상한)")
+    mg = sp.add_parser("merge-stage1")
+    mg.add_argument("--in", dest="inputs", nargs="+", required=True)
+    mg.add_argument("--out", required=True)
+    pd = sp.add_parser("predict")
+    pd.add_argument("--obs", required=True, help="T 절단 관측 표 폴더 (obs_table.py build --work W --out DIR이 만든 DIR — DIR/{시즌}/T{T}.jsonl.gz)")
+    pd.add_argument("--seasons", required=True, help="맞힐 시즌 S42 · S22-S26 · S22,S30")
+    pd.add_argument("--T", default="all", help="all(= common.t_grid) 또는 48 · 24,48,96")
+    pd.add_argument("--m2-stage1", required=True, help="M2 1단계 (r7/stage1_M2_D1.json — merge-stage1 결과)")
+    pd.add_argument("--m1-stage1", required=True, help="M1 1단계 (r7/stage1_M1_D1.json)")
+    pd.add_argument("--m1-hier", default=None, help="M1 2단계 결과 (r7/hier_M1_D1.json). 없으면 M1 1단계 파일에서 hier.prior_for를 M1과 같은 인자로 부른다")
+    pd.add_argument("--out", required=True)
+    pd.add_argument("--cache", default=None, help="hier 창 적합 캐시 폴더 (디스크 npz)")
+    pd.add_argument("--log", default=None, help="진행 기록 파일 (덧붙임)")
+    pd.add_argument("--resume", action="store_true")
+    pd.add_argument("--warmup", type=int, default=500)
+    pd.add_argument("--samples", type=int, default=500)
+    pd.add_argument("--retry-warmup", type=int, default=1000)
+    pd.add_argument("--max-tree-depth", type=int, default=10)
     t = sp.add_parser("test")
     t.add_argument("--work", default=None)
     t.add_argument("--m1-stage1", default=None)
@@ -1229,6 +1499,12 @@ def main():
         name = "multistart.json"
     elif a.cmd == "stage1":
         cmd_stage1(a)
+        return
+    elif a.cmd == "merge-stage1":
+        cmd_merge_stage1(a)
+        return
+    elif a.cmd == "predict":
+        cmd_predict(a)
         return
     elif a.cmd == "test" and a.which == "m1match":
         r = test_m1match(a.m1_stage1, a.season)
