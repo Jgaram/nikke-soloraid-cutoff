@@ -517,3 +517,55 @@ def pred_cells(season, T, draws_lnC, conv, server="KR"):
                       "i80": [float(np.exp(lo80)), float(np.exp(hi80))], "i95": [float(np.exp(lo95)), float(np.exp(hi95))],
                       "own": True, "conv": bool(conv)})
     return cells
+
+
+# ---------- 합성 % 뽑기 (SBC·PPC·시험 공용; 2026-10-29 더함, 기존 인자 안 바꿈) ----------
+
+def simulate_pct(sel, H, err, mu_sd_fn, eps, phi_true, seed=0, delay_key=None, K=64):
+    """select_rows가 고른 줄 배치(점수·종류·시각 정보·서버 라벨·사이트)를 그대로 두고 pct만 곡면에서 새로 뽑는다.
+    mu_sd_fn(y[N], u[N]) -> (mu[3,N], sd[3,N]) numpy (서버 성분 KR·JP·GL의 log10 %와 잔차 sd). eps = 오염 확률, phi_true = [4,3] 사이트별 서버 몫.
+    순서: 서버(라벨 줄은 elab 확률로 다른 서버, 미상 줄은 phi_true[사이트]) -> 촬영 시각(노드 K개 중 하나) -> 곡면 + 정규 잡음 ->
+    오염(eps, 라플라스 0.34 더함) -> 표시(반올림/버림 반반, 0.01 단위). 100% 초과·0.01% 미만은 버린다.
+    -> (rows [pct 바뀐 줄 목록], info {server_true, contam, t_shot, n_dropped})"""
+    rng = np.random.default_rng(seed)
+    keep, tshot, srv = [], [], []
+    for r in sel:
+        t, w, why = nodes_detail(r, H, err, delay_key, K)
+        if t is None:
+            continue
+        tshot.append(float(rng.choice(t, p=w / w.sum())))
+        si = SITES.index(r["site"]) if r["site"] in SITES else 3
+        if r["server"] in SERVERS:
+            lab = SERVERS.index(r["server"])
+            if rng.random() < _elab(r, err):
+                pr = np.array(phi_true[si], float)
+                pr[lab] = 0
+                srv.append(int(rng.choice(3, p=pr / pr.sum())))
+            else:
+                srv.append(lab)
+        else:
+            srv.append(int(rng.choice(3, p=np.asarray(phi_true[si], float) / np.sum(phi_true[si]))))
+        keep.append(r)
+    n = len(keep)
+    if n == 0:
+        return [], {"server_true": [], "contam": [], "t_shot": [], "n_dropped": 0}
+    y = np.log([r["score"] for r in keep])
+    tshot = np.array(tshot)
+    u = np.clip(tshot / H, 0.02, 1.0)
+    mu, sd = mu_sd_fn(y, u)
+    srv = np.array(srv)
+    z = mu[srv, np.arange(n)] + sd[srv, np.arange(n)] * rng.standard_normal(n)
+    cont = rng.random(n) < eps
+    z = np.where(cont, z + rng.laplace(0, 0.34, n), z)
+    x100 = 10 ** np.clip(z, -6, 6) * 100
+    pct = np.where(rng.random(n) < 0.5, np.round(x100), np.floor(x100)) / 100
+    out, kk = [], []
+    for i, (r, p) in enumerate(zip(keep, pct)):
+        if p > 100.0 or p < 0.01:
+            continue
+        x = dict(r)
+        x["pct"] = float(p)
+        out.append(x)
+        kk.append(i)
+    kk = np.array(kk, int)
+    return out, {"server_true": srv[kk].tolist(), "contam": cont[kk].tolist(), "t_shot": tshot[kk].tolist(), "n_dropped": n - len(out)}

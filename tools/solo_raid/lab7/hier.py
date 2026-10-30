@@ -63,9 +63,10 @@ def fit_window(theta_hat, V, mu_loc, mu_scale, tau_scale, seed=0, chains=4, warm
     J, D = theta_hat.shape
     if J > JPAD:
         raise ValueError(f"J={J} > {JPAD}")
-    th = np.zeros((JPAD, D))
-    VV = np.tile(np.eye(D), (JPAD, 1, 1))
-    mk = np.zeros(JPAD)
+    JP = next(b for b in (4, 8, 12, 16, JPAD) if b >= J)   # 채움 칸: 시즌 수에 맞는 작은 칸 (24로 늘 채우면 작은 창이 6배 느리다; 컴파일은 칸마다 한 번)
+    th = np.zeros((JP, D))
+    VV = np.tile(np.eye(D), (JP, 1, 1))
+    mk = np.zeros(JP)
     th[:J], VV[:J], mk[:J] = theta_hat, V, 1.0
     key = (D, chains, warmup, samples)
     if key not in _MCMC:
@@ -79,6 +80,7 @@ def fit_window(theta_hat, V, mu_loc, mu_scale, tau_scale, seed=0, chains=4, warm
           extra_fields=("diverging",))
     sm = m.get_samples()
     ex = m.get_extra_fields()
+    jax.block_until_ready((sm, ex))   # jax는 비동기라 이걸 기다려야 걸린 시간이 맞다
     secs = time.time() - t0
     STATS["fit"] += 1
     STATS["secs"] += secs

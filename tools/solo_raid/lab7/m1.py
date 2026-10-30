@@ -494,7 +494,7 @@ def map_init(n):
 
 
 def fit_one(rows, H, season, err, form, x_term, r2, K=16, delay_key=None, stage1=True, prior=None, seed=0,
-            keep_ll=True, retry=True, max_tree_depth=10, multistart=True, warmup=1000, samples=1000, retry_warmup=1500):
+            keep_ll=True, retry=True, max_tree_depth=10, multistart=True, warmup=1000, samples=1000, retry_warmup=1500, n_starts=8):
     """한 칸 맞춤: prepare -> map_precond -> fit_with_retry. -> dict(samples, info, diag, obs, jobs, pre, names)"""
     import obs_table  # noqa: F401
     obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1)
@@ -503,10 +503,10 @@ def fit_one(rows, H, season, err, form, x_term, r2, K=16, delay_key=None, stage1
     names = theta_names(form, x_term, r2)
     t0 = time.time()
     if multistart:
-        modes = multistart_map(jobs, prior, form, x_term, r2=r2)
+        modes = multistart_map(jobs, prior, form, x_term, r2=r2, n=n_starts)
         rep = sum(1 for p in modes if p["info"]["fun"] - modes[0]["info"]["fun"] < 0.5)
         if rep < 2:   # 최고 봉우리가 시작점 둘 이상에서 안 나오면 8개 더 (명세 7절 「WP3b M1 세션이 더함」)
-            modes = sorted(modes + multistart_map(jobs, prior, form, x_term, r2=r2, seed=1), key=lambda p: p["info"]["fun"])
+            modes = sorted(modes + multistart_map(jobs, prior, form, x_term, r2=r2, n=n_starts, seed=1), key=lambda p: p["info"]["fun"])
             rep = sum(1 for p in modes if p["info"]["fun"] - modes[0]["info"]["fun"] < 0.5)
         pre = modes[0]
         pre["n_starts"], pre["n_best_repeat"] = len(modes), rep
@@ -672,6 +672,597 @@ def cmd_compare(a):
     _log_attempt(a.ll_dir, line)
 
 
+
+# ======================================================================
+# 설계서 2.3~2.9: prior · priorcheck · sbc · check43 · kcheck · predict (joint는 맨 끝)
+# ======================================================================
+import hashlib  # noqa: E402
+
+
+def _variant(js):
+    return js["form"], bool(js["x_term"]), bool(js["r2"])
+
+
+def _load_stage1(path):
+    with open(path, encoding="utf-8") as f:
+        js = json.load(f)
+    st = {s: {"names": js["names"], "mean": v["mean"], "cov": v["cov"], "a_var": v["cov"][0][0]} for s, v in js["seasons"].items()}
+    return js, st
+
+
+def _write_json(path, obj):
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=1, default=float)
+    os.replace(path + ".tmp", path)
+
+
+def snum_(s):
+    return int(s.lstrip("S"))
+
+
+def cmd_prior(a):
+    import hier as Hr
+    js, st = _load_stage1(a.stage1)
+    form, x_term, r2 = _variant(js)
+    names = theta_names(form, x_term, r2)
+    mu_loc, mu_scale, tau = hier_args(names)
+    out = {"about": "M1 2단계 사전 (두 단계 경험적 베이즈): 창 k는 시간 순 교차검증, 사전 = 창 안 앞 시즌 1단계 사후로 맞춘 새 시즌 모수의 예측 분포 (정규 근사).",
+           "data_ver": C.DATA_VER, "model": "M1", "form": form, "x_term": x_term, "r2": r2, "stage1": os.path.basename(a.stage1),
+           "tool_head": _git_head(), "targets": {}}
+    if a.resume and os.path.exists(a.out):
+        with open(a.out, encoding="utf-8") as f:
+            out = json.load(f)
+    for t in expand_seasons(a.targets):
+        if t in out["targets"] and a.resume:
+            continue
+        t0 = time.time()
+        st0 = dict(Hr.STATS)
+        pe = Hr.prior_for(st, t, names, tau, mu_loc, mu_scale, a.cache)
+        pe["secs"] = round(time.time() - t0, 1)
+        pe["fits_run"] = Hr.STATS["fit"] - st0["fit"]
+        pe["cache_hits"] = Hr.STATS["hit"] - st0["hit"]
+        out["targets"][t] = pe
+        _write_json(a.out, out)
+        line = f"prior {t}: k {pe['k']} window {pe['window'][0]}..{pe['window'][-1]} secs {pe['secs']} fits {pe['fits_run']} hits {pe['cache_hits']} fit {pe['fit_info']['secs']}s div {pe['fit_info']['divergences']} rhat {pe['fit_info']['rhat_max']:.3f}"
+        print(line, flush=True)
+        _log_attempt(a.cache, line)
+
+
+def expand_seasons(spec):
+    out = []
+    for part in spec.split(","):
+        if "-" in part:
+            x, y = part.split("-")
+            out += [f"S{n}" for n in range(snum_(x), snum_(y) + 1)]
+        else:
+            out.append(part)
+    return out
+
+
+def prior_mean_curves(entry, w_grid, u_grid, form=None):
+    """2단계 평균 곡선 (M2·M3 평균 함수용). entry = hier_M1_D1.json["targets"][시즌] (또는 prior_for 결과).
+    반환: {"r": r(w_grid) = 컷 기울기의 로그 (r0 + r1 w + r2 w^2), "ell": ell(u_grid) = ln(-dP/du) (P(0.4) = 1로 정규화, 침수 크기 lnm은 따로),
+           "lnm", "a", "beta"(있으면), "theta": 모수 평균 dict}. 모수는 2단계 예측 평균 (x항 beta는 P에 점수 의존 배수 exp(beta z)로 따로 곱해지므로 곡선에 안 넣음)."""
+    import jax
+    import jax.numpy as jnp
+    names = entry["names"]
+    mean = dict(zip(names, entry["mean"]))
+    form = form or ("f2pow" if "eta2" in mean else "kuma")
+    w = np.asarray(w_grid, float)
+    r = mean["r0"] + mean["r1"] * w + mean.get("r2", 0.0) * w * w
+    eta = [jnp.float32(mean[f"eta{i}"]) for i in range(ETA_N[form])]
+    if form == "f2pow":
+        eta[2] = jnp.abs(eta[2])
+    p04 = _p0(jnp.float32(0.4), eta, form)
+    dp = jax.vmap(jax.grad(lambda u: _p0(u, eta, form)))(jnp.asarray(u_grid, jnp.float32))
+    ell = np.log(np.maximum(-np.asarray(dp), 1e-30) / float(p04))
+    return {"r": r, "ell": ell, "lnm": mean["lnm"], "a": entry["a"]["mean"], "beta": mean.get("beta"), "theta": mean}
+
+
+def _theta_np(vec, names, form):
+    return theta_from_vec([vec[i + 1] for i in range(len(names))], names, vec[0], form)
+
+
+def _stat_fn(names, form):
+    import jax
+    import jax.numpy as jnp
+    us = jnp.asarray([0.1, 0.2, 0.4, 0.7], jnp.float32)
+
+    def f(vec):
+        th = _theta_np(vec, names, form)
+        a_ = th["a"]
+        p = flood(jnp.exp(th["lnm"]), _eta_of(th, form), us, form)
+        return jnp.concatenate([jnp.stack([jnp.exp(a_), jnp.exp(lnC(th, 1.0) - a_), jnp.exp(lnC(th, 10.0) - a_)]), p])
+    return jax.jit(jax.vmap(f))
+
+
+STAT_NAMES = ["cut3_score", "C1_over_C3", "C10_over_C3", "P_u0.1", "P_u0.2", "P_u0.4", "P_u0.7"]
+
+
+def cmd_priorcheck(a):
+    js, st = _load_stage1(a.stage1)
+    with open(a.hier, encoding="utf-8") as f:
+        hj = json.load(f)
+    form, x_term, r2 = _variant(js)
+    names = theta_names(form, x_term, r2)
+    fn = _stat_fn(names, form)
+    rng = np.random.default_rng(0)
+    out = {"about": "사전 예측 점검 (명세 7절 ②): 시즌 s의 2단계 사전에서 모수 1000개를 뽑아 곡면 요약의 5·50·95% 분위를 앞 시즌 1단계 사후 평균값의 범위와 나란히 (x항은 w=0에서 빼고 계산).",
+           "data_ver": C.DATA_VER, "stats": STAT_NAMES, "seasons": {}}
+    for t in expand_seasons(a.targets):
+        pe = hj["targets"][t]
+        ix = [pe["names"].index(n) for n in names]
+        mean = np.array(pe["mean"])[ix]
+        cov = np.array(pe["cov"])[np.ix_(ix, ix)]
+        th = rng.multivariate_normal(mean, cov, 1000)
+        av = rng.normal(pe["a"]["mean"], np.sqrt(pe["a"]["var"]), 1000)
+        S = np.asarray(fn(np.concatenate([av[:, None], th], 1).astype(np.float32)))
+        before = [s for s in sorted(st, key=snum_) if snum_(s) < snum_(t)]
+        prevv = np.asarray(fn(np.array([[st[s]["mean"][0]] + [st[s]["mean"][st[s]["names"].index(n)] for n in names] for s in before], np.float32)))
+        res = {}
+        for j, nm in enumerate(STAT_NAMES):
+            q = np.quantile(S[:, j], [0.05, 0.5, 0.95]).tolist()
+            lo, hi = float(prevv[:, j].min()), float(prevv[:, j].max())
+            res[nm] = {"prior_q05_50_95": q, "prev_min": lo, "prev_max": hi, "covers_prev_range": bool(q[0] <= lo and hi <= q[2]),
+                       "prior_median_over_prev_median": float(q[1] / np.median(prevv[:, j])),
+                       "frac_prior_outside_10x_prev_median": float(np.mean((S[:, j] > 10 * np.median(prevv[:, j])) | (S[:, j] < 0.1 * np.median(prevv[:, j]))))}
+        out["seasons"][t] = res
+        print("priorcheck", t, {k: (v["covers_prev_range"], round(v["frac_prior_outside_10x_prev_median"], 3)) for k, v in res.items()}, flush=True)
+    _write_json(a.out, out)
+
+
+def _mu_sd_fn_factory(th, form, x_term):
+    """truth theta(dict) -> mu_sd_fn(y, u) for OM.simulate_pct (K=1 노드)."""
+    import jax.numpy as jnp
+
+    def fn(y, u):
+        mu, P = surface(th, jnp.asarray(y, jnp.float32), jnp.asarray(u[:, None], jnp.float32), form, x_term)
+        mu, P = np.asarray(mu)[:, :, 0], np.asarray(P)[:, :, 0]
+        sd = np.sqrt(np.exp(float(th["lnsig0"])) ** 2 + (np.exp(float(th["lnrho"])) * P) ** 2)
+        return mu, sd
+    return fn
+
+
+def _phi_prior_mean(err):
+    dsite = err["1e_server"]["unknown_row_site_dirichlet"]
+    return np.array([[dsite[s]["alpha"][k] for k in OM.SERVERS] for s in ("dc", "naver", "blabla", "*")])
+
+
+def cmd_sbc(a):
+    import obs_table as O
+    with open(a.hier, encoding="utf-8") as f:
+        hj = json.load(f)
+    form, x_term, r2 = hj["form"], hj["x_term"], hj["r2"]
+    names = theta_names(form, x_term, r2)
+    pe = hj["targets"][a.season]
+    err = OM.load_err()
+    head, rows = O.read_cell(a.cell)
+    H = head["H"]
+    sel = OM.select_rows(rows, H, stage1=False)
+    ix = [pe["names"].index(n) for n in names]
+    mean, cov = np.array(pe["mean"])[ix], np.array(pe["cov"])[np.ix_(ix, ix)]
+    alpha = _phi_prior_mean(err)
+    out = {"about": "SBC 가벼운 판 (명세 7절 ①): 그 시즌 사전에서 모수·eps·phi를 뽑아 같은 칸 배치로 pct를 만들어 같은 사전으로 맞춤. 순위 = 사후에서 참값보다 작은 몫.",
+           "data_ver": C.DATA_VER, "season": a.season, "cell": os.path.basename(a.cell), "reps": [], "setup": "8시작 MAP · 4사슬x(500+500) · 재시도(0.95, 예열 1000)"}
+    if a.resume and os.path.exists(a.out):
+        with open(a.out, encoding="utf-8") as f:
+            out = json.load(f)
+    watch = ["a"] + names + ["lnC_1", "lnC_3", "lnC_10"]
+    for rep in range(a.reps):
+        if rep < len(out["reps"]) and a.resume:
+            continue
+        rng = np.random.default_rng(1000 + rep)
+        vec = rng.multivariate_normal(mean, cov)
+        a_true = rng.normal(pe["a"]["mean"], np.sqrt(pe["a"]["var"]))
+        eps_t = rng.beta(1.46, 98.54)
+        phi_t = np.array([rng.dirichlet(al) for al in alpha])
+        th = theta_from_vec(list(vec), names, a_true, form)
+        fn = _mu_sd_fn_factory(th, form, x_term)
+        sim, info = OM.simulate_pct(sel, H, err, fn, eps_t, phi_t, seed=rep, delay_key=a.season)
+        t0 = time.time()
+        r = fit_one(sim, H, a.season, err, form, x_term, r2, K=16, delay_key=a.season, stage1=False, prior=pe, seed=rep,
+                    warmup=500, samples=500, retry_warmup=1000)
+        truth = {"a": a_true, **dict(zip(names, vec))}
+        for q in (1, 3, 10):
+            truth[f"lnC_{q}"] = float(lnC(th, float(q)))
+        res = {}
+        for nm in watch:
+            v = r["samples"][nm].reshape(-1)
+            res[nm] = {"truth": float(truth[nm]), "rank": float((v < truth[nm]).mean()), "median": float(np.median(v))}
+        out["reps"].append({"rep": rep, "n_rows": r["obs"]["n"], "conv_core": core_diag(r["diag"], names, r["info"]["divergences"])["conv_core"],
+                            "retried": r["info"]["retried"], "secs": round(time.time() - t0, 1), "params": res})
+        out["summary"] = _sbc_summary(out["reps"], watch)
+        _write_json(a.out, out)
+        print(f"sbc rep {rep}: {out['reps'][-1]['secs']}s conv {out['reps'][-1]['conv_core']}", flush=True)
+        _log_attempt(a.ll_dir, f"sbc {a.season} rep {rep} {out['reps'][-1]['secs']}s conv {out['reps'][-1]['conv_core']}")
+
+
+def _sbc_summary(reps, watch):
+    s = {"n": len(reps), "conv_frac": float(np.mean([r["conv_core"] for r in reps])), "secs_mean": float(np.mean([r["secs"] for r in reps])), "by_param": {}}
+    for nm in watch:
+        rk = np.array([r["params"][nm]["rank"] for r in reps])
+        bias = np.array([r["params"][nm]["median"] - r["params"][nm]["truth"] for r in reps])
+        s["by_param"][nm] = {"cover80": float(((rk > 0.1) & (rk < 0.9)).mean()), "cover95": float(((rk > 0.025) & (rk < 0.975)).mean()),
+                             "bias_mean": float(bias.mean()), "rank_mean": float(rk.mean())}
+    return s
+
+
+def count_pairs(rows):
+    """PPC용 순서 모순 수. rows = select_rows 꼴(+pct 바뀐) 목록. (1) KR 라벨 A 줄 짝: |dh| <= 0.25h인데 점수 높은 쪽 %가 0.01%p 넘게 더 나쁨.
+    (2) 같은 pid, 점수 0.1억 안, 늦은 줄 %가 더 좋음 (0.01%p 넘게)."""
+    A = [r for r in rows if r["tg"] == "A" and r["server"] == "KR"]
+    h = np.array([r["h"] for r in A])
+    sc = np.array([r["score"] for r in A])
+    pc = np.array([r["pct"] for r in A])
+    dh = np.abs(h[:, None] - h[None, :]) <= 0.25
+    c1 = int(((sc[:, None] > sc[None, :]) & dh & (pc[:, None] > pc[None, :] + 0.01)).sum()) if len(A) else 0
+    by = {}
+    for r in rows:
+        if r["tg"] != "post" and r.get("h") is not None:
+            by.setdefault(r["pid"], []).append(r)
+    c2 = 0
+    for L in by.values():
+        for i in range(len(L)):
+            for j in range(len(L)):
+                if i != j and abs(L[i]["score"] - L[j]["score"]) <= 0.1 and L[j]["h"] > L[i]["h"] and L[j]["pct"] < L[i]["pct"] - 0.01:
+                    c2 += 1
+    return c1, c2
+
+
+def cmd_check43(a):
+    import obs_table as O
+    sys.path.insert(0, os.path.join(C.TOOLS, "lab6"))
+    import anchor as AN
+    js, st = _load_stage1(a.stage1)
+    form, x_term, r2 = _variant(js)
+    names = theta_names(form, x_term, r2)
+    err = OM.load_err()
+    truth = AN.truth()
+    alpha = _phi_prior_mean(err)
+    out = {"about": "1단계 4.3 점검. 사후는 1단계 JSON의 평균·공분산 정규 근사에서 뽑은 100개로 근사 (뽑기 자체는 저장 안 함). 정답 견줌(answer_key)은 보고용이고 고르기에 쓰지 않는다.",
+           "data_ver": C.DATA_VER, "seasons": {}}
+    flags_out = {"about": "사후 오염 확률 0.5 넘는 줄 (key·pid·kind·tg·server·p_contam·p_kr만)", "data_ver": C.DATA_VER, "seasons": {}}
+    rng = np.random.default_rng(0)
+    for s in expand_seasons(a.seasons):
+        v = js["seasons"][s]
+        head, rows = O.read_cell(os.path.join(a.obs, f"{s}.jsonl.gz"))
+        H = head["H"]
+        obs = OM.prepare(rows, H, s, err, K=16, delay_key=delay_key_stage1(s), stage1=True)
+        jobs = OM.to_jax(obs)
+        sel = OM.select_rows(rows, H, stage1=True)
+        meta = obs["meta"]
+        sel = [r for r in sel if True][:len(meta)]
+        mean = np.array(v["mean"])
+        cov = np.array(v["cov"])
+        draws = rng.multivariate_normal(mean, cov, 100)
+        fn = theta_surface_fn(names, form, x_term, r2)
+        samp = {"a": draws[None, :, 0]}
+        for i, nm in enumerate(names):
+            samp[nm] = draws[None, :, i + 1]
+        samp["eps"] = rng.beta(1.46, 98.54, (1, 100))
+        samp["phi"] = np.array([[np.array([rng.dirichlet(al) for al in alpha]) for _ in range(100)]])
+        rp = OM.row_posteriors(jobs, samp, fn, max_draws=100)
+        # A 잔차 (평균 모수 plug-in)
+        import jax.numpy as jnp
+        th = _theta_np(mean, names, form)
+        mu, P = surface(th, jobs["y"], jobs["u"], form, x_term)
+        mu, P = np.asarray(mu), np.asarray(P)
+        sig = np.sqrt(np.exp(float(th["lnsig0"])) ** 2 + (np.exp(float(th["lnrho"])) * P) ** 2)
+        pos = obs["pos"]
+        res = []
+        for i, mrow in enumerate(meta):
+            if mrow["tg"] != "A":
+                continue
+            p_i = pos[i]
+            k = obs["lab"][p_i] if obs["lab"][p_i] >= 0 else 0
+            m0, s0 = mu[k, p_i, 0], sig[k, p_i, 0]
+            lo, hi = obs["zlo"][p_i], obs["zhi"][p_i]
+            d = 0.0 if lo <= m0 <= hi else ((lo - m0) / s0 if m0 < lo else (m0 - hi) / s0)
+            res.append(d)
+        res = np.array(res)
+        # C 시각
+        dts = []
+        for i, mrow in enumerate(meta):
+            if mrow["tg"] == "delay" and sel[i].get("h_lo_top7") is not None and sel[i].get("h_hi_top7") is not None:
+                p_i = pos[i]
+                prior_mean = float((np.exp(obs["lw"][p_i]) * obs["t"][p_i]).sum())
+                dts.append(float(rp["t_mean"][i]) - prior_mean)
+        unk = [i for i, mrow in enumerate(meta) if mrow["server"] is None]
+        pk = rp["p_server"][unk, 0] if unk else np.array([])
+        # PPC
+        c1_obs, c2_obs = count_pairs(sel)
+        c1s, c2s = [], []
+        for d in range(100):
+            thd = _theta_np(draws[d], names, form)
+            fnd = _mu_sd_fn_factory(thd, form, x_term)
+            sim, _ = OM.simulate_pct(sel, H, err, fnd, float(samp["eps"][0, d]), samp["phi"][0, d], seed=d, delay_key=delay_key_stage1(s), K=16)
+            c1, c2 = count_pairs(sim)
+            c1s.append(c1)
+            c2s.append(c2)
+        q = lambda x: np.quantile(x, [0.05, 0.5, 0.95]).tolist() if len(x) else None
+        e = {}
+        for qq in (1, 3, 10):
+            tv = truth.get((s, "KR", float(qq)))
+            med = float(np.exp(v["lnC_q"][f"{qq:g}"][2]))
+            e[str(qq)] = {"truth": tv, "median": med, "e": (med / tv - 1) if tv else None}
+        out["seasons"][s] = {
+            "A_rows": int(len(res)), "A_frac_abs_dist_gt_2": float((np.abs(res) > 2).mean()) if len(res) else None,
+            "A_dist_quantiles_5_50_95_99": np.quantile(np.abs(res), [0.05, 0.5, 0.95, 0.99]).tolist() if len(res) else None,
+            "n_flags": v["n_flags"], "C_rows_with_top7": len(dts), "C_t_post_minus_prior_node_mean_quantiles_5_25_50_75_95": np.quantile(dts, [0.05, 0.25, 0.5, 0.75, 0.95]).tolist() if dts else None,
+            "unknown_rows": len(unk), "unknown_p_kr_quantiles_5_25_50_75_95": np.quantile(pk, [0.05, 0.25, 0.5, 0.75, 0.95]).tolist() if len(pk) else None,
+            "ppc_order_contradiction": {"observed": c1_obs, "ppc_q05_50_95": q(c1s), "ppc_exceeds_frac": float(np.mean(np.array(c1s) >= c1_obs))},
+            "ppc_same_person_later_better": {"observed": c2_obs, "ppc_q05_50_95": q(c2s), "ppc_exceeds_frac": float(np.mean(np.array(c2s) >= c2_obs))},
+            "answer_key_report_only": e}
+        flags_out["seasons"][s] = v["flags"]
+        print("check43", s, out["seasons"][s]["A_frac_abs_dist_gt_2"], c1_obs, c2_obs, flush=True)
+        _write_json(a.out, out)
+        _write_json(a.flags, flags_out)
+
+
+def _group_cells(spec):
+    """'S30:24,48,96 S42:24,48,96' -> [(S30, 24.0), ...]"""
+    out = []
+    for tok in spec:
+        s, ts = tok.split(":")
+        out += [(s, float(t)) for t in ts.split(",")]
+    return out
+
+
+def fit_cell(tab_dir, season, T, pe, form, x_term, r2, err, K=16, seed=0, n_starts=8, warmup=500, samples=500):
+    import obs_table as O
+    head, rows = O.read_cell(os.path.join(tab_dir, season, f"T{T:g}.jsonl.gz"))
+    return fit_one(rows, head["H"], season, err, form, x_term, r2, K=K, delay_key=season, stage1=False, prior=pe, seed=seed,
+                   warmup=warmup, samples=samples, retry_warmup=1000, n_starts=n_starts)
+
+
+def cmd_kcheck(a):
+    with open(a.hier, encoding="utf-8") as f:
+        hj = json.load(f)
+    form, x_term, r2 = hj["form"], hj["x_term"], hj["r2"]
+    err = OM.load_err()
+    out = {"about": "노드 수 점검 (명세 7절 ⑤): K16(seed 0)·K16(seed 1)·K32(seed 0)의 lnC_q 사후 중앙. 세션 덧붙임: 같은 K 두 seed 차(MCMC 잡음)도 함께.", "data_ver": C.DATA_VER, "cells": {}}
+    if a.resume and os.path.exists(a.out):
+        with open(a.out, encoding="utf-8") as f:
+            out = json.load(f)
+    for s, T in _group_cells(a.cells):
+        key = f"{s}:T{T:g}"
+        if key in out["cells"]:
+            continue
+        res = {}
+        for tag, K, seed in (("K16_s0", 16, 0), ("K16_s1", 16, 1), ("K32_s0", 32, 0)):
+            r = fit_cell(a.obs, s, T, hj["targets"][s], form, x_term, r2, err, K=K, seed=seed, n_starts=a.starts)
+            res[tag] = {f"{q:g}": float(np.median(r["samples"][f"lnC_{q:g}"])) for q in OM.Q_TARGETS}
+            res[tag]["secs"] = r["info"]["secs"]
+            res[tag]["conv_core"] = core_diag(r["diag"], r["names"], r["info"]["divergences"])["conv_core"]
+        d = {}
+        for q in res["K16_s0"]:
+            if q in ("secs", "conv_core"):
+                continue
+            d[q] = {"K16_vs_K32_rel": float(np.exp(res["K16_s0"][q] - res["K32_s0"][q]) - 1), "K16_seed_vs_seed_rel": float(np.exp(res["K16_s0"][q] - res["K16_s1"][q]) - 1)}
+        out["cells"][key] = {"medians": res, "diffs": d}
+        _write_json(a.out, out)
+        print("kcheck", key, {q: (round(v["K16_vs_K32_rel"], 5), round(v["K16_seed_vs_seed_rel"], 5)) for q, v in d.items()}, flush=True)
+
+
+def row_pred_cdf(jobs, mu, P, sigma0, rho, eps, phi, z):
+    """줄 하나의 예측 CDF at z[N]: 서버 혼합 x (정규 구간 성분 노드 평균 x (1-eps) + 라플라스 오염 x eps)."""
+    import jax.numpy as jnp
+    from jax.scipy.stats import norm
+    sig = jnp.sqrt(sigma0 ** 2 + (rho * P) ** 2)
+    w = jnp.exp(jnp.minimum(jobs["lw"], 0.0))[None]
+    Fn = (w * norm.cdf((z[None, :, None] - mu) / sig)).sum(2)
+    x = z[None, :, None] - mu
+    s = jobs["fc_scale"]
+    Fl = (w * (0.5 + 0.5 * jnp.sign(x) * (1 - jnp.exp(-jnp.abs(x) / s)))).sum(2)
+    Fk = (1 - eps) * Fn + eps * Fl
+    pi = jnp.exp(OM._logpi(jobs, phi))
+    return (pi.T * Fk).sum(0)
+
+
+def loo_pit(jobs, obs, sm, names, form, x_term, T, max_draws=1000):
+    """T-6 < 촬영 <= T 인 A 줄마다 PSIS-LOO PIT: 예측 CDF(zmid)의 PSIS 가중 사후 평균. -> (pit 목록, 줄 수)"""
+    import jax
+    import jax.numpy as jnp
+    from arviz.stats import psislw
+    meta, pos = obs["meta"], obs["pos"]
+    rows_i = [i for i, mr in enumerate(meta) if mr["tg"] == "A" and T - 6 < mr["h"] <= T + 1e-9]
+    if not rows_i:
+        return [], 0
+    idx = pos[rows_i]
+    flat = {k: np.asarray(v).reshape((-1,) + np.asarray(v).shape[2:]) for k, v in sm.items() if k in ["a"] + names + ["eps", "phi", "ll"]}
+    S = len(flat["a"])
+    sel_s = np.unique(np.linspace(0, S - 1, min(max_draws, S)).astype(int))
+    zmid = 0.5 * (jobs["zlo"][idx] + jobs["zhi"][idx])
+    sub = {k: (jobs[k][idx] if hasattr(jobs[k], "shape") and getattr(jobs[k], "ndim", 0) >= 1 and k not in ("dirichlet",) else jobs[k]) for k in jobs}
+    sub["lw"] = jobs["lw"][idx]
+
+    def one(draw):
+        th = theta_from_vec([draw[nm] for nm in names], names, draw["a"], form)
+        mu, P = surface(th, jobs["y"], jobs["u"], form, x_term)
+        return row_pred_cdf(sub, mu[:, idx], P[:, idx], jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), draw["eps"], draw["phi"], zmid)
+
+    f = jax.jit(jax.vmap(one))
+    F = []
+    keys = ["a"] + names + ["eps", "phi"]
+    for i0 in range(0, len(sel_s), 100):
+        ii = sel_s[i0:i0 + 100]
+        F.append(np.asarray(f({k: jnp.asarray(flat[k][ii]) for k in keys})))
+    F = np.concatenate(F, 0)                                  # [S', n]
+    ll = flat["ll"][sel_s][:, idx]                            # [S', n]
+    pits = []
+    for j in range(len(idx)):
+        lw, _ = psislw(-ll[:, j])
+        w = np.exp(lw - lw.max())
+        w /= w.sum()
+        pits.append(float((w * F[:, j]).sum()))
+    return pits, len(idx)
+
+
+def cmd_predict(a):
+    import obs_table as O
+    with open(a.hier, encoding="utf-8") as f:
+        hj = json.load(f)
+    form, x_term, r2 = hj["form"], hj["x_term"], hj["r2"]
+    err = OM.load_err()
+    names = theta_names(form, x_term, r2)
+    cells = []
+    for s in a.seasons.split(","):
+        _, H = C.info(s)
+        Ts = C.t_grid(s)
+        if a.cells:
+            want = dict((k, v) for k, v in [(c.split(":")[0], [float(x) for x in c.split(":")[1].split(",")]) for c in a.cells.split(" ")])
+            if s not in want:
+                continue
+            Ts = [t for t in Ts if t in want[s]]
+        cells += [(s, t) for t in Ts]
+    pred = {"about": "M1 조정 시즌 T 절단 칸 예측 (score.py 꼴)", "method": "M1", "data_ver": C.DATA_VER,
+            "made": {"tool_head": _git_head(), "cmd": " ".join(sys.argv[1:]), "inputs": {"hier": hashlib.sha1(open(a.hier, "rb").read()).hexdigest()[:12]}}, "cells": []}
+    cell_log = {"about": "칸별 기록 (수렴·시간·LOO-PIT)", "data_ver": C.DATA_VER, "cells": []}
+    if a.resume and os.path.exists(a.out):
+        with open(a.out, encoding="utf-8") as f:
+            pred = json.load(f)
+        with open(a.cells_out, encoding="utf-8") as f:
+            cell_log = json.load(f)
+    done = {(c["season"], c["T"]) for c in cell_log["cells"]}
+    for s, T in cells:
+        if (s, T) in done:
+            continue
+        t0 = time.time()
+        r = fit_cell(a.obs, s, T, hj["targets"][s], form, x_term, r2, err, K=a.K, seed=0, n_starts=a.starts)
+        sm, obs, jobs = r["samples"], r["obs"], r["jobs"]
+        cd = core_diag(r["diag"], names, r["info"]["divergences"])
+        draws = {q: sm[f"lnC_{q:g}"].reshape(-1) for q in OM.Q_TARGETS}
+        pc = OM.pred_cells(s, T, draws, cd["conv_core"])
+        for c in pc:
+            c["retried"] = r["info"]["retried"]
+            c["sec"] = round(time.time() - t0, 1)
+        pred["cells"] += pc
+        try:
+            pits, npit = loo_pit(jobs, obs, sm, names, form, x_term, T)
+        except Exception as ex:   # PIT 실패가 칸을 막지 않게
+            pits, npit = [], -1
+            print("pit failed", repr(ex)[:200], flush=True)
+        rp = OM.row_posteriors(jobs, {k: v for k, v in sm.items() if k != "ll"}, theta_surface_fn(names, form, x_term, r2), max_draws=200)
+        fl = OM.flags(obs["meta"], rp)
+        cell_log["cells"].append({"season": s, "T": T, "n_rows": obs["n"], "N": obs["N"], "diag": cd, "retried": r["info"]["retried"],
+                                  "secs": round(time.time() - t0, 1), "info": {k: r["info"][k] for k in ("secs", "map_secs", "mean_leapfrog", "divergences", "n_starts", "n_best_repeat") if k in r["info"]},
+                                  "n_flags": len(fl), "pit": pits, "n_pit": npit,
+                                  "pit_in_0.1_0.9": float(np.mean([(0.1 <= p <= 0.9) for p in pits])) if pits else None})
+        _write_json(a.out, pred)
+        _write_json(a.cells_out, cell_log)
+        line = f"predict {s} T{T:g}: {cell_log['cells'][-1]['secs']}s n {obs['n']} conv_core {cd['conv_core']} retried {r['info']['retried']} pit n {npit}"
+        print(line, flush=True)
+        _log_attempt(a.ll_dir, line)
+
+
+
+def joint_model(wins, tgt, hyper, names, form, x_term, r2):
+    """완전 계층 대안 (명세 7절 ⑦): 창 시즌 전체 표 + 맞힐 시즌 칸을 한 모형으로.
+    wins = [{"jobs", "m" (1+n), "chol" (1+n,1+n)}...] (시즌 순서), tgt = 같은 꼴 (맞힐 시즌 칸, m·chol은 2단계 사전에서),
+    hyper = {"mu_loc","mu_scale","tau_scale"}. 시즌마다 [a, 모수]는 1단계 사후 평균·공분산으로 아핀 펴고(z), eps·phi는 직접 표집."""
+    import jax.numpy as jnp
+    import numpyro
+    import numpyro.distributions as dist
+    from numpyro.distributions import constraints
+    D = len(names)
+    mu = numpyro.sample("mu", dist.Normal(jnp.asarray(hyper["mu_loc"], jnp.float32), jnp.asarray(hyper["mu_scale"], jnp.float32)).to_event(1))
+    tau = numpyro.sample("tau", dist.HalfNormal(jnp.asarray(hyper["tau_scale"], jnp.float32)).to_event(1))
+    lom = numpyro.sample("L_omega", dist.LKJCholesky(D, 2.0))
+    Lc = tau[:, None] * lom
+    tau_a = numpyro.sample("tau_a", dist.HalfNormal(0.3))
+    mvn = dist.MultivariateNormal(mu, scale_tril=Lc)
+    a_prev = None
+    for k, w in enumerate(wins + [tgt]):
+        is_t = k == len(wins)
+        jb = w["jobs"]
+        z = numpyro.sample(f"z{k}", dist.ImproperUniform(constraints.real_vector, (), (D + 1,)))
+        vec = jnp.asarray(w["m"], jnp.float32) + jnp.asarray(w["chol"], jnp.float32) @ z
+        a_k, th_vec = vec[0], vec[1:]
+        numpyro.factor(f"th{k}", mvn.log_prob(th_vec))
+        if a_prev is None:
+            numpyro.factor(f"a{k}", dist.Normal(WEAK["a"][0], WEAK["a"][1]).log_prob(a_k))
+        else:
+            numpyro.factor(f"a{k}", dist.Normal(a_prev, tau_a).log_prob(a_k))
+        a_prev = a_k
+        eps = numpyro.sample(f"eps{k}", dist.Beta(*[jnp.float32(x) for x in jb["eps_ab"]]))
+        phi = numpyro.sample(f"phi{k}", dist.Dirichlet(jb["dirichlet"]))
+        th = theta_from_vec([th_vec[i] for i in range(D)], names, a_k, form)
+        mu_s, P = surface(th, jb["y"], jb["u"], form, x_term)
+        ll = OM.row_loglik(jb, mu_s, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), eps, phi)
+        numpyro.factor(f"ll{k}", ll.sum())
+        if is_t:
+            for q in OM.Q_TARGETS:
+                numpyro.deterministic(f"lnC_{q:g}", lnC(th, q))
+
+
+def cmd_joint(a):
+    import jax
+    import obs_table as O
+    from numpyro.infer import MCMC, NUTS, init_to_median
+    js, st = _load_stage1(a.stage1)
+    with open(a.hier, encoding="utf-8") as f:
+        hj = json.load(f)
+    form, x_term, r2 = _variant(js)
+    names = theta_names(form, x_term, r2)
+    err = OM.load_err()
+    mu_loc, mu_scale, tau_scale = hier_args(names)
+    pe = hj["targets"][a.target]
+    win = pe["window"]
+    wins = []
+    for s in win:
+        head, rows = O.read_cell(os.path.join(a.full, f"{s}.jsonl.gz"))
+        obs = OM.prepare(rows, head["H"], s, err, K=16, delay_key=delay_key_stage1(s), stage1=True)
+        v = js["seasons"][s]
+        cov = np.array(v["cov"]) + 1e-8 * np.eye(len(v["mean"]))
+        wins.append({"jobs": OM.to_jax(obs), "m": np.array(v["mean"]), "chol": np.linalg.cholesky(cov)})
+    ix = [pe["names"].index(n) for n in names]
+    tm = np.concatenate([[pe["a"]["mean"]], np.array(pe["mean"])[ix]])
+    tc = np.zeros((len(tm), len(tm)))
+    tc[0, 0] = pe["a"]["var"]
+    tc[1:, 1:] = np.array(pe["cov"])[np.ix_(ix, ix)]
+    tchol = np.linalg.cholesky(tc + 1e-8 * np.eye(len(tm)))
+    out = {"about": "완전 계층 대안 (명세 7절 ⑦) 대 두 단계(predict)의 lnC 중앙·80% 구간 차", "data_ver": C.DATA_VER, "target": a.target, "window": win, "cells": {}}
+    if a.resume and os.path.exists(a.out):
+        with open(a.out, encoding="utf-8") as f:
+            out = json.load(f)
+    pred = json.load(open(a.pred, encoding="utf-8")) if a.pred else None
+    for T in [float(x) for x in a.T.split(",")]:
+        key = f"T{T:g}"
+        if key in out["cells"]:
+            continue
+        head, rows = O.read_cell(os.path.join(a.obs, a.target, f"T{T:g}.jsonl.gz"))
+        tobs = OM.prepare(rows, head["H"], a.target, err, K=16, delay_key=a.target, stage1=False)
+        tgt = {"jobs": OM.to_jax(tobs), "m": tm, "chol": tchol}
+        hyper = {"mu_loc": mu_loc, "mu_scale": mu_scale, "tau_scale": tau_scale}
+        kern = NUTS(joint_model, target_accept_prob=0.9, dense_mass=True, max_tree_depth=a.depth, init_strategy=init_to_median(num_samples=15))
+        mc = MCMC(kern, num_warmup=a.warmup, num_samples=a.samples, num_chains=4, chain_method="parallel", progress_bar=False)
+        t0 = time.time()
+        mc.run(jax.random.PRNGKey(0), extra_fields=("diverging", "num_steps"), wins=wins, tgt=tgt, hyper=hyper, names=names, form=form, x_term=x_term, r2=r2)
+        ex = mc.get_extra_fields(group_by_chain=True)
+        sm = {k: np.asarray(v) for k, v in mc.get_samples(group_by_chain=True).items()}
+        secs = time.time() - t0
+        dg = OM.diagnose(sm, [f"lnC_{q:g}" for q in (1, 3, 10)] + ["tau_a"], divergences=int(np.asarray(ex["diverging"]).sum()))
+        res = {"secs": round(secs, 1), "rows_total": int(sum(w["jobs"]["n"] for w in wins) + tobs["n"]), "mean_leapfrog": float(np.asarray(ex["num_steps"]).mean()),
+               "divergences": int(np.asarray(ex["diverging"]).sum()), "rhat_max": dg["rhat_max"], "ess_min": dg["ess_min"], "lnC": {}}
+        for q in (1, 3, 10):
+            v = sm[f"lnC_{q}"].reshape(-1)
+            r_ = {"median": float(np.median(v)), "i80": np.quantile(v, [0.1, 0.9]).tolist()}
+            if pred:
+                c = [x for x in pred["cells"] if x["season"] == a.target and abs(x["T"] - T) < 1e-9 and abs(x["pct"] - q) < 1e-9]
+                if c:
+                    r_["two_stage_median"] = float(np.log(c[0]["pred"]))
+                    r_["two_stage_i80"] = [float(np.log(c[0]["i80"][0])), float(np.log(c[0]["i80"][1]))]
+                    r_["median_diff_rel"] = float(np.exp(r_["median"] - r_["two_stage_median"]) - 1)
+            res["lnC"][str(q)] = r_
+        out["cells"][key] = res
+        _write_json(a.out, out)
+        print("joint", key, res["secs"], "s", res["rows_total"], "rows", "leap", res["mean_leapfrog"], "rhat", res["rhat_max"], flush=True)
+        _log_attempt(a.ll_dir, f"joint {a.target} {key}: {res['secs']}s rows {res['rows_total']} leapfrog {res['mean_leapfrog']:.0f} rhat {res['rhat_max']:.3f}")
+        if secs > 3600 and not a.all_cells:
+            break
+
+
 def main():
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -701,8 +1292,69 @@ def main():
     p.add_argument("--out", required=True)
     p.add_argument("--stage1-a")
     p.add_argument("--stage1-b")
+    p = sp.add_parser("prior")
+    p.add_argument("--stage1", required=True)
+    p.add_argument("--targets", required=True)
+    p.add_argument("--cache", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--resume", action="store_true")
+    p = sp.add_parser("priorcheck")
+    p.add_argument("--hier", required=True)
+    p.add_argument("--stage1", required=True)
+    p.add_argument("--targets", required=True)
+    p.add_argument("--out", required=True)
+    p = sp.add_parser("sbc")
+    p.add_argument("--hier", required=True)
+    p.add_argument("--season", required=True)
+    p.add_argument("--cell", required=True)
+    p.add_argument("--reps", type=int, default=20)
+    p.add_argument("--out", required=True)
+    p.add_argument("--ll-dir", required=True)
+    p.add_argument("--resume", action="store_true")
+    p = sp.add_parser("check43")
+    p.add_argument("--stage1", required=True)
+    p.add_argument("--obs", required=True)
+    p.add_argument("--seasons", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--flags", required=True)
+    p = sp.add_parser("kcheck")
+    p.add_argument("--hier", required=True)
+    p.add_argument("--obs", required=True)
+    p.add_argument("--cells", nargs="+", required=True)
+    p.add_argument("--starts", type=int, default=8)
+    p.add_argument("--out", required=True)
+    p.add_argument("--resume", action="store_true")
+    p = sp.add_parser("predict")
+    p.add_argument("--hier", required=True)
+    p.add_argument("--obs", required=True)
+    p.add_argument("--seasons", required=True)
+    p.add_argument("--cells", help="예: 'S30:24,48,96 S42:24'")
+    p.add_argument("--K", type=int, default=16)
+    p.add_argument("--starts", type=int, default=8)
+    p.add_argument("--out", required=True)
+    p.add_argument("--cells-out", dest="cells_out", required=True)
+    p.add_argument("--ll-dir", required=True)
+    p.add_argument("--resume", action="store_true")
+    p = sp.add_parser("joint")
+    p.add_argument("--target", required=True)
+    p.add_argument("--T", required=True)
+    p.add_argument("--stage1", required=True)
+    p.add_argument("--hier", required=True)
+    p.add_argument("--full", required=True, help="끝난 시즌 전체 표 폴더")
+    p.add_argument("--obs", required=True, help="T 절단 표 폴더")
+    p.add_argument("--pred", help="두 단계 예측 파일 (견줄 것)")
+    p.add_argument("--out", required=True)
+    p.add_argument("--ll-dir", required=True)
+    p.add_argument("--warmup", type=int, default=500)
+    p.add_argument("--samples", type=int, default=500)
+    p.add_argument("--depth", type=int, default=10)
+    p.add_argument("--all-cells", action="store_true")
+    p.add_argument("--resume", action="store_true")
     a = ap.parse_args()
-    {"stage1": cmd_stage1, "compare": cmd_compare}[a.cmd](a)
+    if a.cmd != "compare":
+        OM.setup_host(4)
+    {"stage1": cmd_stage1, "compare": cmd_compare, "prior": cmd_prior, "priorcheck": cmd_priorcheck, "sbc": cmd_sbc,
+     "check43": cmd_check43, "kcheck": cmd_kcheck, "predict": cmd_predict, "joint": cmd_joint}[a.cmd](a)
 
 
 if __name__ == "__main__":
