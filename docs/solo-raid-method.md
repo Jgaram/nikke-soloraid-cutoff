@@ -517,7 +517,7 @@ WP0 기반 ─┬─ WP1 오차 재기 (1a~1g 병렬) ───────┐
 | WP3a 명세 | 끝 (2026-10-29) | [세션](https://claude.ai/code/session_01MQimn4KqiHqxTf5HtQyvuV) | 「WP3 명세」·「G1 보고」 절, `r7/wp3a/bench.json` | 21c0a44·(이 커밋) |
 | WP2 도구 고침 | 끝 (2026-10-29) — 자료 판 D1 | [세션](https://claude.ai/code/session_01MQimn4cGS8nxuwgSowSxtS) | `post_time.py`·`lab7/common.py`(DATA_VER), 시즌 state D1, `r7/*_D1.json`, 「WP2 결과」 절 | d8c0e85·ab61aa8·(이 커밋) |
 | WP3b M1 + 관측 층 | 진행 (2026-10-29, 자료 판 D1) — `obs_model.py`·`hier.py` push함 (M2·M3 가져다 씀), M1 맞춤 중 | [세션](https://claude.ai/code/session_01MQimn32HkrdhgEMfgquXFA) | `lab7/obs_model.py`·`lab7/hier.py`·`lab7/m1.py` | — |
-| WP3b M2 | 진행 (2026-10-29, 자료 판 D1) — `m2.py`·칸당 시간 잼 (`r7/wp3b_m2/bench.json`, 임시 평균): 2단계 꼴(초모수 고정) S30 444줄 약 3분·S31 1,104줄 약 8.8분, 수렴 통과 → MCMC. 1단계 꼴(초모수 표집)은 약 10~13분에 ESS 340로 수렴 못 지남, f2 길이가 기저 최소보다 짧음. M1 1단계·꼴 고르기 기다림 | [세션](https://claude.ai/code/session_01MQimn29CxLY2wRKsmbw3LU) | `lab7/m2.py` | — |
+| WP3b M2 | 진행 (2026-10-30, 자료 판 D1) — 칸당 시간(`r7/wp3b_m2/bench.json`): 2단계 꼴 약 3~9분 → MCMC. M1 최종 꼴 평균으로 조정 6시즌 1단계 (`r7/wp3b_m2/stage1_M2_tune_D1.json`): 시즌당 33~59분, 수렴 2/6, f2 길이 약 0.06·크기 약 1로 σ0가 M1의 약 1/6 — 지나치게 맞추는지 조율 세션에 물음. 24시즌 1단계는 `stage1_M1_D1.json` 기다림 | [세션](https://claude.ai/code/session_01MQimn29CxLY2wRKsmbw3LU) | `lab7/m2.py` | — |
 | WP3b M3 | 진행 (2026-10-29, 자료 판 D1) | [세션](https://claude.ai/code/session_01MQimn27YypmdZ2nat11D5Q) | `lab7/m3.py`, `r7/stage1_M3_D1.json`·`r7/pred_M3_tune_D1.json`·`r7/wp3b_m3/` | — |
 | WP4 빼 보기 | 대기 | — | — | — |
 | WP5 사전 고정·채점 | 대기 | — | `r7/diag7.json`, 「결과」 절 | — |
