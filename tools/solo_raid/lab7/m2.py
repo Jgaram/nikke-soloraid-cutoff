@@ -326,8 +326,20 @@ def _v_layout(hyper, G=None):
     return names, len(names) + G.mw + G.mu + N_EP
 
 
-def _unpack(v, hyper, G):
-    """v -> theta dict (jnp)."""
+def _lnm_shift(th, G, mean, anchor):
+    """lnm 재매개화 (선택, 2026-10-30 진단): g = ln( dP 가중 평균 exp(f2) , u >= anchor 구간 ). v의 lnm 자리가 lnm' = lnm + g를 담는다.
+    f2가 켜지면 lnm과 exp(f2)의 수준이 휘어진 능선(상관 -0.98)이라 NUTS가 느렸다. lnm' 좌표에서는 그 능선이 축에 맞는다. 모형(밀도)은 그대로다."""
+    import jax.numpy as jnp
+    f2 = _hsgp_f(G.Phi_u, G.sl_u, th["ell2"], th["alpha2"], th["beta2"])
+    f2 = f2 - f2.mean()
+    ef = jnp.exp(jnp.clip(f2, -10.0, 10.0))
+    wg = np.asarray(mean["dP"], float) * (G.u[:-1] >= anchor)
+    wg = wg / wg.sum()
+    return jnp.log((jnp.asarray(wg, ef.dtype) * 0.5 * (ef[1:] + ef[:-1])).sum())
+
+
+def _unpack(v, hyper, G, mean=None, anchor=None):
+    """v -> theta dict (jnp). anchor가 있으면 v의 lnm 자리는 lnm' (= lnm + g, _lnm_shift)이고 theta["lnm"]은 원래 lnm이다."""
     import jax.numpy as jnp
     names, n0 = _v_layout(hyper, G)
     th = {nm: v[i] for i, nm in enumerate(names)}
@@ -339,6 +351,8 @@ def _unpack(v, hyper, G):
     nh = len(names)
     th["beta1"] = v[nh:nh + G.mw]
     th["beta2"] = v[nh + G.mw:nh + G.mw + G.mu]
+    if anchor is not None:
+        th["lnm"] = v[1] - _lnm_shift(th, G, mean or default_mean(G), anchor)
     return th
 
 
@@ -358,11 +372,14 @@ def _ep_unpack(tail, obs):
     return eps_v, phi_v, lp
 
 
-def _logprior(v, prior, hyper, G, igp, obs):
-    """사전 로그 밀도 (dtype을 따른다 — float64 MAP에서도 쓴다). -> (lp, eps, phi)"""
+def _logprior(v, prior, hyper, G, igp, obs, mean=None, anchor=None):
+    """사전 로그 밀도 (dtype을 따른다 — float64 MAP에서도 쓴다). -> (lp, eps, phi). anchor가 있으면 사전은 원래 lnm (= v[1] - g)에 걸린다 (야코비안 1)."""
     import jax.numpy as jnp
     names, n0 = _v_layout(hyper, G)
-    lp = M1._prior_logp64(v[:1 + len(CORE)], CORE, prior)
+    vc = v[:1 + len(CORE)]
+    if anchor is not None:
+        vc = vc.at[1].set(_unpack(v, hyper, G, mean, anchor)["lnm"])
+    lp = M1._prior_logp64(vc, CORE, prior)
     nh = len(names)
     nb = G.mw + G.mu
     if hyper is None:
@@ -401,8 +418,8 @@ def _center(prior, hyper, G, obs=None):
     return np.asarray(loc, float), np.asarray(sd, float)
 
 
-def model(obs, prior, hyper=None, mean=None, pre=None, keep_ll=False, mb=(MB, MB)):
-    """numpyro 모형. 머리 docstring 참조. pre = map_precond 결과 {"loc","chol"}. mb = (f1 기저 수, f2 기저 수)."""
+def model(obs, prior, hyper=None, mean=None, pre=None, keep_ll=False, mb=(MB, MB), anchor=None):
+    """numpyro 모형. 머리 docstring 참조. pre = map_precond 결과 {"loc","chol"}. mb = (f1 기저 수, f2 기저 수). anchor = lnm 재매개화 기준 u (None이면 끔 = 기본)."""
     import jax.numpy as jnp
     import numpyro
     import numpyro.distributions as dist
@@ -416,9 +433,9 @@ def model(obs, prior, hyper=None, mean=None, pre=None, keep_ll=False, mb=(MB, MB
     z = numpyro.sample("z", dist.ImproperUniform(constraints.real_vector, (), (n0,)))
     v = jnp.asarray(pre["loc"], jnp.float32) + jnp.asarray(pre["chol"], jnp.float32) @ z
     igp = _igps(G)
-    lp, eps_v, phi_v = _logprior(v, prior, hyper, G, igp, obs)
+    lp, eps_v, phi_v = _logprior(v, prior, hyper, G, igp, obs, mean, anchor)
     numpyro.factor("prior", lp)
-    th = _unpack(v, hyper, G)
+    th = _unpack(v, hyper, G, mean, anchor)
     for nm in names:
         numpyro.deterministic(nm, th[nm])
     numpyro.deterministic("beta1", th["beta1"])
@@ -431,7 +448,7 @@ def model(obs, prior, hyper=None, mean=None, pre=None, keep_ll=False, mb=(MB, MB
         numpyro.deterministic(f"lnC_{q:g}", lnC(th, q, G, mean))
 
 
-def map_precond(obs, prior, hyper=None, mean=None, start=None, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), two_step=True, mb=(MB, MB)):
+def map_precond(obs, prior, hyper=None, mean=None, start=None, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), two_step=True, mb=(MB, MB), anchor=None, eig_floor=1e-6):
     """float64 MAP + 라플라스 (m1.map_precond(full=True)와 같은 방식 — eps·phi도 함께 푼다). -> dict(loc, chol, info)
     hyper=None(초모수 표집)일 때 two_step=True면: (1) 초모수를 사전 중앙값에 고정하고 나머지(a·core·beta·eps·phi)의 MAP + 라플라스를 구하고,
     (2) 초모수 4개는 사전 중앙값 / 대각 사전 sd(0.5, 0.7, 0.5, 0.7)로 이어 붙인다. 초모수를 함께 푼 MAP은 beta-크기 능선 때문에 헤세 행렬이 불정부호가 되었다
@@ -442,7 +459,7 @@ def map_precond(obs, prior, hyper=None, mean=None, start=None, iters=1500, temps
         n_core = 1 + len(CORE)
         n = _v_layout(None, G)[1]
         keep = list(range(n_core)) + list(range(n_core + 4, n))          # 초모수 자리를 뺀 v 위치
-        sub = map_precond(obs, prior, hc, mean, None if start is None else np.asarray(start, float)[keep], iters, temps, two_step=False, mb=mb)
+        sub = map_precond(obs, prior, hc, mean, None if start is None else np.asarray(start, float)[keep], iters, temps, two_step=False, mb=mb, anchor=anchor, eig_floor=eig_floor)
         hp = [n_core + i for i in range(4)]
         cov = np.zeros((n, n))
         cov[np.ix_(keep, keep)] = sub["cov"]
@@ -466,9 +483,9 @@ def map_precond(obs, prior, hyper=None, mean=None, start=None, iters=1500, temps
             o[k] = jnp.asarray(a, jnp.int64 if a.dtype.kind in "iu" else jnp.float64)
 
         def negpost(v, temp):
-            th = _unpack(v, hyper, G)
+            th = _unpack(v, hyper, G, mean, anchor)
             mu, P = surface(th, o["y"], o["u"], G, mean)
-            lp, eps_v, phi_v = _logprior(v, prior, hyper, G, igp, o)
+            lp, eps_v, phi_v = _logprior(v, prior, hyper, G, igp, o, mean, anchor)
             ll = OM.row_loglik(o, mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), eps_v, phi_v)
             return -(temp * ll.sum() + lp)
 
@@ -533,7 +550,7 @@ def map_precond(obs, prior, hyper=None, mean=None, start=None, iters=1500, temps
         H = np.asarray(hess(jnp.asarray(x), 1.0), float)
     H = 0.5 * (H + H.T)
     w, Q = np.linalg.eigh(H)
-    cov = (Q / np.maximum(w, 1e-6)) @ Q.T
+    cov = (Q / np.maximum(w, eig_floor)) @ Q.T
     chol = np.linalg.cholesky(0.5 * (cov + cov.T) + 1e-12 * np.eye(len(x)))
     return {"loc": x, "chol": chol, "cov": 0.5 * (cov + cov.T),
             "info": {"fun": float(res.fun), "nit": nit, "ok": bool(res.success), "min_eig": float(w.min()), "max_eig": float(w.max()),
@@ -542,18 +559,18 @@ def map_precond(obs, prior, hyper=None, mean=None, start=None, iters=1500, temps
 
 # ---------- 다중 시작 MAP ----------
 
-def multistart_map(obs, prior, hyper=None, mean=None, n=8, seed=0, scatter=0.5, mb=(MB, MB)):
+def multistart_map(obs, prior, hyper=None, mean=None, n=8, seed=0, scatter=0.5, mb=(MB, MB), anchor=None, eig_floor=1e-6):
     """시작점 n개의 MAP (m1.multistart_map과 같은 꼴): 첫째는 기본 시작, 나머지는 그 해에서 서버 보조 모수(dJP..kGL)만 N(0, scatter^2)로 흩음.
     -> info.fun 오름차순 [pre dict] (fun = -log 사후 상대값이므로 작을수록 높은 봉우리)."""
     names, _ = _v_layout(hyper, grids(*mb))
-    base = map_precond(obs, prior, hyper, mean, mb=mb)
+    base = map_precond(obs, prior, hyper, mean, mb=mb, anchor=anchor, eig_floor=eig_floor)
     out = [base]
     rng = np.random.default_rng(seed)
     idx = [i for i, nm in enumerate(names) if nm in M1.OFF]
     for _ in range(n - 1):
         st = np.array(base["loc"], float)
         st[idx] += rng.normal(0, scatter, len(idx))
-        out.append(map_precond(obs, prior, hyper, mean, start=st, mb=mb))
+        out.append(map_precond(obs, prior, hyper, mean, start=st, mb=mb, anchor=anchor, eig_floor=eig_floor))
     return sorted(out, key=lambda p: p["info"]["fun"])
 
 
@@ -564,7 +581,7 @@ def map_init(n):
 
 # ---------- 실행 도구 ----------
 
-def _draws_lnc(vdraws, hyper, mean, mb=(MB, MB)):
+def _draws_lnc(vdraws, hyper, mean, mb=(MB, MB), anchor=None):
     """v 뽑기 [S, n] -> {q: lnC [S]} (float32 vmap)."""
     import jax
     import jax.numpy as jnp
@@ -572,17 +589,17 @@ def _draws_lnc(vdraws, hyper, mean, mb=(MB, MB)):
     mean = mean or default_mean(G)
 
     def one(v):
-        th = _unpack(v, hyper, G)
+        th = _unpack(v, hyper, G, mean, anchor)
         return jnp.stack([lnC(th, q, G, mean) for q in OM.Q_TARGETS])
     out = np.asarray(jax.jit(jax.vmap(one))(jnp.asarray(vdraws, jnp.float32)))
     return {q: out[:, i] for i, q in enumerate(OM.Q_TARGETS)}
 
 
-def laplace_summary(pre, hyper, mean, n=4000, seed=0, mb=(MB, MB)):
+def laplace_summary(pre, hyper, mean, n=4000, seed=0, mb=(MB, MB), anchor=None):
     """라플라스 사후에서 뽑아 core 모수·lnC_{1,3,10}의 평균·sd를 낸다."""
     rng = np.random.default_rng(seed)
     v = pre["loc"] + rng.standard_normal((n, len(pre["loc"]))) @ pre["chol"].T
-    lc = _draws_lnc(v, hyper, mean, mb)
+    lc = _draws_lnc(v, hyper, mean, mb, anchor)
     names, _ = _v_layout(hyper, grids(*mb))
     out = {nm: {"mean": float(v[:, i].mean()), "sd": float(v[:, i].std())} for i, nm in enumerate(names)}
     for q in (1.0, 3.0, 10.0):
@@ -978,7 +995,7 @@ def theta_surface_fn(G, mean):
 
 
 def fit_one(rows, H, season, err, mean, mb, K=16, delay_key=None, seed=0, warmup=1000, samples=1000, retry_warmup=1500, max_tree_depth=10,
-            prior=None, hyper=None, stage1=True, keep_ll=True):
+            prior=None, hyper=None, stage1=True, keep_ll=True, anchor=None, eig_floor=1e-6):
     """한 칸 맞춤: prepare -> 시작점 8개 MAP(최고 봉우리가 둘 미만이면 8개 더) -> fit_with_retry. m1.fit_one과 같은 설정.
     1단계 (기본): prior = 약한 사전, hyper = None (초모수 표집), stage1=True (끝난 시즌 전체 표 — 종료 뒤 화면 줄 포함).
     칸 예측 (cmd_predict): prior = hier.prior_for 꼴, hyper = 고정 초모수 dict, stage1=False, keep_ll=False."""
@@ -988,10 +1005,10 @@ def fit_one(rows, H, season, err, mean, mb, K=16, delay_key=None, seed=0, warmup
     G = grids(*mb)
     names, _ = _v_layout(hyper, G)
     t0 = time.time()
-    modes = multistart_map(jobs, prior, hyper, mean, mb=mb)
+    modes = multistart_map(jobs, prior, hyper, mean, mb=mb, anchor=anchor, eig_floor=eig_floor)
     rep = sum(1 for p in modes if p["info"]["fun"] - modes[0]["info"]["fun"] < 0.5)
     if rep < 2:
-        modes = sorted(modes + multistart_map(jobs, prior, hyper, mean, seed=1, mb=mb), key=lambda p: p["info"]["fun"])
+        modes = sorted(modes + multistart_map(jobs, prior, hyper, mean, seed=1, mb=mb, anchor=anchor, eig_floor=eig_floor), key=lambda p: p["info"]["fun"])
         rep = sum(1 for p in modes if p["info"]["fun"] - modes[0]["info"]["fun"] < 0.5)
     pre = modes[0]
     idx_off = [i for i, nm in enumerate(names) if nm in M1.OFF]
@@ -1000,6 +1017,8 @@ def fit_one(rows, H, season, err, mean, mb, K=16, delay_key=None, seed=0, warmup
     watch = ["a"] + [n for n in CORE if n not in M1.OFF] + [f"lnC_{q:g}" for q in OM.Q_TARGETS]
     init = map_init(len(pre["loc"]))
     kw = {"obs": jobs, "prior": prior, "hyper": hyper, "mean": mean, "pre": pre, "keep_ll": keep_ll, "mb": mb}
+    if anchor is not None:
+        kw["anchor"] = anchor
     sm, info, dg = OM.fit_with_retry(model, kw, names=watch, seed=seed, init=init, max_tree_depth=max_tree_depth,
                                      warmup=warmup, samples=samples, retry_warmup=retry_warmup)
     info["map_secs"] = round(map_secs, 1)
@@ -1348,8 +1367,12 @@ def cmd_predict(a):
     if a.m1_hier:
         with open(a.m1_hier, encoding="utf-8") as f:
             hj = json.load(f)
-    cfg = {"warmup": a.warmup, "samples": a.samples, "retry_warmup": a.retry_warmup, "max_tree_depth": a.max_tree_depth, "K": 16, "chains": 4,
+    cfg = {"warmup": a.warmup, "samples": a.samples, "retry_warmup": a.retry_warmup, "max_tree_depth": a.max_tree_depth, "K": a.K, "chains": 4,
            "target_accept": 0.9, "retry_target_accept": 0.95}
+    if a.lnm_anchor is not None:
+        cfg["lnm_anchor"] = a.lnm_anchor     # 선택 인자를 줬을 때만 적는다 (기본 설정 dict는 그대로)
+    if a.eig_floor != 1e-6:
+        cfg["eig_floor"] = a.eig_floor
     inputs = {"m2_stage1": _sha12(a.m2_stage1), "m1_stage1": _sha12(a.m1_stage1)}
     if a.m1_hier:
         inputs["m1_hier"] = _sha12(a.m1_hier)
@@ -1403,8 +1426,9 @@ def cmd_predict(a):
             try:
                 head, rows = O.read_cell(path)
                 dk = s if _snum(s) >= 21 else None
-                r = fit_one(rows, head["H"], s, err, pr["mean"], pr["mb"], K=16, delay_key=dk, seed=0, warmup=a.warmup, samples=a.samples,
-                            retry_warmup=a.retry_warmup, max_tree_depth=a.max_tree_depth, prior=pr["prior"], hyper=pr["hyper"], stage1=False, keep_ll=False)
+                r = fit_one(rows, head["H"], s, err, pr["mean"], pr["mb"], K=a.K, delay_key=dk, seed=0, warmup=a.warmup, samples=a.samples,
+                            retry_warmup=a.retry_warmup, max_tree_depth=a.max_tree_depth, prior=pr["prior"], hyper=pr["hyper"], stage1=False, keep_ll=False,
+                            anchor=a.lnm_anchor, eig_floor=a.eig_floor)
                 sm, info, dg, obs = r["samples"], r["info"], r["diag"], r["obs"]
                 conv = bool(dg["conv"])
                 cells = OM.pred_cells(s, T, {q: sm[f"lnC_{q:g}"] for q in OM.Q_TARGETS}, conv)
@@ -1481,6 +1505,9 @@ def main():
     pd.add_argument("--samples", type=int, default=500)
     pd.add_argument("--retry-warmup", type=int, default=1000)
     pd.add_argument("--max-tree-depth", type=int, default=10)
+    pd.add_argument("--K", type=int, default=32, help="구적 노드 수 (명세 7절 5, M1 세션 kcheck_D1.json: T 절단 칸은 32). stage1의 K=16은 그대로")
+    pd.add_argument("--lnm-anchor", type=float, default=None, help="(선택, 기본 끔) lnm 재매개화 기준 u: v의 lnm 자리가 lnm + ln(dP 가중 평균 exp(f2), u >= 기준)이 된다. 모형은 그대로, NUTS 기하만 바뀐다")
+    pd.add_argument("--eig-floor", type=float, default=1e-6, help="라플라스 헤세 고윳값 바닥 (기본 1e-6 = 옛 동작)")
     t = sp.add_parser("test")
     t.add_argument("--work", default=None)
     t.add_argument("--m1-stage1", default=None)
