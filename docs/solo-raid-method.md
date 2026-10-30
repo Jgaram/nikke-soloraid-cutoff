@@ -453,6 +453,12 @@ WP3b는 이 절대로 만든다. 여기 없는 선택이 나오면 이 절에 �
   도우미 세션은 m2.py·관측 층을 고치지 않고 돌리기만 한다 (조율 세션 2026-10-30, WP5와 같은 방식).
   2026-10-30 시작: 코드 판 cfc0ab2 고정, 도우미 6세션 × 4시즌 (S19-S22·S23-S26·S27-S30·S31-S34·S35-S38·S39-S42), 기저 다시 맞춤 시간 상한 없음 (`--refit-limit-secs 100000`).
   묶음 파일 `r7/wp3b_m2/parts/` → `m2.py merge-stage1` → `r7/stage1_M2_D1.json`.
+  **끝 (2026-10-30)** → `r7/stage1_M2_D1.json`. 수렴 10/24 (S22~S26·S28·S29·S32·S36·S41).
+  못 지난 14시즌 가운데 11시즌은 R-hat·ESS는 통과하고 발산만 1~8개다. R-hat에서 걸린 것은 S21(1.18)·S31(1.08)·S33(1.04)이다. 시즌당 27~226분 걸렸다.
+  S35·S37은 기저 20의 첫 맞춤은 수렴했는데, 진단 규칙대로 40으로 늘려 다시 맞춘 것이 발산으로 못 지났다. 파일에는 늘린 쪽이 들어 있다 (규칙대로).
+  정해진 대로 conv: false 시즌도 V_j를 그대로 쓴다.
+- **조정 시즌 칸 예측 (2026-10-30 시작, 코드 판 4e335eb).** 라플라스 (바닥 0.05·anchor 0.15·K 32)로 조정 6시즌 T 격자 전체를 시즌마다 도우미 세션 하나에서 돌린다.
+  기준 MCMC 4 × (2,000 + 2,000)와 바닥 0.01·0.2 민감도는 견줌 칸 6개를 도우미 3세션에서 돌린다. 결과는 `r7/wp3b_m2/parts_pred/`에 모았다가 합친다.
 
 #### WP3b M3 결과 (2026-10-30 끝) — 자료 판 D1
 
@@ -582,7 +588,7 @@ WP0 기반 ─┬─ WP1 오차 재기 (1a~1g 병렬) ───────┐
 | WP3a 명세 | 끝 (2026-10-29) | [세션](https://claude.ai/code/session_01MQimn4KqiHqxTf5HtQyvuV) | 「WP3 명세」·「G1 보고」 절, `r7/wp3a/bench.json` | 21c0a44·(이 커밋) |
 | WP2 도구 고침 | 끝 (2026-10-29) — 자료 판 D1 | [세션](https://claude.ai/code/session_01MQimn4cGS8nxuwgSowSxtS) | `post_time.py`·`lab7/common.py`(DATA_VER), 시즌 state D1, `r7/*_D1.json`, 「WP2 결과」 절 | d8c0e85·ab61aa8·(이 커밋) |
 | WP3b M1 + 관측 층 | 진행 (2026-10-29, 자료 판 D1) — `obs_model.py`·`hier.py` push함 (M2·M3 가져다 씀), M1 맞춤 중 | [세션](https://claude.ai/code/session_01MQimn32HkrdhgEMfgquXFA) | `lab7/obs_model.py`·`lab7/hier.py`·`lab7/m1.py` | — |
-| WP3b M2 | 진행 (2026-10-30, 자료 판 D1) — 칸당 시간 잼 (2단계 꼴 3~9분, MCMC), 조정 6시즌 1단계 (수렴 2/6) → [M2 결과 절](#wp3b-m2-결과-진행-중-2026-10-30--자료-판-d1). 24시즌 1단계 도우미 6세션에서 도는 중 (cfc0ab2) | [세션](https://claude.ai/code/session_01MQimn29CxLY2wRKsmbw3LU) | `lab7/m2.py` | — |
+| WP3b M2 | 진행 (2026-10-30, 자료 판 D1) — 24시즌 1단계 끝 (`r7/stage1_M2_D1.json`, 수렴 10/24). 칸 예측은 C4 라플라스로, 조정 6시즌 예측과 기준 MCMC를 도우미 9세션에서 돌리는 중 (4e335eb) → [M2 결과 절](#wp3b-m2-결과-진행-중-2026-10-30--자료-판-d1) | [세션](https://claude.ai/code/session_01MQimn29CxLY2wRKsmbw3LU) | `lab7/m2.py` | — |
 | WP3b M3 | 끝 (2026-10-30, 자료 판 D1) — 중앙은 F보다 0.31%p 나음, 80% 포함 0.08·0.00으로 g4 탈락 ([결과](#wp3b-m3-결과-2026-10-30-끝--자료-판-d1)) | [세션](https://claude.ai/code/session_01MQimn27YypmdZ2nat11D5Q) | `lab7/m3.py`, `r7/stage1_M3_D1.json`·`r7/pred_M3_tune_D1.json`·`r7/flag_M3_D1.json`·`r7/wp3b_m3/` | 2519850~(이 커밋) |
 | WP4 빼 보기 | 대기 | — | — | — |
 | WP5 사전 고정·채점 | 대기 | — | `r7/diag7.json`, 「결과」 절 | — |
