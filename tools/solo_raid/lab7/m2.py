@@ -1286,8 +1286,8 @@ def stage1_dict(j):
 
 
 def _pick_prior(hj, season):
-    """M1 세션이 낸 hier 결과 파일에서 그 시즌의 사전 (hier.prior_for 꼴 dict: names·mean·a). {"seasons": {s: ..}}, {"priors": {s: ..}}, {s: ..} 어느 꼴이든, 값이 {"prior": ..}로 싸여 있어도 받는다."""
-    for top in (hj.get("seasons"), hj.get("priors"), hj):
+    """M1 세션이 낸 hier 결과 파일에서 그 시즌의 사전 (hier.prior_for 꼴 dict: names·mean·a). {"targets": {s: ..}} (hier_M1_D1.json), {"seasons": {s: ..}}, {"priors": {s: ..}}, {s: ..} 어느 꼴이든, 값이 {"prior": ..}로 싸여 있어도 받는다."""
+    for top in (hj.get("targets"), hj.get("seasons"), hj.get("priors"), hj):
         if isinstance(top, dict) and season in top:
             v = top[season]
             return v["prior"] if isinstance(v, dict) and "prior" in v else v

@@ -451,6 +451,8 @@ WP3b는 이 절대로 만든다. 여기 없는 선택이 나오면 이 절에 �
   ③ 기저 20 → 40은 진단 규칙대로라 명세 안이다. 2단계는 창 안 중앙 초모수를 쓴다.
 - **24시즌 1단계** (시즌당 약 45분, 한 컨테이너로 약 18시간)는 `stage1_M1_D1.json`이 나온 뒤, 시즌을 묶어 도우미 세션 여러 개에서 따로 파일로 내고 합친다.
   도우미 세션은 m2.py·관측 층을 고치지 않고 돌리기만 한다 (조율 세션 2026-10-30, WP5와 같은 방식).
+  2026-10-30 시작: 코드 판 cfc0ab2 고정, 도우미 6세션 × 4시즌 (S19-S22·S23-S26·S27-S30·S31-S34·S35-S38·S39-S42), 기저 다시 맞춤 시간 상한 없음 (`--refit-limit-secs 100000`).
+  묶음 파일 `r7/wp3b_m2/parts/` → `m2.py merge-stage1` → `r7/stage1_M2_D1.json`.
 
 ### WP4 관측 층 빼 보기 — 조정 시즌에서 먼저, 최종은 WP5 안에서
 
@@ -538,7 +540,7 @@ WP0 기반 ─┬─ WP1 오차 재기 (1a~1g 병렬) ───────┐
 | WP3a 명세 | 끝 (2026-10-29) | [세션](https://claude.ai/code/session_01MQimn4KqiHqxTf5HtQyvuV) | 「WP3 명세」·「G1 보고」 절, `r7/wp3a/bench.json` | 21c0a44·(이 커밋) |
 | WP2 도구 고침 | 끝 (2026-10-29) — 자료 판 D1 | [세션](https://claude.ai/code/session_01MQimn4cGS8nxuwgSowSxtS) | `post_time.py`·`lab7/common.py`(DATA_VER), 시즌 state D1, `r7/*_D1.json`, 「WP2 결과」 절 | d8c0e85·ab61aa8·(이 커밋) |
 | WP3b M1 + 관측 층 | 진행 (2026-10-29, 자료 판 D1) — `obs_model.py`·`hier.py` push함 (M2·M3 가져다 씀), M1 맞춤 중 | [세션](https://claude.ai/code/session_01MQimn32HkrdhgEMfgquXFA) | `lab7/obs_model.py`·`lab7/hier.py`·`lab7/m1.py` | — |
-| WP3b M2 | 진행 (2026-10-30, 자료 판 D1) — 칸당 시간 잼 (2단계 꼴 3~9분, MCMC), 조정 6시즌 1단계 (수렴 2/6) → [M2 결과 절](#wp3b-m2-결과-진행-중-2026-10-30--자료-판-d1). 24시즌 1단계는 `stage1_M1_D1.json` 뒤 도우미 세션 여럿으로 (조율 세션 2026-10-30) | [세션](https://claude.ai/code/session_01MQimn29CxLY2wRKsmbw3LU) | `lab7/m2.py` | — |
+| WP3b M2 | 진행 (2026-10-30, 자료 판 D1) — 칸당 시간 잼 (2단계 꼴 3~9분, MCMC), 조정 6시즌 1단계 (수렴 2/6) → [M2 결과 절](#wp3b-m2-결과-진행-중-2026-10-30--자료-판-d1). 24시즌 1단계 도우미 6세션에서 도는 중 (cfc0ab2) | [세션](https://claude.ai/code/session_01MQimn29CxLY2wRKsmbw3LU) | `lab7/m2.py` | — |
 | WP3b M3 | 진행 (2026-10-29, 자료 판 D1) | [세션](https://claude.ai/code/session_01MQimn27YypmdZ2nat11D5Q) | `lab7/m3.py`, `r7/stage1_M3_D1.json`·`r7/pred_M3_tune_D1.json`·`r7/wp3b_m3/` | — |
 | WP4 빼 보기 | 대기 | — | — | — |
 | WP5 사전 고정·채점 | 대기 | — | `r7/diag7.json`, 「결과」 절 | — |
