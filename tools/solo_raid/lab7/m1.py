@@ -1232,7 +1232,7 @@ def cmd_joint(a):
         if key in out["cells"]:
             continue
         head, rows = O.read_cell(os.path.join(a.obs, a.target, f"T{T:g}.jsonl.gz"))
-        tobs = OM.prepare(rows, head["H"], a.target, err, K=16, delay_key=a.target, stage1=False)
+        tobs = OM.prepare(rows, head["H"], a.target, err, K=a.K, delay_key=a.target, stage1=False)
         tgt = {"jobs": OM.to_jax(tobs), "m": tm, "chol": tchol}
         hyper = {"mu_loc": mu_loc, "mu_scale": mu_scale, "tau_scale": tau_scale}
         kern = NUTS(joint_model, target_accept_prob=0.9, dense_mass=True, max_tree_depth=a.depth, init_strategy=init_to_median(num_samples=15))
@@ -1261,6 +1261,63 @@ def cmd_joint(a):
         _log_attempt(a.ll_dir, f"joint {a.target} {key}: {res['secs']}s rows {res['rows_total']} leapfrog {res['mean_leapfrog']:.0f} rhat {res['rhat_max']:.3f}")
         if secs > 3600 and not a.all_cells:
             break
+
+
+
+def cmd_scoreextra(a):
+    """채점 덧붙임 (조율 세션 요청): (1) 막판 칸(T = H-12·H-6·H) 따로 |e|·편향·80% 포함, 정답과 어긋난 칸의 가까운 A 점 (2) 80% 포함을 F와 같은 칸 집합(조정 시즌 정답 있는 KR 칸 전부, T 격자 전체)에서."""
+    import obs_table as O
+    sys.path.insert(0, os.path.join(C.TOOLS, "lab6"))
+    import anchor as AN
+    truth = AN.truth()
+    tune = set(a.tune.split(","))
+    P = json.load(open(a.pred, encoding="utf-8"))["cells"]
+    Fc = json.load(open(a.ref, encoding="utf-8"))["cells"]
+
+    def stats(cells, sel):
+        rows = []
+        for c in cells:
+            if c["season"] not in tune or c.get("server", "KR") != "KR" or not sel(c):
+                continue
+            tv = truth.get((c["season"], "KR", float(c["pct"])))
+            if tv is None or not c.get("pred") or not c.get("i80"):
+                continue
+            e = c["pred"] / tv - 1
+            rows.append((c["season"], c["T"], c["pct"], e, c["i80"][0] <= tv <= c["i80"][1], c["pred"], tv))
+        if not rows:
+            return {"n": 0}
+        e = np.array([r[3] for r in rows])
+        return {"n": len(rows), "mean_abs_e": float(np.abs(e).mean()), "mean_e": float(e.mean()), "frac_e_neg": float((e < 0).mean()),
+                "cover80": float(np.mean([r[4] for r in rows]))}
+
+    def endcell(c):
+        _, H = C.info(c["season"])
+        return c["T"] in (H - 12, H - 6, H)
+    groups = {"1_3": lambda c: c["pct"] in (1.0, 3.0), "10": lambda c: c["pct"] == 10.0, "all_pct": lambda c: True}
+    out = {"about": "채점 덧붙임. 모든 칸 = 조정 6시즌 정답 있는 KR 칸 T 격자 전체. e = 예측/정답 - 1 (answer_key는 읽기만, 고르기에 안 씀).", "data_ver": C.DATA_VER, "all_cells": {}, "end_cells": {}}
+    for nm, cells in (("M1", P), ("F", Fc)):
+        out["all_cells"][nm] = {g: stats(cells, f) for g, f in groups.items()}
+        out["end_cells"][nm] = {g: stats(cells, lambda c, f=f: f(c) and endcell(c)) for g, f in groups.items()}
+    detail = []
+    for c in P:
+        if c["season"] in tune and endcell(c) and c.get("server", "KR") == "KR":
+            tv = truth.get((c["season"], "KR", float(c["pct"])))
+            if tv is None:
+                continue
+            e = c["pred"] / tv - 1
+            row = {"season": c["season"], "T": c["T"], "pct": c["pct"], "pred": c["pred"], "truth": tv, "e": e, "in_i80": bool(c["i80"][0] <= tv <= c["i80"][1])}
+            _, H = C.info(c["season"])
+            if c["T"] == H:
+                head, rows = O.read_cell(os.path.join(a.obs, c["season"], f"T{c['T']:g}.jsonl.gz"))
+                A = [r for r in OM.select_rows(rows, head["H"], stage1=False) if r["tg"] == "A" and r["pct"]]
+                if A:
+                    r0 = min(A, key=lambda r: abs(np.log(r["pct"] / c["pct"])))
+                    row["nearest_A"] = {"pct": r0["pct"], "score": r0["score"], "score_over_truth_minus_1": r0["score"] / tv - 1}
+            detail.append(row)
+    out["end_cell_detail"] = detail
+    _write_json(a.out, out)
+    for nm in ("M1", "F"):
+        print(nm, "all", {g: (v["n"], round(v.get("cover80", 0), 3)) for g, v in out["all_cells"][nm].items()}, "end", {g: (v["n"], round(v.get("mean_abs_e", 0), 4), round(v.get("mean_e", 0), 4), round(v.get("cover80", 0), 3)) for g, v in out["end_cells"][nm].items()})
 
 
 def main():
@@ -1335,6 +1392,12 @@ def main():
     p.add_argument("--cells-out", dest="cells_out", required=True)
     p.add_argument("--ll-dir", required=True)
     p.add_argument("--resume", action="store_true")
+    p = sp.add_parser("scoreextra")
+    p.add_argument("--pred", required=True)
+    p.add_argument("--ref", required=True)
+    p.add_argument("--obs", required=True)
+    p.add_argument("--tune", default="S22,S26,S30,S34,S38,S42")
+    p.add_argument("--out", required=True)
     p = sp.add_parser("joint")
     p.add_argument("--target", required=True)
     p.add_argument("--T", required=True)
@@ -1348,13 +1411,14 @@ def main():
     p.add_argument("--warmup", type=int, default=500)
     p.add_argument("--samples", type=int, default=500)
     p.add_argument("--depth", type=int, default=10)
+    p.add_argument("--K", type=int, default=16)
     p.add_argument("--all-cells", action="store_true")
     p.add_argument("--resume", action="store_true")
     a = ap.parse_args()
-    if a.cmd != "compare":
+    if a.cmd not in ("compare", "scoreextra"):
         OM.setup_host(4)
     {"stage1": cmd_stage1, "compare": cmd_compare, "prior": cmd_prior, "priorcheck": cmd_priorcheck, "sbc": cmd_sbc,
-     "check43": cmd_check43, "kcheck": cmd_kcheck, "predict": cmd_predict, "joint": cmd_joint}[a.cmd](a)
+     "check43": cmd_check43, "kcheck": cmd_kcheck, "predict": cmd_predict, "joint": cmd_joint, "scoreextra": cmd_scoreextra}[a.cmd](a)
 
 
 if __name__ == "__main__":
