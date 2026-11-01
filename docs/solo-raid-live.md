@@ -122,7 +122,8 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
    - 그 밖 → `bash tools/solo_raid/live_tick.sh fail merge` → 7.
 5. **마무리:** `bash tools/solo_raid/live_tick.sh finish`.
    - `run`: 내보내기·커밋(`S{n} 받기 T{T}`)·push → 예측(`predict_run.sh`, 몇 초~1분) → `predict/T{T}/`·후처리 파일·README 줄 커밋(`S{n} 예측 T{T}`)·push.
-     push가 `publish.yml`을 돌려 웹이 몇 분 안에 바뀐다. 출력 끝에 `[요약]` 줄과 경고(`!!`)가 나온다.
+     출력 끝에 `[요약]` 줄과 경고(`!!`)가 나온다. 예측이 커밋됐으면 `publish.yml`을 한 번 돌려 웹을 바꾼다 — push로는 돌지 않는다 (2026-11-01,
+     [publish 「언제 복사하나」](publish.md#언제-복사하나)). `final`이 끝난 뒤에도 한 번.
    - `final`: 내보내기·커밋·push → `post_all.sh` → `live/final_done.json`, `live.json`의 `season`을 비움 → 커밋(`S{n} 종료 후 수집 끝`)·push.
    - 종료 1 (예측 실패) → 이미 기록·커밋됐다. 7로.
 6. **예약 작업 손보기** (1의 `after`, `update_trigger` 도구가 있을 때만):

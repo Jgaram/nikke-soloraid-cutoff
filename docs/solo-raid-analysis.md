@@ -578,9 +578,9 @@ S41 한 시즌 도구(`fit_prior.py`·`predict.py`)를 여러 시즌 도구로 �
     `data/solo-raid/live.json`·`S42/**`.
   - 건드려도 되는 것 (분석 전용, 출력은 `--out`·`--tag`로 따로): `xval.py`(`summarize`만 조심)·`fit_prior_multi.py`·`fit_prior.py`(새 prior는 `analysis/`에 쓰고 `S41/state/`에는 쓰지 않는다)·`backtest.py`·
     `registry.py`·`truth_grade.py`·`calib.py`·`review.py`·`refetch.py`·`split.py`·`score_live.py`(10-26 전에)·`explore_early_level.py`.
-- **웹이 분석 도구·결과에 묶여 있다.** `tools/solo_raid/**`·`analysis/**`·`registry.json`·`split.json` 등을 push하면 `publish.yml`이 돌고, `site.py`가 `viz` → `fit_prior`·`predict`·`xval.summarize`를 불러 다시 계산한다.
+- **웹이 분석 도구·결과에 묶여 있다.** `tools/solo_raid/**`·`analysis/**`·`registry.json`·`split.json` 등을 바꾼 뒤 `publish.yml`을 돌리면 (2026-11-01부터 손으로만, [publish 「언제 복사하나」](publish.md#언제-복사하나)), `site.py`가 `viz` → `fit_prior`·`predict`·`xval.summarize`를 불러 다시 계산한다.
   `viz.py`는 `xval_dev.json`의 loso 요약이 다시 계산한 값과 다르면 멈춘다 → 진행 중 시즌의 웹 갱신도 같이 멈춘다.
-  분석 도구를 고친 push 전에는 `python3 -I tools/publish/build_public.py --out DIR --site DIR2`로 빌드를 확인한다. `analysis/*` 갱신은 바로 공개 웹에 나간다.
+  분석 도구를 고쳤으면 publish를 돌리기 전에 `python3 -I tools/publish/build_public.py --out DIR --site DIR2`로 빌드를 확인한다. `analysis/*` 갱신은 publish를 돌리면 바로 공개 웹에 나간다.
 - [x] **`criteria.json` 판 2.** — `analysis/criteria_v2.json` (커밋 `799e088`, 2026-10-17 22:10 KST, 새 후보 결과를 보기 전).
   판 1 파일은 바꾸지 않고 따로 둔다 (S42 채점·3.7 기록·웹이 판 1을 읽는다). **판정 시간 범위 (사용자: 「기존 범위의 근거도 판단」):** T_main 18·24·36·48, T_late 72·96은 가드, 12는 따로.
   근거 — 아래 18은 모델과 무관한 자료량(23시즌 tr, 게시 ≤ T 관측 사람: 6시간 21/23시즌 5명 미만, 12시간 6/23, 18시간부터 모두 5명 이상 중앙 29), 위 48은 목표 「초반」(2일차 끝, 그 뒤는 모든 시즌 39명 이상).

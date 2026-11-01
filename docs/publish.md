@@ -9,7 +9,7 @@
 | 웹 | <https://jgaram.github.io/nikke-soloraid-cutoff/> — 첫 화면 탭 셋(「이번 시즌」: 최종 컷 예측 · 계산기, 「지난 시즌」 `#past`: 지난 시즌 커트라인 · 실제로 낸 예측 · 되돌려 보기 · 시즌별 침수 비교, 「방법」 `#method`: 작업 흐름 · 로직 · 검증 설명), `analysis.html`(분석 페이지 — 방법 탭에서 링크) |
 | 라이선스 | CC0 1.0 (사용자 결정) |
 | 이름 | 처음 `nikke-solo-percent`로 만들었다가 같은 날 `nikke-soloraid-cutoff`로 바꿨다 (사용자 결정). GitHub가 옛 레포 주소는 넘겨 주지만 Pages 주소는 넘겨 주지 않는다 |
-| 만드는 도구 | `tools/publish/build_public.py`(공개 레포 내용) · `tools/publish/site.py`(웹) · `.github/workflows/publish.yml`(자동 복사) |
+| 만드는 도구 | `tools/publish/build_public.py`(공개 레포 내용) · `tools/publish/site.py`(웹) · `.github/workflows/publish.yml`(복사 — 손으로 실행) |
 
 ## 정한 것
 
@@ -30,14 +30,37 @@
     「끝난 시즌 모두 — 개발 검증, 독립 검증은 새 시즌의 미리 커밋된 예측 채점」으로 바꿨다. 공개 README도 같게.
     `conv()`(계산기 곡선)는 viz의 정답 표 시즌을 쓰므로 split 판 2 뒤로 지난 시험 6시즌도 들어간다 (따로 정할 것 없음).
     로컬 분석 도구의 `install_guard`는 그대로 둔다 (판 2에는 막는 시즌이 없다).
-- **갱신은 Actions 자동 복사다.** 이 레포 `main`에 관련 경로(워크플로의 `paths`)가 push되면, `publish.yml`이 공개 레포 `main`과 `gh-pages`를 통째로 다시 만든다.
+- **갱신은 Actions 복사이고, 필요할 때만 돌린다 (2026-11-01 사용자 결정 — 아래 「언제 복사하나」).** `publish.yml`을 실행하면 공개 레포 `main`과 `gh-pages`를 통째로 다시 만든다.
   공개 레포에 직접 커밋한 것은 다음 복사 때 사라진다.
-  - 워크플로는 웹에 들어가는 자료(`analysis/`·`registry.json`·`seasons.json`·`split.json`·`S*/predict/`·`S*/state/season.json`)와 공개 코드·문서가 바뀔 때만 돈다.
-    수집 중 `state/`·`runs/` 커밋에는 돌지 않는다 (2026-10-16 — 그날 `data/solo-raid` 커밋 137개 중 웹 자료를 바꾼 것은 11개였다).
+  - 2026-10-16 ~ 10-31에는 웹에 들어가는 경로가 push될 때마다 저절로 돌았다. 연구 커밋이 하루 100개를 넘는 날이 있어 10월에 482회 · 약 680분을 썼고,
+    비공개 레포 Actions 무료 한도(월 2,000분)를 10-31 02:17 KST에 넘겨 그 뒤로 notices 수집까지 멈췄다. 그래서 push 조건을 지웠다.
   - 웹의 기준 시각은 **웹 내용이 바뀐 때**다. `site.py`가 넣는 자료와 페이지 틀로 지문(`data.json`의 `content`)을 만들고,
     지금 공개된 `data.json`과 지문이 같으면 그 기준 시각을 그대로 쓴다 (`build_public.py`가 `--prev`로 넘김). 그래서 내용이 그대로면 `gh-pages`에 커밋이 생기지 않는다.
     바뀌었으면 그 커밋(HEAD) 시각이다. 예전에는 `data/solo-raid` 아무 커밋 시각이라, 잠긴 시즌 README 커밋에도 시각이 움직였다.
   - 예측 파일·`season.json` 하나가 깨져도 그 파일만 빼고 Actions에 노란 경고를 남긴다. 지난 시즌 컷과 공개 레포 코드는 계속 갱신된다.
+
+## 언제 복사하나
+
+2026-11-01 사용자 결정: 「자동 말고, 필요할 때만 — 에이전트가 판단해서 올린다」. 한 번에 약 2분이 든다 (비공개 레포라 Actions 시간이 과금된다).
+
+- **돌린다 — 작업 하나를 끝낸 뒤 한 번.** 그 작업에서 아래 「웹에 들어가는 경로」가 바뀌었고, 공개해도 될 만큼 마무리됐으면 마지막 push 뒤에 한 번 돌린다.
+  한 세션에서 여러 번 push했어도 끝에 한 번이다.
+  - 웹에 들어가는 경로: `tools/solo_raid/**` · `tools/publish/**` · `experiments/2026-10-15-solo-raid-low-cost/`의 `README.md`·`tools/**` · `docs/solo-raid-*.md` ·
+    `docs/community-access.md` · `docs/publish.md` · `.claude/agents/**` · `.claude/workflows/**` ·
+    `data/solo-raid/`의 `analysis/**`·`registry.json`·`seasons.json`·`split.json`·`S*/predict/**`·`S*/state/season.json`·`bosses/**`
+  - 진행 중 시즌: 6시간 수집이 예측을 커밋하면(`live_tick.sh finish`의 `run`) 그때마다 한 번 — 웹 「이번 시즌」이 이것으로 바뀐다 ([live 5](solo-raid-live.md)).
+    종료 후 수집 끝(`final`)에도 한 번.
+- **돌리지 않는다.**
+  - 위 경로가 바뀌지 않은 작업 — 수집 중 `state/`·`runs/` 커밋, `notices/`, 이슈 정리, 위 목록 밖의 문서만 고친 것 등.
+  - 「진행 중」·중간 조각 커밋, 같은 작업을 이어서 더 고칠 것이 남았을 때. 끝난 다음에 한 번 돌린다.
+  - 사용자가 공개를 미루라고 한 것.
+- **「운영 일 — 웹 반영」과 다르다.** AGENTS.md의 「웹 반영은 사용자가 지시할 때만」(2026-10-28)은 웹에 무엇을 싣고 어떤 모델·예측을 쓸지를 바꾸는 결정이다.
+  여기 복사는 이미 커밋한 공개 대상 변경을 공개 레포로 옮기기만 하는 일이라 에이전트가 판단한다 (10월까지 push마다 저절로 하던 일).
+- **판단이 어려우면** 돌리지 말고 마지막 답에 「공개 레포·웹에 아직 안 올림 — 이유」를 한 줄 적는다. 다음에 올리는 작업이 같이 실어 간다 (복사는 늘 `main` 전체를 다시 만든다).
+- **돌리는 법:** 세션에서 GitHub MCP `actions_run_trigger` — `method: run_workflow`, `owner: Jgaram`, `repo: nikke-community`, `workflow_id: publish.yml`, `ref: main`.
+  도구가 없으면 사용자에게 [Actions → publish → Run workflow](https://github.com/Jgaram/nikke-community/actions/workflows/publish.yml)를 안내한다.
+  분석 도구를 고쳤으면 돌리기 전에 로컬 빌드를 확인한다 (`python3 -I tools/publish/build_public.py --out DIR --site DIR2` — [분석](solo-raid-analysis.md) 「웹이 분석 도구·결과에 묶여 있다」).
+- **돌린 뒤:** 1~2분 뒤 결과(초록 · 빨강)를 보고, 마지막 답에 「공개 레포·웹 복사 실행 — 결과」를 한 줄 적는다. 빨가면 로그를 보고 고친다.
 
 ## 보스 그림
 
@@ -256,7 +279,7 @@
 2. **이 레포 Secret:** nikke-community → Settings → Secrets and variables → Actions → New repository secret.
    이름은 `PUBLIC_REPO_TOKEN`, 값은 1번의 토큰이다. 없는 동안 `publish.yml`은 아무것도 하지 않고 초록으로 끝난다.
 3. **Pages:** nikke-soloraid-cutoff → Settings → Pages → Build and deployment → Source: Deploy from a branch → `gh-pages` / `/ (root)`.
-4. 처음 한 번은 Actions → publish → Run workflow로 돌린다. 그다음부터는 push마다 돈다.
+4. Actions → publish → Run workflow로 돌린다. 2026-11-01부터는 push로 돌지 않고, 그 뒤에도 필요할 때만 이렇게 돌린다 (「언제 복사하나」).
 
 ## 주의
 
