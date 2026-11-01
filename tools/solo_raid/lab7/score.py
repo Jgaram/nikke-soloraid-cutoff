@@ -1,10 +1,18 @@
-"""새 방법 연구 채점 틀 (docs/solo-raid-method.md WP0 d). 5.3 B의 채점(`lab6/e_53s.py`)과 같은 셈을
+"""새 방법 연구 채점 틀 (docs/solo-raid-method.md WP0 d, 「2.1 성공 기준」). 5.3 B의 채점(`lab6/e_53s.py`)과 같은 셈을
 방법 어느 것에나 쓰게 한 것이다 — 예측 파일 하나가 방법 하나.
 
-  python3 -I tools/solo_raid/lab7/score.py --pred A.json [--pred B.json ...] --ref F.json --lb lb_D0.json [--out diag.json]
+  python3 -I tools/solo_raid/lab7/score.py --pred A.json [--pred B.json ...] --ref F.json --lb lb_D0.json [--out diag.json] [--weights third|half]
 
---pred 순서가 「단순한 쪽 먼저」 순서다 (0.3%p 안이면 앞 방법을 고른다). --ref는 기준선 F (맨 뒤 후보이자 g2·g3의 기준).
+--pred 순서가 「단순한 쪽 먼저」 순서다 (0.3%p 안이면 앞 방법을 고른다). --ref는 기준선 F — **참고 한 줄로만** 낸다
+(2026-10-31 사용자 결정: 새 로직을 처음부터 만드는 연구라 F와 견주지 않는다. 고르기·지킬 조건에 안 쓴다). 옛 판(`--weights half`)에서만 F가 후보이자 g2·g3의 기준.
 자료 판(data_ver)이 다른 파일은 견주지 않는다.
+
+규칙 판 (--weights, 출력 JSON의 weights·rule에 적힘):
+  third (기본, 2026-10-31) score = ⅓ × (초반 창 T 18·24·36·48 칸 평균 |e|) + ⅔ × (막판 창 T H−12·H−6·H 칸 평균 |e|).
+        지킬 조건은 g1 (중앙 < 하한 − 0.05인 칸 0)과 g4 (80% 포함 두 창 각각 ≥ 0.70)뿐. g2(시즌 끝 허용 밖 수)·g3(최악 시즌)·F는 보고만.
+        0.3%p 안이면 --pred 순서가 앞선 규칙. 지킨 규칙이 없으면 「없음」.
+  half  (옛 판, 2026-10-31 이전) score = ½·½, 조건 g1 · g2 ≤ F · g3 최악 ≤ F + 0.5%p · g4, F도 후보 (5.3 B 사전 규칙). 옛 결과를 그대로 다시 낼 때만 쓴다
+        (WP3b·WP4 결과 절의 숫자).
 
 예측 파일 (공통 꼴):
   {"about": str, "method": "F", "data_ver": "D0",
@@ -18,10 +26,10 @@
 
 셈 (e_53s.evaluate와 같음):
   e = 중앙 ÷ 정답 − 1 (정답은 answer_key). 창 main = T 18·24·36·48, end = T H−12·H−6·H.
-  score = ½ (main 칸 평균 |e|) + ½ (end 칸 평균 |e|). 칸 = 시즌 × T × 목표 %, 정답 있는 칸만.
+  score = w_main × (main 칸 평균 |e|) + w_end × (end 칸 평균 |e|), (w_main, w_end) = ⅓·⅔ (third) 또는 ½·½ (half). 칸 = 시즌 × T × 목표 %, 정답 있는 칸만.
   g1 = 자기 칸(own)에서 T ≥ 18이고 중앙 < 하한 − 0.05인 칸 수 · g2 = T = H에서 |e| > 허용인 (시즌, %) 수 ·
   worst = 시즌별 (두 창 칸 평균 |e|)의 최댓값 · cov = 창별 80% 구간 포함률.
-덧붙임 (보고만, 고르기에 안 씀):
+덧붙임 (보고만, 고르기에 안 씀 — third 판에서는 g2·worst·F도 여기에 든다):
   crps = 창 칸 평균의 CRPS 분위 근사. 비율 척도 (중앙·분위 ÷ 정답, 정답 = 1)에서
          CRPS ≈ 2 × (분위 수준 τ ∈ {0.025, 0.1, 0.5, 0.9, 0.975}에 대한 pinball 손실 평균),
          pinball(τ) = (1 − x_τ) × (τ − 1[1 < x_τ]), x_τ = 그 분위 ÷ 정답. 분위: 0.025·0.975 = i95, 0.1·0.9 = i80, 0.5 = pred.
@@ -47,6 +55,12 @@ MAIN_T = (18.0, 24.0, 36.0, 48.0)
 TOL = {0.5: 0.03, 1.0: 0.02, 2.0: 0.03, 3.0: 0.02, 5.0: 0.03, 10.0: 0.03}
 GROUPS = (("1·3%", (1.0, 3.0)), ("10%", (10.0,)))
 NEAR = 0.003   # score 0.3%p 안이면 단순한 쪽
+# 규칙 판 (2026-10-31): 이름 → (초반 창 무게, 막판 창 무게, 설명)
+WEIGHTS = {
+    "third": (1 / 3, 2 / 3, "2026-10-31: score = 1/3 초반 + 2/3 막판; 지킬 조건 g1·g4뿐, g2·g3·F는 보고만"),
+    "half": (0.5, 0.5, "옛 판(2026-10-31 이전): score = 1/2·1/2; 조건 g1·g2<=F·g3<=F+0.5%p·g4, F도 후보"),
+}
+DEFAULT_WEIGHTS = "third"
 TUNE = ("S22", "S26", "S30", "S34", "S38", "S42")   # 조정 시즌 (계획 4.4)
 # CRPS 근사에 쓰는 분위 (수준, 어느 구간, 끝 번호) — 중앙은 pred
 LEVELS95 = ((0.025, "i95", 0), (0.1, "i80", 0), (0.5, None, 0), (0.9, "i80", 1), (0.975, "i95", 1))
@@ -109,9 +123,10 @@ def crps_cell(c, tv):
     return 2.0 * tot / len(lv), has95
 
 
-def evaluate(cells, truth, lb, pcts, tol, seasons=None):
+def evaluate(cells, truth, lb, pcts, tol, seasons=None, weights=DEFAULT_WEIGHTS):
     """e_53s.evaluate와 같은 셈. cells = 예측 파일 칸 목록, truth = A.truth(), lb = {(시즌, T, %): 하한}.
-    seasons를 주면 그 시즌 칸만 (조정/나머지 나눔용)."""
+    seasons를 주면 그 시즌 칸만 (조정/나머지 나눔용). weights = WEIGHTS의 이름 (기본 third ⅓·⅔, half = 옛 ½·½)."""
+    w_main, w_end = WEIGHTS[weights][:2]
     win = collections.defaultdict(list)       # 창 → [(시즌, |e|, 포함, 폭, crps, 5분위)]
     per_season = collections.defaultdict(list)
     endH = []
@@ -163,9 +178,9 @@ def evaluate(cells, truth, lb, pcts, tol, seasons=None):
     worst = max(((st.mean(v), s) for s, v in per_season.items()), default=(None, None))
     cov = {w: mean([x[2] for x in win[w]]) for w in ("main", "end")}
     no2123 = [x for w in ("main", "end") for x in win[w] if x[0] not in ("S21", "S22", "S23")]
-    both = lambda a, b: None if a is None or b is None else (a + b) / 2   # noqa: E731
+    both = lambda a, b: None if a is None or b is None else w_main * a + w_end * b   # noqa: E731
     allw = win["main"] + win["end"]
-    return dict(score=both(sc["main"], sc["end"]), main=sc["main"], end=sc["end"],
+    return dict(weights=weights, score=both(sc["main"], sc["end"]), main=sc["main"], end=sc["end"],
                 score_med=both(medsc["main"], medsc["end"]), cov_main=cov["main"], cov_end=cov["end"],
                 g1=g1, g2=len(endH), g2_list=endH, worst=worst[0], worst_season=worst[1],
                 fallback=dict(fb), n=dict((w, len(win[w])) for w in ("main", "end")),
@@ -181,45 +196,52 @@ def evaluate(cells, truth, lb, pcts, tol, seasons=None):
 SPLIT_KEYS = ("score", "main", "end", "cov_main", "cov_end", "crps", "worst", "n", "w80")
 
 
-def evaluate_split(cells, truth, lb, pcts, tol):
+def evaluate_split(cells, truth, lb, pcts, tol, weights=DEFAULT_WEIGHTS):
     """전체(22시즌) · 조정 6시즌 · 나머지 16시즌 — 앞 둘은 요약만."""
-    allr = evaluate(cells, truth, lb, pcts, tol)
-    tune = evaluate(cells, truth, lb, pcts, tol, seasons=set(TUNE))
+    allr = evaluate(cells, truth, lb, pcts, tol, weights=weights)
+    tune = evaluate(cells, truth, lb, pcts, tol, seasons=set(TUNE), weights=weights)
     rest_s = {c["season"] for c in cells} - set(TUNE)
-    rest = evaluate(cells, truth, lb, pcts, tol, seasons=rest_s)
+    rest = evaluate(cells, truth, lb, pcts, tol, seasons=rest_s, weights=weights)
     pick = lambda r: {k: r[k] for k in SPLIT_KEYS}   # noqa: E731
     return allr, dict(all=pick(allr), tune=pick(tune), rest=pick(rest))
 
 
-def select(res, Fres, order):
-    """사전 규칙 (5.3 B): g1 0 · g2 ≤ F · 최악 ≤ F + 0.5%p · 80% 포함 두 창 ≥ 0.70 을 지킨 것 중 score 최소,
-    0.3%p 안이면 order에서 앞선 쪽 (F는 맨 뒤). res {이름: 평가}. 반환 (고른 이름, 기록)."""
+def select(res, Fres, order, weights=DEFAULT_WEIGHTS):
+    """사전 규칙. third (기본, 2026-10-31): g1 0 · 80% 포함 두 창 ≥ 0.70 을 지킨 것 중 score 최소, 0.3%p 안이면 order에서 앞선 쪽.
+    g2·worst는 기록(note)만, F는 고르기에 안 든다 — 지킨 것이 없으면 (None, 기록).
+    half (옛 판, 5.3 B): g1 0 · g2 ≤ F · 최악 ≤ F + 0.5%p · 80% 포함 ≥ 0.70 을 지킨 것 중 score 최소, F도 후보(맨 뒤).
+    res {이름: 평가}. 반환 (고른 이름, 기록)."""
+    old = weights == "half"
     log = []
     ok = {}
     for name in order:
         r = res[name]
         why = []
+        note = []
         if r["score"] is None or r["worst"] is None or r["cov_main"] is None or r["cov_end"] is None:
             why.append("칸 모자람")
         else:
             if r["g1"] > 0:
                 why.append(f"g1 {r['g1']}")
             if r["g2"] > Fres["g2"]:
-                why.append(f"g2 {r['g2']} > F {Fres['g2']}")
+                (why if old else note).append(f"g2 {r['g2']} > F {Fres['g2']}")
             if r["worst"] > Fres["worst"] + 0.005:
-                why.append(f"g3 최악 {r['worst'] * 100:.2f} > F {Fres['worst'] * 100:.2f}+0.5")
+                (why if old else note).append(f"g3 최악 {r['worst'] * 100:.2f} > F {Fres['worst'] * 100:.2f}+0.5")
             if r["cov_main"] < 0.70 or r["cov_end"] < 0.70:
                 why.append(f"g4 포함 {r['cov_main']:.2f}/{r['cov_end']:.2f}")
-        log.append(dict(name=name, score=None if r["score"] is None else round(r["score"] * 100, 3), fail=why))
+        log.append(dict(name=name, score=None if r["score"] is None else round(r["score"] * 100, 3), fail=why, note=note))
         if not why:
             ok[name] = r["score"]
-    ok["F"] = Fres["score"]
-    log.append(dict(name="F", score=round(Fres["score"] * 100, 3), fail=[]))
+    if old:
+        ok["F"] = Fres["score"]
+        log.append(dict(name="F", score=round(Fres["score"] * 100, 3), fail=[], note=[]))
+    if not ok:
+        return None, log
     best = min(ok.values())
-    for name in list(order) + ["F"]:
+    for name in list(order) + (["F"] if old else []):
         if name in ok and ok[name] <= best + NEAR:
             return name, log
-    return "F", log
+    return ("F" if old else None), log
 
 
 def pct(x, d=2):
@@ -240,6 +262,8 @@ def main():
     ap.add_argument("--ref", required=True, help="기준선 F 예측 파일")
     ap.add_argument("--lb", required=True, help="하한 파일")
     ap.add_argument("--out")
+    ap.add_argument("--weights", choices=sorted(WEIGHTS), default=DEFAULT_WEIGHTS,
+                    help="third = ⅓·⅔ 새 규칙(기본) · half = 옛 ½·½ 규칙(옛 결과 재현)")
     a = ap.parse_args()
     ref = load_pred(a.ref)
     lbh, lb = load_lb(a.lb)
@@ -255,16 +279,17 @@ def main():
         names.append(n)
     truth = A.truth()
     out = {"about": "새 방법 채점 (lab7/score.py, e_53s와 같은 셈)", "data_ver": vers.pop(), "ref": ref["method"],
-           "files": {os.path.basename(p): sha12(p) for p in a.pred + [a.ref, a.lb]}, "groups": {}}
+           "files": {os.path.basename(p): sha12(p) for p in a.pred + [a.ref, a.lb]},
+           "weights": a.weights, "w_main": WEIGHTS[a.weights][0], "w_end": WEIGHTS[a.weights][1], "rule": WEIGHTS[a.weights][2], "groups": {}}
     for gname, qs in GROUPS:
-        Fres, Fsplit = evaluate_split(ref["cells"], truth, lb, qs, TOL)
+        Fres, Fsplit = evaluate_split(ref["cells"], truth, lb, qs, TOL, a.weights)
         res, split = {}, {}
         for n, p in zip(names, preds):
-            res[n], split[n] = evaluate_split(p["cells"], truth, lb, qs, TOL)
-        pick, log = select(res, Fres, names)
+            res[n], split[n] = evaluate_split(p["cells"], truth, lb, qs, TOL, a.weights)
+        pick, log = select(res, Fres, names, a.weights)
         out["groups"][gname] = dict(pick=pick, log=log, F=Fres, cands=res, split=dict(F=Fsplit, **split))
-        print(f"== {gname}: 고름 {pick}  (자료 판 {out['data_ver']}, 조건 g1~g4는 select 규칙)")
-        print(line(ref["method"], Fres))
+        print(f"== {gname}: 고름 {pick or '없음'}  (자료 판 {out['data_ver']}, 무게 {a.weights} {WEIGHTS[a.weights][0]:.3f}/{WEIGHTS[a.weights][1]:.3f}, 조건은 select 규칙)")
+        print(line(ref["method"] + (" (참고)" if a.weights != "half" else ""), Fres))
         for n in names:
             print(line(n, res[n]))
         print("   -- 22시즌 전체 / 조정 6시즌 / 나머지 16시즌 (score · CRPS)")
@@ -273,6 +298,8 @@ def main():
         for x in log:
             if x["fail"]:
                 print(f"   탈락 {x['name']}: {'; '.join(x['fail'])}")
+            if x.get("note"):
+                print(f"   보고만 {x['name']}: {'; '.join(x['note'])}")
     if a.out:
         with open(a.out, "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False)

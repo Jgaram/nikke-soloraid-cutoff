@@ -73,10 +73,47 @@ def setup_host(n=4):
     jax.config.update("jax_enable_x64", False)
 
 
+# ---------- 변형 (WP4 관측 층 빼 보기, 2026-10-31) ----------
+# 이름 -> 설정. 없는 키는 본안 값. base·None은 get_var가 None으로 돌려 기존 코드 경로 그대로 간다.
+VARIANTS = {
+    "base": {},
+    "A": {"kinds": {"A"}},                      # 정확한 점만
+    "AB": {"kinds": {"A", "B"}},                # A + B
+    "Cpost": {"c_post": True},                  # C를 게시 시각(he)에 둠, 시각 오차 0
+    "text": {"text": True},                     # 본안 + 글로만 적은 %
+    "nocontam": {"contam": False},              # 오염 성분 뺌
+    "mono": {"server": "mono"},                 # 서버 미상 줄은 mono 거르기 + 한섭 확정
+}
+TEXT_EPS = 0.109                                # 글 줄 eps 고정 (1c 엄격 값, load_err 값으로 prepare가 덮는다)
+
+
+def get_var(name):
+    """변형 이름·설정 -> 설정 dict(name 포함). None·"base"는 None."""
+    if name is None or name == "base":
+        return None
+    if isinstance(name, dict):
+        return name
+    if name not in VARIANTS:
+        raise ValueError(f"모르는 변형 {name}; {sorted(VARIANTS)}")
+    v = dict(VARIANTS[name])
+    v["name"] = name
+    return v
+
+
+def _dec(v):
+    """소수 자릿수 (0~3), 그 이상 9 (err_1c.dec과 같은 논리)."""
+    for d in range(4):
+        if abs(round(v, d) - v) < 1e-9:
+            return d
+    return 9
+
+
 # ---------- 1.1 줄 고르기 ----------
 
-def select_rows(rows, H, stage1=False):
-    """쓸 줄 목록 (복사본에 tg·post 추가). 기본 = kind A·B·C, lo_reason None, rep. stage1이면 종료 뒤 화면 줄도 더한다."""
+def select_rows(rows, H, stage1=False, var=None, stats=None):
+    """쓸 줄 목록 (복사본에 tg·post 추가). 기본 = kind A·B·C, lo_reason None, rep. stage1이면 종료 뒤 화면 줄도 더한다.
+    var(변형)가 있을 때만 kind 거르기·mono·글 줄을 더 건드린다. stats = 세어 담을 dict (선택)."""
+    var = get_var(var)
     out = []
     seen = set()
     for r in rows:
@@ -97,8 +134,17 @@ def select_rows(rows, H, stage1=False):
             continue
         if r["pct"] is None or r["score"] is None or r["score"] <= 0:
             continue
+        if var:
+            if not post and var.get("kinds") and r["kind"] not in var["kinds"]:
+                continue
         x = dict(r)
         x["post"] = post
+        if var and var.get("server") == "mono" and r["server"] is None:
+            if post or r.get("mono_drop"):          # 종료 뒤 화면은 mono 정의 안 됨 / 거른 줄
+                if stats is not None:
+                    stats["drop_mono"] = stats.get("drop_mono", 0) + 1
+                continue
+            x["server"], x["server_basis"], x["mono_kr"] = "KR", "mono", True
         if post:
             x["tg"] = "post"
         elif r["kind"] == "A":
@@ -109,6 +155,34 @@ def select_rows(rows, H, stage1=False):
         else:
             x["tg"] = "delay"
         out.append(x)
+    if var and var.get("text"):
+        out += _text_rows(rows, stage1, var, stats)
+    return out
+
+
+def _text_rows(rows, stage1, var, stats=None):
+    """글로만 적은 %의 줄 (복사본에 tg·post·is_text). 사진과 같은 사람·같은 %(0.01 단위)인 글은 뺀다."""
+    photo = {(r["pid"], round(r["pct"], 2)) for r in rows if r["kind"] in ABC and r["pct"] is not None}
+    seen = set()
+    out = []
+    for r in rows:
+        if r["kind"] != "text" or r["score"] is None or r["pct"] is None or r["score"] <= 0 or r["link"]:
+            continue
+        if r["server"] is not None and r["server"] not in SERVERS:
+            continue
+        k = (r["pid"], round(r["pct"], 2))
+        if k in photo or k in seen or r["hp"] is None or r["hp"] < 0:
+            continue
+        post = r["day_lo"] == "post"
+        if post and not stage1:
+            continue
+        seen.add(k)
+        x = dict(r)
+        x["post"], x["is_text"] = post, True
+        x["tg"] = "post" if post else "delay"
+        out.append(x)
+    if stats is not None:
+        stats["sel_text_rows"] = len(out)
     return out
 
 
@@ -165,9 +239,16 @@ def support(r, H):
     return max(los), Up
 
 
-def nodes_detail(r, H, err, delay_key, K):
+def nodes_detail(r, H, err, delay_key, K, var=None):
     """(t[K], w[K], 사유 또는 None) — 사유: bad_support·timer_fallback·flat_support. 지지가 비면 (None, None, "bad_support")."""
     tg = r["tg"]
+    if var is not None and r["kind"] == "C" and tg == "delay":
+        var = get_var(var)
+        if var and var.get("c_post"):               # Cpost: C는 게시 시각(he)에 노드 하나, 시각 오차 0
+            t0 = r.get("he") if r.get("he") is not None else r.get("hp")
+            if t0 is None:
+                return None, None, "bad_support"
+            return _pad(np.array([min(max(float(t0), 0.0), float(H))]), np.array([1.0]), K) + (None,)
     if tg == "A":
         return _pad(np.array([r["h"]], float), np.array([1.0]), K) + (None,)
     if tg == "post":
@@ -222,9 +303,9 @@ def nodes_detail(r, H, err, delay_key, K):
     return hp - x, np.full(K, 1.0 / K), reason
 
 
-def nodes_for(r, H, err, delay_key, K):
+def nodes_for(r, H, err, delay_key, K, var=None):
     """줄 r (tg 붙은 것)의 촬영 시각 노드 (t[K'], w[K']), K' <= K. 지지가 비면 (None, None). 안 쓰는 칸은 무게 0 (K로 채움)."""
-    t, w, _ = nodes_detail(r, H, err, delay_key, K)
+    t, w, _ = nodes_detail(r, H, err, delay_key, K, var)
     return t, w
 
 
@@ -235,20 +316,40 @@ ELAB_KEY = {"top7": "top7", "text": "text", "text+top7": "text+top7", "top7_1": 
 
 
 def _elab(r, err):
+    if r.get("mono_kr"):                           # mono: 한섭 확정
+        return 0.0
     if r["server"] not in SERVERS:
         return 0.0
     key = ELAB_KEY.get(r["server_basis"], "text")
     return float(err["1e_server"]["label_error_by_basis"][key]["beta_central"]["mean"])
 
 
-def prepare(rows, H, season, err, K=16, delay_key=None, stage1=False):
-    """줄 고르기 + 노드 + 채움 → Obs (numpy dict). delay_key = 1a expanding 시즌 키 (맞힐 시즌, 앞 시즌 값) 또는 None(전체 값)."""
-    sel = select_rows(rows, H, stage1)
-    cnt = collections.Counter()
+def _text_intervals(p, err):
+    """글 % 값 구간 [(log10 하한, log10 상한, 무게)] 1~2개. 소수 둘째 자리 이상은 사진과 같은 구간, 한 자리·없음은 반올림·버림 혼합."""
+    def lg(x):
+        return float(np.log10(x)) if x > 0 else -30.0
+    d = _dec(p)
+    if d >= 2:
+        return [(lg(p - 0.005), float(np.log10(p + 0.01)), 1.0)]
+    w = err["1c_text_pct"]["digits_1"]["mixture"]["w_round"]
+    u = 0.1 if d == 1 else 1.0
+    return [(lg(p - u / 2), float(np.log10(p + u / 2)), w), (lg(p), float(np.log10(p + u)), 1.0 - w)]
+
+
+def prepare(rows, H, season, err, K=16, delay_key=None, stage1=False, var=None, dep=None):
+    """줄 고르기 + 노드 + 채움 → Obs (numpy dict). delay_key = 1a expanding 시즌 키 (맞힐 시즌, 앞 시즌 값) 또는 None(전체 값).
+    var = 변형 이름(VARIANTS) 또는 None. None·base면 이전 코드와 같은 배열.
+    dep = 시간 어긋남 변형(WP5a) "dt"·"dtp" 또는 None. None이면 이전 코드와 같은 배열(키도 안 더한다)."""
+    if dep not in DEP_KINDS and dep is not None:
+        raise ValueError(f"모르는 dep {dep}; {DEP_KINDS}")
+    var = get_var(var)
+    stats = {}
+    sel = select_rows(rows, H, stage1, var, stats)
+    cnt = collections.Counter(stats)
     nodes_reason = collections.Counter()
     keep = []
     for r in sel:
-        t, w, why = nodes_detail(r, H, err, delay_key, K)
+        t, w, why = nodes_detail(r, H, err, delay_key, K, var)
         if why:
             nodes_reason[why] += 1
         if t is None:
@@ -274,29 +375,54 @@ def prepare(rows, H, season, err, K=16, delay_key=None, stage1=False):
     lw[:, 0] = 0.0
     site, lab, elab = np.zeros(N, int), np.zeros(N, int), np.zeros(N)
     kind, mask = np.zeros(N, int), np.zeros(N)
+    text = bool(var and var.get("text"))
+    if text:
+        zlo2, zhi2 = np.full(N, -1.0), np.zeros(N)
+        lwi1, lwi2, eps_row = np.zeros(N), np.full(N, NEG), np.full(N, -1.0)
+        eps_text = float(err["1c_text_pct"]["contamination"]["eps_strict_all_photos"]["p"])
     meta = []
     for i0, (r, t, w) in enumerate(keep):
         i = pos[i0]
-        y[i] = np.log(r["score"])
+        is_text = bool(r.get("is_text"))
+        if is_text:
+            sc = float(r["score"])
+            y[i] = np.log(sc + 0.5) if sc.is_integer() else np.log(sc)     # 정수 억이면 [s, s+1)의 가운데
+        else:
+            y[i] = np.log(r["score"])
         p = r["pct"]
-        zlo[i] = np.log10(p - 0.005) if p - 0.005 > 0 else -30.0
-        zhi[i] = np.log10(p + 0.01)
+        if is_text:
+            iv = _text_intervals(p, err)
+            zlo[i], zhi[i] = iv[0][0], iv[0][1]
+            zlo2[i], zhi2[i] = (iv[1][0], iv[1][1]) if len(iv) > 1 else (iv[0][0], iv[0][1])
+            if len(iv) > 1:
+                lwi1[i], lwi2[i] = np.log(iv[0][2]), np.log(iv[1][2])
+            eps_row[i] = eps_text
+        else:
+            zlo[i] = np.log10(p - 0.005) if p - 0.005 > 0 else -30.0
+            zhi[i] = np.log10(p + 0.01)
+            if text:
+                zlo2[i], zhi2[i] = zlo[i], zhi[i]
         tt[i] = t
         u[i] = np.clip(t / H, 0.02, 1.0)
         lw[i] = np.where(w > 0, np.log(np.maximum(w, 1e-300)), NEG)
         site[i] = SITES.index(r["site"]) if r["site"] in SITES else 3
         lab[i] = SERVERS.index(r["server"]) if r["server"] in SERVERS else -1
         elab[i] = _elab(r, err)
-        kind[i] = 3 if r["post"] else "ABC".index(r["kind"])
+        kind[i] = 3 if r["post"] else (4 if is_text else "ABC".index(r["kind"]))
         mask[i] = 1.0
         if r["tg"] == "A":
             Lo = Up = r["h"]
         elif r["tg"] == "post":
             Lo = Up = float(H)
+        elif var and var.get("c_post") and r["kind"] == "C" and r["tg"] == "delay":
+            Lo = Up = float(t[0])
         else:
             Lo, Up = support(r, H)
         meta.append({"key": r["key"], "pid": r["pid"], "kind": r["kind"], "tg": r["tg"], "server": r["server"],
                      "site": r["site"], "h": r["h"], "hp": r["hp"], "Lo": Lo, "Up": Up})
+        if is_text:
+            meta[-1]["is_text"] = True
+            cnt["sel_text"] += 1
         cnt["sel_" + r["tg"]] += 1
     fill = mask == 0
     if n:
@@ -307,15 +433,54 @@ def prepare(rows, H, season, err, K=16, delay_key=None, stage1=False):
     dsite = err["1e_server"]["unknown_row_site_dirichlet"]
     dirichlet = np.array([[dsite[s]["alpha"][k] for k in SERVERS] for s in ("dc", "naver", "blabla", "*")])
     cd = err["1d_contamination"]
-    return {"season": season, "H": float(H), "K": K, "n": n, "N": N, "n1": N1, "pos": pos,
+    obs = {"season": season, "H": float(H), "K": K, "n": n, "N": N, "n1": N1, "pos": pos,
             "y": y, "zlo": zlo, "zhi": zhi, "u": u, "lw": lw, "t": tt, "site": site, "lab": lab, "elab": elab,
             "kind": kind, "mask": mask, "meta": meta,
             "counts": {"rows": dict(cnt), "node_reasons": dict(nodes_reason)},
             "dirichlet": dirichlet,
             "eps_ab": (cd["contamination_weight_photo"]["prior_central"]["a"], cd["contamination_weight_photo"]["prior_central"]["b"]),
             "fc_scale": float(cd["contaminant_density"]["family_fits"]["laplace"]["params(shape..., loc, scale)"][-1])}
+    if var:                                         # 변형 전용 키 (본안에는 없다)
+        obs["var"] = var["name"]
+        if text:
+            obs.update(zlo2=zlo2, zhi2=zhi2, lwi1=lwi1, lwi2=lwi2, eps_row=eps_row)
+        if var.get("contam") is False:
+            obs["no_contam"] = True
+    if dep:                                         # WP5a: 시간 어긋남 매듭 배열 (본안에는 없다)
+        obs.update(_dep_arrays(dep, H, tt, [r["pid"] for r, _, _ in keep], pos, N))
+        obs["counts"]["dep"] = {"kind": dep, "nk": obs["dep_nk"], "n_pid_effects": obs["dep_np"]}
+    return obs
 
 
+DEP_KINDS = ("dt", "dtp")
+DEP_DT = 3.0                                        # 매듭 간격 (시간)
+DEP_ARR = ("dep_j0", "dep_w1", "dep_pid")           # to_jax·MAP이 배열로 옮기는 dep 키
+
+
+def _dep_arrays(dep, H, tt, pids, pos, N):
+    """매듭 t_j = 0, 3, 6, ... (H를 넘는 첫 매듭까지) 위 선형 보간용 배열. 노드마다 (왼쪽 매듭 번호 j0, 오른쪽 무게 w1), 줄마다 사람 효과 번호.
+    사람 효과는 고른 줄 안에서 줄이 2개 이상인 pid만 (번호 0..np-1, 나머지·채움 줄은 np = 0짜리 칸). dt면 np = 0."""
+    nk = int(np.floor(H / DEP_DT)) + 2              # H가 매듭 위여도 H 오른쪽 매듭이 하나 더 있다 (w1 = 0 이어도 색인이 닿게)
+    s = np.clip(tt, 0.0, None) / DEP_DT
+    j0 = np.minimum(np.floor(s).astype(int), nk - 2)
+    w1 = np.clip(s - j0, 0.0, 1.0)
+    jH = int(np.floor(H / DEP_DT))
+    out = {"dep": dep, "dep_nk": nk, "dep_j0": j0, "dep_w1": w1, "dep_jH": jH, "dep_wH": float(H / DEP_DT - jH)}
+    ids = {}
+    if dep == "dtp":
+        cnt = collections.Counter(pids)
+        ids = {p: i for i, p in enumerate(sorted(p for p, c in cnt.items() if c >= 2))}
+    npid = len(ids)
+    pi = np.full(N, npid, int)
+    for i0, p in enumerate(pids):
+        if p in ids:
+            pi[pos[i0]] = ids[p]
+    out["dep_np"] = npid
+    out["dep_pid"] = pi
+    return out
+
+
+EXTRA = ("zlo2", "zhi2", "lwi1", "lwi2", "eps_row")
 NUMERIC = ("y", "zlo", "zhi", "u", "lw", "t", "site", "lab", "elab", "kind", "mask", "dirichlet")
 
 
@@ -329,7 +494,32 @@ def to_jax(obs):
     for k in ("eps_ab", "fc_scale", "K", "N", "n", "n1", "H"):
         out[k] = obs[k]
     out["pos"] = np.asarray(obs["pos"])
+    for k in EXTRA:                                 # 변형 전용 배열 (있을 때만)
+        if k in obs:
+            out[k] = jnp.asarray(np.asarray(obs[k]), jnp.float32)
+    for k in ("no_contam", "var"):
+        if k in obs:
+            out[k] = obs[k]
+    if "dep" in obs:                                # 시간 어긋남 변형 (WP5a)
+        for k in DEP_ARR:
+            a = np.asarray(obs[k])
+            out[k] = jnp.asarray(a, jnp.int32 if a.dtype.kind in "iu" else jnp.float32)
+        for k in ("dep", "dep_nk", "dep_np", "dep_jH", "dep_wH"):
+            out[k] = obs[k]
     return out
+
+
+def dep_add(obs, mu, delta, bp=None):
+    """시간 어긋남 더하기 (WP5a). mu[3,N,K]의 한섭 성분(0번)에 노드 시각 보간 delta(t), 모든 서버 성분에 사람 효과 b_pid를 더한다.
+    delta = 매듭 값 [nk] (log10 %), bp = 사람 효과 [np] 또는 None. 노드 값은 delta[j0](1 - w1) + delta[j0 + 1] w1."""
+    import jax.numpy as jnp
+    j0, w1 = obs["dep_j0"], obs["dep_w1"]
+    dn = delta[j0] * (1.0 - w1) + delta[j0 + 1] * w1                # [N,K]
+    mu = mu.at[0].add(dn)
+    if bp is not None:
+        b = jnp.concatenate([bp, jnp.zeros((1,), bp.dtype)])[obs["dep_pid"]]    # [N] (한 줄짜리·채움 줄은 0)
+        mu = mu + b[None, :, None]
+    return mu
 
 
 # ---------- 1.4 가능도 ----------
@@ -360,13 +550,18 @@ def _logpi(obs, phi):
     return jnp.log(jnp.maximum(pi, 1e-30))
 
 
-def _AB(zlo, zhi, mu, P, lw, sigma0, rho, fc_scale):
-    """노드 합 A = logsumexp_n(lw + logPr), B = logsumexp_n(lw + logfc) -> [3,N]. 입력: zlo·zhi [N], mu·P [3,N,K], lw [N,K]."""
+def _AB(zlo, zhi, mu, P, lw, sigma0, rho, fc_scale, mix=None):
+    """노드 합 A = logsumexp_n(lw + logPr), B = logsumexp_n(lw + logfc) -> [3,N]. 입력: zlo·zhi [N], mu·P [3,N,K], lw [N,K].
+    mix = (zlo2, zhi2, lwi1, lwi2) [N] — 값 구간 혼합(글 %): logPr = logaddexp(lwi1 + 구간1, lwi2 + 구간2)."""
     import jax.numpy as jnp
     from jax.scipy.special import logsumexp
     sig = jnp.sqrt(sigma0 ** 2 + (rho * P) ** 2)
     zl, zh = zlo[None, :, None], zhi[None, :, None]
     logpr = logdiff_ndtr((zl - mu) / sig, (zh - mu) / sig)
+    if mix is not None:
+        zl2, zh2 = mix[0][None, :, None], mix[1][None, :, None]
+        logpr2 = logdiff_ndtr((zl2 - mu) / sig, (zh2 - mu) / sig)
+        logpr = jnp.logaddexp(mix[2][None, :, None] + logpr, mix[3][None, :, None] + logpr2)
     logfc = -jnp.abs(0.5 * (zl + zh) - mu) / fc_scale - jnp.log(2 * fc_scale) + jnp.log(zh - zl)
     return logsumexp(lw[None] + logpr, axis=2), logsumexp(lw[None] + logfc, axis=2), logpr, logfc
 
@@ -378,14 +573,22 @@ def row_loglik(obs, mu, P, sigma0, rho, eps, phi, parts=False):
     from jax.scipy.special import logsumexp
     s = obs["fc_scale"]
     n1 = obs.get("n1", 0)
-    if parts or n1 == 0:
-        A, B, logpr, logfc = _AB(obs["zlo"], obs["zhi"], mu, P, obs["lw"], sigma0, rho, s)
+    mix = (obs["zlo2"], obs["zhi2"], obs["lwi1"], obs["lwi2"]) if "zlo2" in obs else None   # 변형 text
+    if mix is None:
+        mx1 = mx2 = None
     else:
-        A1, B1, _, _ = _AB(obs["zlo"][:n1], obs["zhi"][:n1], mu[:, :n1, :1], P[:, :n1, :1], obs["lw"][:n1, :1], sigma0, rho, s)
-        A2, B2, _, _ = _AB(obs["zlo"][n1:], obs["zhi"][n1:], mu[:, n1:], P[:, n1:], obs["lw"][n1:], sigma0, rho, s)
+        mx1, mx2 = tuple(a[:n1] for a in mix), tuple(a[n1:] for a in mix)
+    if parts or n1 == 0:
+        A, B, logpr, logfc = _AB(obs["zlo"], obs["zhi"], mu, P, obs["lw"], sigma0, rho, s, mix)
+    else:
+        A1, B1, _, _ = _AB(obs["zlo"][:n1], obs["zhi"][:n1], mu[:, :n1, :1], P[:, :n1, :1], obs["lw"][:n1, :1], sigma0, rho, s, mx1)
+        A2, B2, _, _ = _AB(obs["zlo"][n1:], obs["zhi"][n1:], mu[:, n1:], P[:, n1:], obs["lw"][n1:], sigma0, rho, s, mx2)
         A, B = jnp.concatenate([A1, A2], axis=1), jnp.concatenate([B1, B2], axis=1)
+    if "eps_row" in obs:                                        # 줄마다 eps (글 줄은 고정 값, 사진은 표집 값)
+        eps = jnp.where(obs["eps_row"] >= 0, obs["eps_row"], eps)
     le, l1e = jnp.log(eps), jnp.log1p(-eps)
-    comp = jnp.logaddexp(l1e + A, le + B)
+    nocon = bool(obs.get("no_contam"))
+    comp = A if nocon else jnp.logaddexp(l1e + A, le + B)
     lp = _logpi(obs, phi)                                       # [N,3]
     joint = lp.T + comp                                         # [3,N]
     ll = logsumexp(joint, axis=0) * obs["mask"]
@@ -394,7 +597,11 @@ def row_loglik(obs, mu, P, sigma0, rho, eps, phi, parts=False):
     tot = logsumexp(joint, axis=0)
     p_c = jnp.exp(logsumexp(lp.T + le + B, axis=0) - tot)
     p_s = jnp.exp(joint - tot).T
-    nodell = jnp.logaddexp(l1e + logpr, le + logfc)             # [3,N,K]
+    if "eps_row" in obs:
+        le, l1e = le[None, :, None], l1e[None, :, None]
+    nodell = logpr if nocon else jnp.logaddexp(l1e + logpr, le + logfc)   # [3,N,K]
+    if nocon:
+        p_c = jnp.zeros_like(p_c)
     lnode = obs["lw"] + logsumexp(lp.T[:, :, None] + nodell, axis=0)
     pn = jnp.exp(lnode - logsumexp(lnode, axis=1, keepdims=True))
     t_mean = (pn * obs["t"]).sum(1)

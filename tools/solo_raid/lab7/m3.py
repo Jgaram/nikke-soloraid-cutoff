@@ -4,6 +4,9 @@
   python3 -I tools/solo_raid/lab7/m3.py stage1 --obs-dir W/obs7/full --seasons S19-S42 --out data/solo-raid/analysis/r7/stage1_M3_D1.json [--chains 4 --warmup 500 --samples 500] [--draws-dir DIR]
   python3 -I tools/solo_raid/lab7/m3.py prior --stage1 STAGE1.json --target S30 [--k 6] [--out P.json] [--prior-cache DIR]
   python3 -I tools/solo_raid/lab7/m3.py predict --stage1 STAGE1.json --obs-dir W/obs7 --seasons S22,S26 --T all|24,48 --out PRED.json [--prior-cache DIR]
+  stage1·predict에 --dep {dt,dtp} (WP5a): 한섭 성분에 시간 어긋남 δ(t) (dtp는 + 사람 효과). 없으면 지금 코드와 같은 계산.
+    stage1 --dep-fit {marg,joint}: 1단계 라플라스의 MAP. joint = 명세 그대로(ζ·hyper 결합 MAP — σ_δ를 10배 넘게 키운다, S30 합성에서 0.008 → 0.099),
+    marg = ζ를 적분한 라플라스 보정(+½ log|H_ζζ|, occam_refine; 기본). 칸 예측은 NUTS가 ζ·hyper를 함께 뽑아 이 선택과 무관하다.
 
 명세 「WP3 명세」 0·1·2·3·4(M3)·5·6절. 좌표: y = ln 점수, w = ln(q/3), u = h/H.
   컷 곡선  ln C(w) = a - R(w),  R(w) = ∫_0^w exp(r(v)) dv      r = 3차 B-스플라인 12개, w ∈ [ln(0.1/3), ln(40/3)] (밖은 끝값 상수)
@@ -41,7 +44,20 @@ LN10 = math.log(10.0)
 L10_3 = math.log10(3.0)
 OFF = M1.OFF                                            # dJP dGL pJP pGL kJP kGL
 XTERM = True                                            # x항 β (M1 ②와 같다): P_k *= exp(beta w_fin_k / ln10)
-NUIS = ["lnsig0", "lnrho"] + (["beta"] if XTERM else []) + list(OFF)   # prior_for에 넘기는 모수 (m1 순서)
+# WP5a: 시간 어긋남 모수 사전 (평균, sd, 2단계 tau 척도) — m1.WEAK는 건드리지 않고 m3 안에서 넓힌다 (「WP5a 정함」).
+WEAK3 = dict(M1.WEAK)
+WEAK3.update({"lnsigd": (math.log(0.01), 1.0, 0.3), "lnelld": (math.log(4.0), 0.7, 0.3), "lnsigp": (math.log(0.005), 1.0, 0.3)})
+DEP = None                                              # None | "dt" | "dtp" (set_dep으로)
+DEP_FIT = "marg"                                        # 1단계 MAP: "joint" = 명세 그대로(ζ까지 결합 MAP), "marg" = ζ를 적분한 라플라스 보정(아래 occam_refine)
+DEP_NAMES = {None: [], "dt": ["lnsigd", "lnelld"], "dtp": ["lnsigd", "lnelld", "lnsigp"]}
+DEP_STEP = OM.DEP_DT                                    # 매듭 간격 (시간); φ = exp(-DEP_STEP / ℓ_δ)
+NUIS = ["lnsig0", "lnrho"] + (["beta"] if XTERM else []) + DEP_NAMES[DEP] + list(OFF)   # prior_for에 넘기는 모수 (m1 순서; dep 이름은 서버 성분 앞에 — OFF가 항상 맨 뒤)
+
+
+def hier_args3(names):
+    """hier에 넘길 (mu_loc, mu_scale = 약한 사전의 2 sd, tau_scale) — m1.hier_args와 같은 꼴, WEAK3 위."""
+    return (np.array([WEAK3[n][0] for n in names]), np.array([2 * WEAK3[n][1] for n in names]),
+            np.array([WEAK3[n][2] for n in names]))
 NR, NL = 13, 12   # 2026-10-29 7·8 → 12·12 → r 13 (균일 12 + 3% 매듭, 관측만의 PSIS-LOO 규칙): 기저 7개로는 범위만 바꿔도 3% 컷이 0.57% 움직였다 (P-스플라인은 넉넉한 기저 + 벌점, Eilers·Marx 1996)
 W_LO, W_HI = math.log(0.1 / 3), math.log(40 / 3)        # 평가 격자 w12 범위 (고정)
 K_LO, K_HI = W_LO, W_HI                                 # r 매듭 범위 (configure로 바꿈)
@@ -106,7 +122,7 @@ def configure(nr=None, nl=None, r_lo_pct=None, r_hi_pct=None, r_extra=None, x_te
 def _update_layout():
     """평가 격자 길이에서 파생되는 것: 1단계 벡터 이름, 24+ 곡선 벡터의 밴드 위치 (r: 0.3%<=q<=13.5%인 점, l: 인덱스 2..11)."""
     global NE_R, S1_NAMES, BAND, OUT, DT, NUIS
-    NUIS = ["lnsig0", "lnrho"] + (["beta"] if XTERM else []) + list(OFF)
+    NUIS = ["lnsig0", "lnrho"] + (["beta"] if XTERM else []) + DEP_NAMES[DEP] + list(OFF)
     w = BASIS["w12"]
     NE_R = len(w)
     S1_NAMES = ["a"] + list(NUIS) + [f"r{i}" for i in range(NE_R)] + [f"l{i}" for i in range(12)]
@@ -116,8 +132,68 @@ def _update_layout():
     OUT = [i for i in range(DT) if i not in BAND]
 
 
+def set_dep(dep, fit=None):
+    """시간 어긋남 변형 (None | "dt" | "dtp")을 정하고 NUIS·1단계 벡터 이름을 다시 만든다. 1단계 파일을 읽으면 load_stage1이 머리의 dep로 부른다.
+    fit = 1단계 MAP 방식 ("marg" | "joint"; None이면 그대로). 칸 예측은 이 값을 안 쓴다 (NUTS가 ζ를 함께 뽑는다)."""
+    global DEP, DEP_FIT
+    if dep not in DEP_NAMES:
+        raise ValueError(f"모르는 dep {dep}")
+    if fit is not None:
+        if fit not in ("marg", "joint"):
+            raise ValueError(f"모르는 dep fit {fit}")
+        DEP_FIT = fit
+    DEP = dep
+    _update_layout()
+
+
 def n_stage1():
     return 1 + NR + NL + 2 + len(NUIS)
+
+
+def _ar_mat(lnsigd, lnelld, nk, xp):
+    """비중심 정상 AR(1)의 선형 사상 A[nk,nk]: δ = A ζ, A[j,i] = σ φ^{j-i} s_i (s_0 = 1, s_i = √(1-φ²)). xp = numpy 또는 jax.numpy."""
+    sig, ell = xp.exp(lnsigd), xp.exp(lnelld)
+    lphi = -DEP_STEP / ell
+    idx = xp.arange(nk)
+    d = idx[:, None] - idx[None, :]
+    Lm = xp.where(d >= 0, xp.exp(xp.maximum(d, 0) * lphi), 0.0)
+    sc = xp.where(idx == 0, 1.0, xp.sqrt(-xp.expm1(2.0 * lphi)))
+    return sig * (Lm * sc[None, :])
+
+
+def _dep_D(hy, nk, npid, xp):
+    """ζ -> (매듭 δ, 사람 효과 b) 전체 사상 D[nz,nz] (블록 대각: AR 블록, σ_p I). 보정 항 occam_pen·set_G에서만 쓴다."""
+    A = _ar_mat(hy["lnsigd"], hy["lnelld"], nk, xp)
+    nz = nk + npid
+    if xp is np:
+        D = np.zeros((nz, nz))
+        D[:nk, :nk] = A
+        if npid:
+            D[nk:, nk:] = np.eye(npid) * np.exp(hy["lnsigp"])
+        return D
+    D = xp.zeros((nz, nz)).at[:nk, :nk].set(A)
+    if npid:
+        D = D.at[nk:, nk:].set(xp.eye(npid) * xp.exp(hy["lnsigp"]))
+    return D
+
+
+def dep_fields(hy, zeta, nk, npid, jH, wH):
+    """시간 어긋남 매듭 값 δ[nk] (log10 %), 끝 시각 값 dH = δ(H), 사람 효과 bp[npid] (dtp만)를 ζ에서 만든다 (비중심 정상 AR(1)).
+    hy = lnsigd·lnelld(·lnsigp). zeta[:nk] 매듭, zeta[nk:] 사람. δ_0 = σ ζ_0, δ_j = φ δ_{j-1} + σ √(1-φ²) ζ_j, φ = exp(-3/ℓ) — 닫힌 꼴 δ = σ (φ^{j-i} s_i) ζ."""
+    import jax.numpy as jnp
+    delta = _ar_mat(hy["lnsigd"], hy["lnelld"], nk, jnp) @ zeta[:nk]
+    out = {"delta": delta, "dH": delta[jH] * (1.0 - wH) + delta[jH + 1] * wH}
+    if "lnsigp" in hy:
+        out["bp"] = jnp.exp(hy["lnsigp"]) * zeta[nk:nk + npid]
+    return out
+
+
+def _lnC_t(th, q):
+    """목표 q% 컷의 ln 점수. dep면 최종 한섭 q% 컷 = lnC(θ, q·10^{-δ(H)}), 아니면 lnC(θ, q) 그대로."""
+    import jax.numpy as jnp
+    if "dH" in th:
+        return lnC(th, jnp.asarray(q, jnp.float32) * jnp.power(10.0, -th["dH"]))
+    return lnC(th, q)
 
 
 def basis_spec():
@@ -231,18 +307,49 @@ class Stage1Prob:
 
     def __init__(self, param="noncentered"):
         self.param = param
-        self.n = n_stage1()
+        self.n = self.n0 = n_stage1()
+        self.nz = 0                               # dep면 bind(obs)가 ζ 길이를 정한다 (ζ는 v 맨 뒤)
+        self.dep = None
+        self.G = None                             # marg 보정용 δ 공간 곡률 (occam_refine이 정한다)
         self.it = 1 + NR + NL                     # ln tau_r 위치 (tau_l은 다음)
         self.off_ix = tuple(self.it + 2 + NUIS.index(n) for n in OFF)   # 서버 성분 모수 6개 위치
         self.tau_ix = (self.it, self.it + 1) if param == "centered" else ()
-        self.start = np.concatenate([[M1.WEAK["a"][0]], np.full(NR, CR_MEAN if param == "centered" else 0.0),
+        self.start = np.concatenate([[WEAK3["a"][0]], np.full(NR, CR_MEAN if param == "centered" else 0.0),
                                      np.full(NL, CL_MEAN if param == "centered" else 0.0), [math.log(0.3)] * 2,
-                                     [M1.WEAK[n][0] for n in NUIS]])
+                                     [WEAK3[n][0] for n in NUIS]])
         self._eig = {}
         for key, nn in (("r", NR), ("l", NL)):
             D2 = np.diff(np.eye(nn), 2, axis=0)
             e, U = np.linalg.eigh(D2.T @ D2)
             self._eig[key] = (np.clip(e, 0, None), U)
+
+    def bind(self, obs):
+        """prepare가 낸 obs의 dep 정보로 ζ(매듭 nk + 사람 np)를 v 뒤에 붙인다. dep가 없으면 아무것도 안 한다."""
+        if not obs.get("dep"):
+            return self
+        self.dep = {"nk": obs["dep_nk"], "npid": obs["dep_np"], "jH": obs["dep_jH"], "wH": obs["dep_wH"]}
+        self.nz = self.dep["nk"] + self.dep["npid"]
+        self.n = self.n0 + self.nz
+        self.start = np.concatenate([self.start[:self.n0], np.zeros(self.nz)])
+        return self
+
+    def _hy(self, v):
+        return {n: v[self.it + 2 + NUIS.index(n)] for n in DEP_NAMES[DEP]}
+
+    def set_G(self, Hz, loc):
+        """ζ 블록 Hessian Hz = I + Dᵀ G D (D = 지금 hyper의 ζ->δ 사상)에서 δ 공간 곡률 G를 뽑아 얼린다 (PSD로 자름)."""
+        D0 = _dep_D({n: float(loc[self.it + 2 + NUIS.index(n)]) for n in DEP_NAMES[DEP]}, self.dep["nk"], self.dep["npid"], np)
+        Di = np.linalg.inv(D0)
+        G = Di.T @ (0.5 * (Hz + Hz.T) - np.eye(self.nz)) @ Di
+        w, Q = np.linalg.eigh(0.5 * (G + G.T))
+        self.G = (Q * np.clip(w, 0.0, None)) @ Q.T
+
+    def occam_pen(self, v):
+        """+½ log|H_ζζ| = ½ log|I + Dᵀ G D| (G 얼림) — ζ를 적분한 라플라스 주변 사후에 빠져 있던 Occam 항. 결합 MAP은 이 항이 없어 σ를 키운다."""
+        import jax.numpy as jnp
+        D = _dep_D(self._hy(v), self.dep["nk"], self.dep["npid"], jnp)
+        M = jnp.eye(self.nz) + D.T @ jnp.asarray(self.G) @ D
+        return 0.5 * jnp.linalg.slogdet(M)[1]
 
     def _curve(self, z, ltau, key):
         import jax.numpy as jnp
@@ -258,21 +365,27 @@ class Stage1Prob:
             cr, cl = self._curve(cr, v[it], "r"), self._curve(cl, v[it + 1], "l")
         d = {"a": v[0], "cr": cr, "cl": cl}
         d.update({n: v[it + 2 + i] for i, n in enumerate(NUIS)})
+        if self.dep:
+            d.update(dep_fields(d, v[it + 2 + len(NUIS):], **self.dep))
         return d
 
     def logprior(self, v):
         import jax.numpy as jnp
         th = self.theta(v)
-        lp = _nlp(v[0], M1.WEAK["a"][0], M1.WEAK["a"][1])
+        lp = _nlp(v[0], WEAK3["a"][0], WEAK3["a"][1])
         if self.param == "centered":
             lp += _nlp(th["cr"], CR_MEAN, CR_SD) + _rw2(th["cr"], v[self.it])
             lp += _nlp(th["cl"], CL_MEAN, CL_SD) + _rw2(th["cl"], v[self.it + 1])
         else:
             lp += _nlp(v[1:1 + NR + NL], 0.0, 1.0)
         lp += _lntau_prior(v[self.it]) + _lntau_prior(v[self.it + 1])
-        mu = jnp.asarray([M1.WEAK[n][0] for n in NUIS])
-        sd = jnp.asarray([M1.WEAK[n][1] for n in NUIS])
-        return lp + _nlp(v[self.it + 2:], mu, sd)
+        mu = jnp.asarray([WEAK3[n][0] for n in NUIS])
+        sd = jnp.asarray([WEAK3[n][1] for n in NUIS])
+        e = self.it + 2 + len(NUIS)
+        lp = lp + _nlp(v[self.it + 2:e], mu, sd)
+        if self.nz:                               # ζ ~ N(0, 1)
+            lp = lp + _nlp(v[e:], 0.0, 1.0)
+        return lp
 
 
 class CellProb:
@@ -298,7 +411,10 @@ class CellProb:
             Mfull[NR:, NE_R:] = np.linalg.inv(Bl)
             self.M = math.sqrt(s2) * Mfull[:, BAND]          # [NR+NL, ne]
         o = 1 + self.K + self.ne
-        self.n = o + len(NUIS)
+        self.o = o
+        self.n = self.n0 = o + len(NUIS)
+        self.nz = 0                                   # dep면 bind(obs)가 ζ 길이를 정한다 (ζ는 v 맨 뒤)
+        self.dep = None
         self.off_ix = tuple(o + NUIS.index(n) for n in OFF)
         self.mc = np.asarray(pr["mean_coef"], float)
         self.phi = np.asarray(pr["phi_coef"], float).reshape(self.K, NR + NL)
@@ -311,6 +427,16 @@ class CellProb:
         self.am, self.av = pr["a"]["mean"], pr["a"]["var"]
         self.start = np.concatenate([[self.am], np.zeros(self.K + self.ne), self.nmean])
 
+    def bind(self, obs):
+        """Stage1Prob.bind와 같다 — ζ는 v 맨 뒤, 사전 N(0, 1)."""
+        if not obs.get("dep"):
+            return self
+        self.dep = {"nk": obs["dep_nk"], "npid": obs["dep_np"], "jH": obs["dep_jH"], "wH": obs["dep_wH"]}
+        self.nz = self.dep["nk"] + self.dep["npid"]
+        self.n = self.n0 + self.nz
+        self.start = np.concatenate([self.start[:self.n0], np.zeros(self.nz)])
+        return self
+
     def theta(self, v):
         import jax.numpy as jnp
         K = self.K
@@ -322,6 +448,8 @@ class CellProb:
         o = 1 + K + self.ne
         d = {"a": v[0], "cr": c[:NR], "cl": c[NR:]}
         d.update({n: v[o + i] for i, n in enumerate(NUIS)})
+        if self.dep:
+            d.update(dep_fields(d, v[o + len(NUIS):], **self.dep))
         return d
 
     def logprior(self, v):
@@ -333,10 +461,14 @@ class CellProb:
             lp += _nlp(v[1:1 + K], 0.0, jnp.sqrt(jnp.asarray(self.lam)))
         if self.ne:
             lp += _nlp(v[1 + K:1 + K + self.ne], 0.0, 1.0)
-        r = v[1 + K + self.ne:] - jnp.asarray(self.nmean)
+        e = self.o + len(NUIS)
+        r = v[1 + K + self.ne:e] - jnp.asarray(self.nmean)
         ch = jnp.asarray(self.nch)
         zz = solve_triangular(ch, r, lower=True)
-        return lp - 0.5 * (zz ** 2).sum() - jnp.log(jnp.diag(ch)).sum() - 0.5 * len(NUIS) * math.log(2 * math.pi)
+        lp = lp - 0.5 * (zz ** 2).sum() - jnp.log(jnp.diag(ch)).sum() - 0.5 * len(NUIS) * math.log(2 * math.pi)
+        if self.nz:                                   # ζ ~ N(0, 1)
+            lp = lp + _nlp(v[e:], 0.0, 1.0)
+        return lp
 
 
 # ---------- 모형·MAP ----------
@@ -379,18 +511,24 @@ def model(obs, prob, pre):
     numpyro.deterministic("v", v)
     th = prob.theta(v)
     if prob.kind == "stage1":
-        numpyro.deterministic("th24", jnp.concatenate([v[:prob.it], v[prob.it + 2:]]))
+        numpyro.deterministic("th24", jnp.concatenate([v[:prob.it], v[prob.it + 2:prob.it + 2 + len(NUIS)]]))
         r12, l12 = curves12(th["cr"], th["cl"])
         numpyro.deterministic("r12", r12)
         numpyro.deterministic("l12", l12)
     if prob.kind == "cell":   # 수렴 판정용: 핵심(a·ξ·lnsig0·lnrho)과 서버 성분 보조 모수를 따로 둔다
         K_ = prob.K
-        numpyro.deterministic("core", jnp.concatenate([v[:1 + K_], v[1 + K_ + prob.ne:-len(OFF)]]))      # a, ξ, lnsig0, lnrho, (β); ppca의 η는 뺀다
-        numpyro.deterministic("aux", v[-len(OFF):])
+        e_ = prob.o + len(NUIS)
+        numpyro.deterministic("core", jnp.concatenate([v[:1 + K_], v[1 + K_ + prob.ne:e_ - len(OFF)]]))      # a, ξ, lnsig0, lnrho, (β), (lnsigd·lnelld·lnsigp); ppca의 η는 뺀다
+        numpyro.deterministic("aux", v[e_ - len(OFF):e_])
+        if prob.nz:
+            numpyro.deterministic("zeta", v[e_:])                                                          # 보고만 (core에 안 넣는다)
     mu, P = surface(th, obs["y"], obs["u"])
+    if prob.nz:
+        mu = OM.dep_add(obs, mu, th["delta"], th.get("bp"))
+        numpyro.deterministic("dH", th["dH"])
     OM.observe(obs, mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), **eps_phi)
     for q in OM.Q_TARGETS:
-        numpyro.deterministic(f"lnC_{q:g}", lnC(th, q))
+        numpyro.deterministic(f"lnC_{q:g}", _lnC_t(th, q))
 
 
 def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), full_ep=False, start=None):
@@ -408,6 +546,13 @@ def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), full_ep=Fa
         for k in OM.NUMERIC:
             a = np.asarray(obs[k])
             o[k] = jnp.asarray(a, jnp.int64 if a.dtype.kind in "iu" else jnp.float64)
+        for k in OM.EXTRA:      # 변형 전용 배열 (있을 때만)
+            if k in obs:
+                o[k] = jnp.asarray(np.asarray(obs[k]), jnp.float64)
+        for k in OM.DEP_ARR:    # 시간 어긋남 배열 (dep일 때만)
+            if k in obs:
+                a = np.asarray(obs[k])
+                o[k] = jnp.asarray(a, jnp.int64 if a.dtype.kind in "iu" else jnp.float64)
         eps0 = obs["eps_ab"][0] / (obs["eps_ab"][0] + obs["eps_ab"][1])
         phi0 = o["dirichlet"] / o["dirichlet"].sum(1, keepdims=True)
         fixed = [jnp.asarray(np.asarray(prob.start, float))]
@@ -421,12 +566,15 @@ def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), full_ep=Fa
             v = full(vf[:nf])
             th = prob.theta(v)
             mu, P = surface(th, o["y"], o["u"])
+            if prob.nz:
+                mu = OM.dep_add(o, mu, th["delta"], th.get("bp"))
             if full_ep:
                 eps_v, phi_v, lp_ep = _eps_phi(vf[nf:], o)
             else:
                 eps_v, phi_v, lp_ep = eps0, phi0, 0.0
             ll = OM.row_loglik(o, mu, P, jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"]), eps_v, phi_v)
-            return -(temp * ll.sum() + prob.logprior(v) + lp_ep)
+            pen = prob.occam_pen(v) if getattr(prob, "G", None) is not None else 0.0
+            return -(temp * ll.sum() + prob.logprior(v) + lp_ep) + pen
 
         def solve(x, tl, nit):
             vg = jax.jit(jax.value_and_grad(negpost))
@@ -484,7 +632,7 @@ def map_precond(obs, prob, iters=1500, temps=(0.003, 0.03, 0.3, 1.0), full_ep=Fa
     sq[np.ix_(fr, fr)] = Q / np.sqrt(np.maximum(w, 1e-6))   # 공분산의 제곱근 (콜레스키가 아니어도 아핀 재매개화로 충분)
     for i in tau_ix:
         sq[i, i] = 0.7
-    return {"loc": loc, "chol": sq, "info": {"fun": float(res.fun), "nit": nit, "ok": bool(res.success),
+    return {"loc": loc, "chol": sq, "H": H, "info": {"fun": float(res.fun), "nit": nit, "ok": bool(res.success),
                                             "min_eig": float(w.min()), "max_eig": float(w.max()), "n_floored": int((w < 1e-6).sum()), "n_escape": n_escape,
                                             "tau_fixed": [math.exp(loc[i]) for i in tau_ix]}}
 
@@ -517,9 +665,30 @@ def multistart_map(obs, prob, full_ep=False, n=8, seed=0, scatter=0.5, tol=0.5):
     return pre
 
 
-def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True, full_ep=False, multistart=True):
-    """관측 줄 -> MAP(시작점 8개) -> NUTS (retry False면 한 번만). (samples, info, diag, obs). info에 map·secs·n·N."""
-    obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1)
+def occam_refine(obs, prob, pre, rounds=4, tol=0.02):
+    """dep 1단계의 결합 MAP 보정 (DEP_FIT == "marg"). ζ를 적분한 라플라스 주변 사후 −log p(h|y) ≈ F(ζ*, h) + ½ log|H_ζζ|에서 ½ log|H_ζζ| = ½ log|I + Dᵀ G D|를 더해 다시 푼다.
+    G = −∇²_δ ll은 앞 답의 Hessian에서 얼리고 (set_G), 라운드를 되풀이한다 (lnσ_δ·lnℓ_δ가 tol 안에서 안 변하면 멈춘다). -> 새 pre (info["occam"]에 라운드 기록)."""
+    names = DEP_NAMES[DEP]
+    ix = [prob.it + 2 + NUIS.index(n) for n in names]
+    hist = [[float(pre["loc"][i]) for i in ix]]
+    for r in range(rounds):
+        prob.set_G(pre["H"][prob.n0:, prob.n0:], pre["loc"])
+        new = map_precond(obs, prob, start=pre["loc"], temps=(1.0,))
+        hist.append([float(new["loc"][i]) for i in ix])
+        shift = max(abs(a - b) for a, b in zip(hist[-1], hist[-2]))
+        pre = new
+        if shift < tol:
+            break
+    prob.G = None
+    pre["info"] = dict(pre["info"], occam={"names": names, "rounds": len(hist) - 1, "hyper_by_round": hist, "last_shift": shift})
+    return pre
+
+
+def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True, full_ep=False, multistart=True, var=None):
+    """관측 줄 -> MAP(시작점 8개) -> NUTS (retry False면 한 번만). (samples, info, diag, obs). info에 map·secs·n·N. var = 관측 층 변형 이름.
+    시간 어긋남 변형은 모듈 전역 DEP (set_dep)."""
+    obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1, var=var, dep=DEP)
+    prob.bind(obs)
     jobs = OM.to_jax(obs)
     t0 = time.time()
     pre = multistart_map(jobs, prob, full_ep=full_ep) if multistart else map_precond(jobs, prob, full_ep=full_ep)
@@ -540,7 +709,11 @@ def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500
         info["retried"] = False
     if prob.kind == "cell":
         ax = OM.diagnose(sm, ["aux"], divergences=0)
-        al = OM.diagnose(sm, ["v"] + (["eps"] if "eps" in sm else []), divergences=0)
+        if prob.nz:     # 전체 판정에서도 ζ는 뺀다 (따로 보고)
+            sm["vh"] = sm["v"][..., :prob.n0]
+            zt = OM.diagnose(sm, ["zeta"], divergences=0)
+            dg["zeta"] = {"rhat": zt["rhat_max"], "ess": zt["ess_min"]}
+        al = OM.diagnose(sm, ["vh" if prob.nz else "v"] + (["eps"] if "eps" in sm else []), divergences=0)
         dg["aux"] = {"rhat": ax["rhat_max"], "ess": ax["ess_min"]}
         dg["all"] = {"rhat": max(al["rhat_max"], dg["rhat_max"]), "ess": min(al["ess_min"], dg["ess_min"])}
     info["map_secs"] = round(t_map, 1)
@@ -550,14 +723,20 @@ def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500
     return sm, info, dg, obs
 
 
-def laplace_fit(rows, H, season, err, prob, delay_key, ndraw=4000, seed=0, K=16, multistart=True):
+def laplace_fit(rows, H, season, err, prob, delay_key, ndraw=4000, seed=0, K=16, multistart=True, var=None):
     """1단계 라플라스 근사 (명세 6절 C4): 결합 MAP(float64, eps·phi는 사전 평균에 고정) + 역 Hessian 공분산(고윳값 바닥 1e-6) -> v 4000뽑기.
     NUTS 쪽과 같은 모양의 (sm, info, dg, obs)를 돌려준다 (사슬 1개)."""
     import jax
-    obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=True)
+    obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=True, var=var, dep=DEP)
+    prob.bind(obs)
     jobs = OM.to_jax(obs)
     t0 = time.time()
     pre = multistart_map(jobs, prob) if multistart else map_precond(jobs, prob)
+    if prob.nz and DEP_FIT == "marg":
+        ms = pre["info"].get("multistart")
+        pre = occam_refine(jobs, prob, pre)
+        if ms is not None:
+            pre["info"]["multistart"] = ms
     t_map = time.time() - t0
     rng = np.random.default_rng(seed)
     v = pre["loc"][None] + rng.standard_normal((ndraw, prob.n)) @ pre["chol"].T
@@ -565,13 +744,17 @@ def laplace_fit(rows, H, season, err, prob, delay_key, ndraw=4000, seed=0, K=16,
     def one(vv):
         th = prob.theta(vv)
         r12, l12 = curves12(th["cr"], th["cl"])
-        return r12, l12, jnp_stack([lnC(th, q) for q in OM.Q_TARGETS])
+        lcs = jnp_stack([_lnC_t(th, q) for q in OM.Q_TARGETS])
+        return (r12, l12, lcs, th["dH"]) if prob.nz else (r12, l12, lcs)
 
     import jax.numpy as jnp
     jnp_stack = jnp.stack
-    r12, l12, lc = jax.jit(jax.vmap(one))(jnp.asarray(v, jnp.float32))
+    res = jax.jit(jax.vmap(one))(jnp.asarray(v, jnp.float32))
+    r12, l12, lc = res[:3]
     sm = {"v": v[None], "r12": np.asarray(r12)[None], "l12": np.asarray(l12)[None],
           "eps": np.full((1, ndraw), jobs["eps_ab"][0] / (jobs["eps_ab"][0] + jobs["eps_ab"][1]))}
+    if prob.nz:
+        sm["dH"] = np.asarray(res[3])[None]
     for i, q in enumerate(OM.Q_TARGETS):
         sm[f"lnC_{q:g}"] = np.asarray(lc[:, i])[None]
     mi = pre["info"]
@@ -586,12 +769,25 @@ def laplace_fit(rows, H, season, err, prob, delay_key, ndraw=4000, seed=0, K=16,
 
 def s1_X(sm):
     v = sm["v"].reshape(-1, sm["v"].shape[-1])
-    it = v.shape[1] - len(NUIS) - 2
-    return np.concatenate([v[:, [0]], v[:, it + 2:], sm["r12"].reshape(len(v), -1), sm["l12"].reshape(len(v), -1)], axis=1)
+    it = 1 + NR + NL
+    return np.concatenate([v[:, [0]], v[:, it + 2:it + 2 + len(NUIS)], sm["r12"].reshape(len(v), -1), sm["l12"].reshape(len(v), -1)], axis=1)
+
+def _dep_post(sm, v, it):
+    """1단계 σ_δ·ℓ_δ·σ_p·δ(H) 사후 평균·sd (보고만; ζ 벡터는 저장하지 않는다)."""
+    out = {}
+    for nm, key in (("lnsigd", "sigma_d"), ("lnelld", "ell_d"), ("lnsigp", "sigma_p")):
+        if nm in NUIS:
+            x = np.exp(v[:, it + 2 + NUIS.index(nm)])
+            out[key] = {"mean": float(x.mean()), "sd": float(x.std())}
+    if "dH" in sm:
+        d = sm["dH"].ravel()
+        out["delta_H"] = {"mean": float(d.mean()), "sd": float(d.std())}
+    return out
+
 
 def stage1_entry(sm, info, dg, obs):
     v = sm["v"].reshape(-1, sm["v"].shape[-1])
-    it = v.shape[1] - len(NUIS) - 2
+    it = 1 + NR + NL
     X = s1_X(sm)
     lc = {f"{q:g}": np.quantile(sm[f"lnC_{q:g}"].ravel(), [0.1, 0.5, 0.9]).tolist() for q in OM.Q_TARGETS}
     tau_rh = OM.diagnose({"lt": sm["v"][..., it:it + 2]}, ["lt"]) if sm["v"].shape[0] > 1 else {"rhat_max": None, "ess_min": None}
@@ -602,7 +798,7 @@ def stage1_entry(sm, info, dg, obs):
             "map": info["map"], "multistart": info["map"].get("multistart"), "n": obs["n"], "N": obs["N"], "counts": obs["counts"],
             "ln_tau_r_mean": float(v[:, it].mean()), "ln_tau_l_mean": float(v[:, it + 1].mean()),
             "tau_rhat": tau_rh["rhat_max"], "tau_ess": tau_rh["ess_min"],
-            "eps_mean": float(sm["eps"].mean()), "lnC_q10_50_90": lc}
+            "eps_mean": float(sm["eps"].mean()), "lnC_q10_50_90": lc, **({"dep_post": _dep_post(sm, v, it)} if DEP else {})}
 
 
 def _atomic_json(path, obj):
@@ -628,6 +824,7 @@ def load_stage1(path):
     if b:   # 1단계 파일의 기저로 맞춘다 (prior·predict가 같은 곡면을 쓰게)
         configure(b["r"]["n"], b["l"]["n"], 3 * math.exp(b["r"]["range_w"][0]), 3 * math.exp(b["r"]["range_w"][1]),
                   r_extra=b["r"].get("extra_knots_w", []), x_term=b.get("x_term", False))
+    set_dep(d.get("header", {}).get("dep"), d.get("header", {}).get("dep_fit", "joint"))      # 1단계 파일의 시간 어긋남 변형 (없으면 None)
     return d["seasons"] if "seasons" in d else d
 
 
@@ -639,11 +836,22 @@ def cmd_stage1(a):
     if os.path.exists(a.out):
         with open(a.out, encoding="utf-8") as f:
             out = json.load(f)
+    var = OM.get_var(a.obs_var)
+    if out.get("seasons") and out.get("header", {}).get("obs_var") != (var["name"] if var else None):
+        sys.exit(f"--obs-var {a.obs_var}가 기존 {a.out}의 obs_var({out.get('header', {}).get('obs_var')})와 다르다 — 다른 --out을 쓴다")
+    if out.get("seasons") and (out.get("header", {}).get("dep") != DEP or (DEP and out["header"].get("dep_fit") != DEP_FIT)):
+        sys.exit(f"--dep {a.dep}·--dep-fit {DEP_FIT}가 기존 {a.out}의 dep({out.get('header', {}).get('dep')})·dep_fit({out.get('header', {}).get('dep_fit')})와 다르다 — 다른 --out을 쓴다")
     out["header"] = {"about": "M3 1단계 — 끝난 시즌 전체 표, 약한 사전, P-스플라인 곡선 (정답 표 안 씀)", "method": "M3", "data_ver": C.DATA_VER,
                      "K": 16, "date": datetime.date.today().isoformat(), "names": S1_NAMES, "basis": basis_spec(),
                      "param": a.param, "method": a.method,
                      "cfg": ({"draws": 4000, "note": "라플라스: 결합 MAP + 역 Hessian, eps·phi는 사전 평균에 고정(MAP과 같음)"} if a.method == "laplace"
                              else {"chains": a.chains, "warmup": a.warmup, "samples": a.samples, "target_accept": a.target_accept, "retry": not a.no_retry})}
+    if var:
+        out["header"]["obs_var"] = var["name"]
+    if DEP:
+        out["header"]["dep"] = DEP
+        out["header"]["dep_fit"] = DEP_FIT
+        out["header"]["dep_spec"] = {"knot_step_h": DEP_STEP, "prior": {n: {"mean": WEAK3[n][0], "sd": WEAK3[n][1]} for n in DEP_NAMES[DEP]}}
     for s in C.parse_seasons(a.seasons):
         if s in out["seasons"]:
             print(s, "건너뜀 (이미 있음)", flush=True)
@@ -651,10 +859,10 @@ def cmd_stage1(a):
         head, rows = obs_table.read_cell(os.path.join(a.obs_dir, f"{s}.jsonl.gz"))
         dk = s if s in err["1a_post_delay"]["expanding"] else None
         if a.method == "laplace":
-            sm, info, dg, obs = laplace_fit(rows, head["H"], s, err, Stage1Prob(a.param), dk)
+            sm, info, dg, obs = laplace_fit(rows, head["H"], s, err, Stage1Prob(a.param), dk, var=a.obs_var)
         else:
             sm, info, dg, obs = fit(rows, head["H"], s, err, Stage1Prob(a.param), dk, a.chains, a.warmup, a.samples, stage1=True,
-                                    target_accept=a.target_accept, retry=not a.no_retry)
+                                    target_accept=a.target_accept, retry=not a.no_retry, var=a.obs_var)
         out["seasons"][s] = stage1_entry(sm, info, dg, obs)
         out["seasons"][s]["param"] = a.param
         out["seasons"][s]["method"] = a.method
@@ -748,6 +956,8 @@ def choose_window_pca(stage1, target, ks=(4, 6, 10, "all")):
 def prior(stage1, target, k_fixed=None, cache=None):
     """맞힐 시즌 target의 JSON 사전 (앞 시즌만 쓴다)."""
     cache = cache if cache is not None else CACHE
+    if cache and DEP:                                   # 창 적합 캐시 열쇠는 값 해시라 dep가 달라도 안 섞이지만, 폴더도 나눈다
+        cache = os.path.join(cache, f"dep_{DEP}")
     before = [s for s in sorted(stage1, key=HR.snum) if HR.snum(s) < HR.snum(target)]
     if not before:
         raise ValueError("앞 시즌이 없다")
@@ -762,7 +972,7 @@ def prior(stage1, target, k_fixed=None, cache=None):
     mean_coef = np.concatenate([np.linalg.lstsq(Br, p["mu"][:NE_R], rcond=None)[0], np.linalg.lstsq(Bl, p["mu"][NE_R:], rcond=None)[0]])
     phi_coef = np.array([np.concatenate([np.linalg.lstsq(Br, f[:NE_R], rcond=None)[0], np.linalg.lstsq(Bl, f[NE_R:], rcond=None)[0]])
                          for f in p["phi"]]).reshape(p["K"], NR + NL)
-    mu_loc, mu_scale, tau_scale = M1.hier_args(NUIS)
+    mu_loc, mu_scale, tau_scale = hier_args3(NUIS)
     pf = HR.prior_for({s: stage1[s] for s in stage1}, target, NUIS, tau_scale, mu_loc, mu_scale, cache=cache, k_fixed=k)
     return {"target": target, "k": k, "window": win, "J": len(win), "K": p["K"], "lambda": p["lam"], "lambda_scaled": p["lam_scaled"],
             "sigma2_res": p["sres"], "explained": p["share"][:6], "band": BAND,
@@ -786,9 +996,9 @@ def cmd_prior(a):
 
 # ---------- 칸 예측 ----------
 
-def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0, full_ep=False, retry=True, multistart=True, ppca=False):
+def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0, full_ep=False, retry=True, multistart=True, ppca=False, var=None):
     prob = CellProb(pr, ppca)
-    sm, info, dg, obs = fit(rows, H, s, err, prob, s, chains, warmup, samples, seed, stage1=False, full_ep=full_ep, retry=retry, multistart=multistart)
+    sm, info, dg, obs = fit(rows, H, s, err, prob, s, chains, warmup, samples, seed, stage1=False, full_ep=full_ep, retry=retry, multistart=multistart, var=var)
     return sm, info, dg, obs
 
 
@@ -805,15 +1015,29 @@ def cmd_predict(a):
     CACHE = a.prior_cache
     OM.setup_host(max(a.chains, 4))   # hier 2단계 적합이 4사슬
     err = OM.load_err()
+    with open(a.stage1, encoding="utf-8") as f:
+        s1_head = json.load(f).get("header", {})
+    s1_var = s1_head.get("obs_var")      # 없으면 base
+    if (a.obs_var if a.obs_var != "base" else None) != s1_var:
+        sys.exit(f"--obs-var {a.obs_var}가 1단계 파일의 obs_var({s1_var})와 다르다 — 같은 변형으로 1단계를 낸 파일을 쓴다")
+    if a.dep != s1_head.get("dep"):
+        sys.exit(f"--dep {a.dep}가 1단계 파일의 dep({s1_head.get('dep')})와 다르다 — 같은 dep로 1단계를 낸 파일을 쓴다")
     s1 = load_stage1(a.stage1)
     with open(a.stage1, "rb") as f:
         sha = hashlib.sha1(f.read()).hexdigest()[:12]
     out = {"about": "M3 함수형 주성분 곡면 — T 절단 칸 예측", "method": "M3", "data_ver": C.DATA_VER,
            "made": {"tool_head": _git_head(), "cmd": " ".join(["m3.py predict"] + sys.argv[2:]), "inputs": {"stage1": sha}},
            "cells": [], "info": [], "priors": {}}
+    if a.obs_var and a.obs_var != "base":
+        out["obs_var"] = a.obs_var
+        out["made"]["obs_var"] = a.obs_var
+    if a.dep:
+        out["dep"] = a.dep
     if os.path.exists(a.out):
         with open(a.out, encoding="utf-8") as f:
             out = json.load(f)
+        if out.get("dep") != a.dep:
+            sys.exit(f"--dep {a.dep}가 기존 {a.out}의 dep({out.get('dep')})와 다르다 — 다른 --out을 쓴다")
     done = {(i["season"], i["T"]) for i in out["info"]}
     for s in C.parse_seasons(a.seasons):
         Ts = C.t_grid(s) if a.T == "all" else [float(t) for t in a.T.split(",")]
@@ -828,12 +1052,13 @@ def cmd_predict(a):
                 out["priors"][s] = prior(s1, s, cache=CACHE)
             pr = out["priors"][s]
             head, rows = obs_table.read_cell(path)
-            sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples, full_ep=a.pre_full, multistart=not a.no_multistart, ppca=a.ppca)
+            sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples, full_ep=a.pre_full, multistart=not a.no_multistart, ppca=a.ppca, var=a.obs_var)
             out["cells"] += OM.pred_cells(s, T, {q: sm[f"lnC_{q:g}"] for q in OM.Q_TARGETS}, dg["conv"])
             out["info"].append({"season": s, "T": T, "secs": info["secs"], "map_secs": info["map_secs"], "conv": dg["conv"], "K": pr["K"],
                                 "k": pr["k"], "rhat_max": dg["all"]["rhat"], "ess_min": dg["all"]["ess"], "rhat_core": dg["rhat_max"], "ess_core": dg["ess_min"],
                                 "rhat_aux": dg["aux"]["rhat"], "ess_aux": dg["aux"]["ess"], "divergences": info["divergences"],
-                                "retried": info["retried"], "tree_cap_frac": info["tree_cap_frac"], "n": obs["n"], "N": obs["N"]})
+                                "retried": info["retried"], "tree_cap_frac": info["tree_cap_frac"], "n": obs["n"], "N": obs["N"],
+                                **({"rhat_zeta": dg["zeta"]["rhat"], "ess_zeta": dg["zeta"]["ess"], "nz": obs["dep_nk"] + obs["dep_np"], "n_pid": obs["dep_np"]} if DEP else {})})
             _atomic_json(a.out, out)
             i = out["info"][-1]
             print(s, T, f"n={i['n']} secs={i['secs']} rhat={i['rhat_max']:.3f} ess={i['ess_min']:.0f} div={i['divergences']} conv={i['conv']}", flush=True)
@@ -855,6 +1080,7 @@ def _selected_rows(rows, H, err, dk, K=16):
 
 
 def check43_season(rows, H, season, err, ndraw_pp=100, seed=0):
+    assert DEP is None, "check43은 본안(dep 없음)만 점검한다"
     import jax
     import jax.numpy as jnp
     dk = season if season in err["1a_post_delay"]["expanding"] else None
@@ -1203,13 +1429,16 @@ def main():
     s.add_argument("--n-basis-r", type=int, default=None, help="r 기저 총수 (기본 12 + 끼운 매듭 수)")
     s.add_argument("--r-extra-knots", default="0", help="r에 끼우는 안쪽 매듭 w 값(쉼표). 기본 0 = 3%%, 빈 문자열 = 없음")
     s.add_argument("--n-basis-l", type=int, default=12)
-    s.add_argument("--r-range-pct", default="0.1,40", help="r 매듭 범위 하한,상한 (%)")
+    s.add_argument("--r-range-pct", default="0.1,40", help="r 매듭 범위 하한,상한 (%%)")
     s.add_argument("--no-x-term", action="store_true", help="x항 β를 뺀다 (기본: 넣음)")
     s.add_argument("--method", choices=("laplace", "nuts"), default="laplace")
     s.add_argument("--no-retry", action="store_true")
     s.add_argument("--vec-dir", default=None, help="33벡터 뽑기 npz (X, lnC) 저장 폴더")
     s.add_argument("--target-accept", type=float, default=0.9)
     s.add_argument("--param", choices=("centered", "noncentered"), default="noncentered")
+    s.add_argument("--obs-var", default=None, choices=sorted(OM.VARIANTS), help="관측 층 변형 (WP4). 기본 None = 본안")
+    s.add_argument("--dep", default=None, choices=("dt", "dtp"), help="시간 어긋남 변형 (WP5a): dt = 한섭 δ(t), dtp = dt + 사람 효과. 기본 None = 본안")
+    s.add_argument("--dep-fit", default="marg", choices=("marg", "joint"), help="dep 1단계 MAP: marg = ζ를 적분한 Occam 보정(기본), joint = ζ까지 결합 MAP(명세 그대로, σ_δ를 키운다)")
     p = sub.add_parser("prior")
     p.add_argument("--stage1", required=True)
     p.add_argument("--target", required=True)
@@ -1228,12 +1457,15 @@ def main():
     q.add_argument("--seasons", required=True)
     q.add_argument("--T", default="all")
     q.add_argument("--out", required=True)
-    q.add_argument("--prior-cache", default=None)
+    q.add_argument("--prior-cache", default=None, help="2단계 창 적합 캐시 폴더. 열쇠는 1단계 값 해시라 변형이 달라도 섞이진 않지만, 변형마다 따로 두는 게 안전하다")
+    q.add_argument("--obs-var", default=None, choices=sorted(OM.VARIANTS), help="관측 층 변형 (WP4). 1단계 파일 머리의 obs_var와 같아야 한다")
+    q.add_argument("--dep", default=None, choices=("dt", "dtp"), help="시간 어긋남 변형 (WP5a). 1단계 파일 머리의 dep와 같아야 한다")
     q.add_argument("--ppca", action="store_true", help="확률 PCA 잔차: 밴드 격자에 등방 잔차 sqrt(sigma2_res) η를 더한다 (주성분이 못 담는 시즌 사이 변동)")
     q.add_argument("--no-multistart", action="store_true", help="MAP 시작점 8개(기본)를 끈다")
     q.add_argument("--pre-full", action="store_true", help="eps·phi도 사전 펴기에 넣는다 (m1과 같은 방식)")
     a = ap.parse_args()
     if a.cmd == "stage1":
+        set_dep(a.dep, a.dep_fit)
         lo, hi = (float(x) for x in a.r_range_pct.split(","))
         ex = [float(x) for x in a.r_extra_knots.split(',') if x.strip() != '']
         configure(a.n_basis_r or 12 + len(ex), a.n_basis_l, lo, hi, r_extra=ex, x_term=not a.no_x_term)
