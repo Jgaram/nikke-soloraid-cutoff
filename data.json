@@ -1,6 +1,6 @@
 {
- "asof": "2026-10-29 14:42",
- "content": "b0389f520fe8c598",
+ "asof": "2026-11-03 21:44",
+ "content": "5dc106fb85e17783",
  "past": [
   {
    "season": "S19",
@@ -69257,6 +69257,20 @@
   ]
  },
  "boss_img": {
+  "S4": "boss/S4.webp?v=ff50fa00",
+  "S6": "boss/S6.webp?v=13bfa68d",
+  "S7": "boss/S7.webp?v=dfd4840f",
+  "S8": "boss/S8.webp?v=fdb2759b",
+  "S9": "boss/S9.webp?v=67da4be9",
+  "S10": "boss/S10.webp?v=820bb169",
+  "S11": "boss/S11.webp?v=c556d337",
+  "S12": "boss/S12.webp?v=8bfb1c95",
+  "S13": "boss/S13.webp?v=d74b1e07",
+  "S14": "boss/S14.webp?v=67026b25",
+  "S15": "boss/S15.webp?v=0df4528f",
+  "S16": "boss/S16.webp?v=7316b974",
+  "S17": "boss/S17.webp?v=793d9315",
+  "S18": "boss/S18.webp?v=86d3a5c1",
   "S19": "boss/S19.webp?v=34de0a6f",
   "S20": "boss/S20.webp?v=6e3bd08b",
   "S21": "boss/S21.webp?v=311e4cf7",
@@ -69283,6 +69297,90 @@
   "S42": "boss/S42.webp?v=ac4f6577"
  },
  "boss_info": {
+  "S4": {
+   "weak": [
+    "electric",
+    "전격"
+   ]
+  },
+  "S6": {
+   "weak": [
+    "wind",
+    "풍압"
+   ]
+  },
+  "S7": {
+   "weak": [
+    "iron",
+    "철갑"
+   ]
+  },
+  "S8": {
+   "weak": [
+    "water",
+    "수냉"
+   ]
+  },
+  "S9": {
+   "weak": [
+    "wind",
+    "풍압"
+   ]
+  },
+  "S10": {
+   "weak": [
+    "electric",
+    "전격"
+   ]
+  },
+  "S11": {
+   "weak": [
+    "fire",
+    "작열"
+   ]
+  },
+  "S12": {
+   "weak": [
+    "water",
+    "수냉"
+   ]
+  },
+  "S13": {
+   "weak": [
+    "iron",
+    "철갑"
+   ]
+  },
+  "S14": {
+   "weak": [
+    "iron",
+    "철갑"
+   ]
+  },
+  "S15": {
+   "weak": [
+    "wind",
+    "풍압"
+   ]
+  },
+  "S16": {
+   "weak": [
+    "electric",
+    "전격"
+   ]
+  },
+  "S17": {
+   "weak": [
+    "fire",
+    "작열"
+   ]
+  },
+  "S18": {
+   "weak": [
+    "water",
+    "수냉"
+   ]
+  },
   "S19": {
    "weak": [
     "electric",
