@@ -11,11 +11,14 @@ python3 -I img_fetch.py NOS.txt POSTDIR IMGDIR MANIFEST.jsonl
 - GIF는 첫 프레임을 PNG로 따로 저장한다 (판독용).
 - 목록 한 줄: id, no, i, ext, w, h, sha1. 같은 sha1은 판독 단계에서 한 번만 본다.
 - 이미 받은 파일은 건너뛴다.
+- 환경 변수 `DC_SKIP_IMG=1`이면 디시 사진을 받지 않고 `err: skip dc_img_gone` 줄만 적는다 (요청 0). 디시가 2024-08 이전 글 사진을 지워
+  자리표시만 오므로 S15~S4 참고 시즌에 쓴다 (사용자 결정 2026-11-03, docs/community-access.md 「이미지」). 글 본문·네이버 사진은 그대로 받는다.
 """
 import hashlib
 import json
 import os
 import sys
+from urllib.parse import urlparse
 
 from PIL import Image
 
@@ -24,6 +27,7 @@ import dcnet  # noqa: E402
 
 # 본문 사진도 글 주소를 Referer로 보낸다. dcimg8은 Referer가 없으면 403 (S37 2026-10-16, Referer를 주니 200)
 VIEW = "https://gall.dcinside.com/mgallery/board/view/?id=gov&no={no}"
+SKIP_IMG = os.environ.get("DC_SKIP_IMG") == "1"
 
 
 def kind(b):
@@ -60,6 +64,15 @@ def fetch_post(no, postdir, imgdir, out, have):
     for i, u in enumerate(imgs):
         iid = f"{no}_{i}"
         if iid in have:
+            continue
+        if SKIP_IMG and (urlparse(u).hostname or "").endswith(("dcinside.com", "dcinside.co.kr")):
+            row = {"id": iid, "no": no, "i": i, "err": "skip dc_img_gone"}
+            if paired:
+                row["fname"] = files[i]["name"]
+                row["orig"] = files[i]["href"]
+            out.write(json.dumps(row, ensure_ascii=False) + "\n")
+            out.flush()
+            have.add(iid)
             continue
         if names[i].endswith(".gif"):
             # 움짤은 크고(평균 4MB) 시범 47장에서 자료가 0건이라 받지 않는다 (2026-10-15)

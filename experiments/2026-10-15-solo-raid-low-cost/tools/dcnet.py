@@ -11,6 +11,8 @@
   예외: 본문 사진 서버(dcimg*)의 403은 그 사진만 실패로 두고 `IMG403`에 모은다. 한 프로세스에서 IMG403_MAX(기본 20)번이
   쌓이면 그때 BLOCKED를 켠다. 429와 목록·본문의 403은 그대로 바로 멈춘다 (S37 2026-10-16: 한 글의 dcimg8 사진 10장이
   Referer가 없어 403이었고, 같은 때 다른 사진 서버는 200이었다. 사용자 결정).
+  네이버 사진 서버(*.pstatic.net)도 같게 다룬다 (S15 2026-11-03 사용자 결정: 유니온 모집 글의 지워진 사진 storep-phinf…/original_36.png가 403, 다시 요청하니 404).
+  네이버 목록·본문(comm-api.game.naver.com)의 403·429는 그대로 바로 멈춘다.
 """
 import fcntl
 import os
@@ -29,7 +31,7 @@ LOCKDIR = os.environ.get("DCNET_LOCKDIR", "/tmp")
 BLOCKED = []
 IMG403 = []
 IMG403_MAX = int(os.environ.get("IMG403_MAX") or 20)
-IMG_HOST = re.compile(r"^dcimg\d+\.dcinside\.(co\.kr|com)$")
+IMG_HOST = re.compile(r"^(dcimg\d+\.dcinside\.(co\.kr|com)|[\w-]+\.pstatic\.net)$")   # 네이버 사진 서버도 (S15 2026-11-03 사용자 결정)
 
 
 def _wait(url):

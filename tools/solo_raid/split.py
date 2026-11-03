@@ -1,13 +1,14 @@
 """솔로레이드 여러 시즌 분석의 학습·검증·시험 분리 (할 일 3.0, 모델 0, 요청 0).
 
 python3 -I tools/solo_raid/split.py check            # split.json이 규칙대로인지 다시 계산해 본다
-python3 -I tools/solo_raid/split.py role S35          # 시즌 몫 (dev | test)
+python3 -I tools/solo_raid/split.py role S35          # 시즌 몫 (dev | test | ref)
 python3 -I tools/solo_raid/split.py seen S35 "무엇을 봤는지" [--who 세션]   # 본 기록 한 줄 추가 (3.0c)
 
 분석 도구에서 쓰는 것
 - role(name) · is_test(name) · test_seasons() — 규칙: data/solo-raid/split.json
   판 2(2026-10-17): 잠근 시험 시즌 없음(판 1 시험 6시즌은 test_v1, 3.7에서 봐 개발). 새 시즌은 모두 「미래 시험」 — 끝나면 고치기 전에
   커밋된 진행 중 예측을 먼저 채점한 뒤 개발 (split.json v2.future_protocol). 그래서 role()은 dev만 낸다
+  참고 시즌(split.json ref, S4~S18, 2026-11-02 사용자 결정)은 'ref' — 모아 두기만 하고 분석·웹에 쓰지 않는다 (분석 도구는 dev만 쓴다)
 - install_guard(final=False) — 이 프로세스의 open()이 시험 시즌 정답을 못 열게 한다 (3.0b).
   · 시험 시즌 state의 truth* 파일 (state 사본도 같은 폴더의 season.json 이름으로 가린다)
   · data/solo-raid/seasons.json · server_cutoffs.csv는 통째로 막고, load_seasons()·load_server_cutoffs()로만 읽는다
@@ -68,6 +69,8 @@ def role(name, sp=None):
     sp = sp or load_split()
     n = snum(name)
     r = sp["rule"]
+    if n in sp.get("ref", []):      # 참고 시즌 (2026-11-02 사용자 결정, split.json ref_note)
+        return "ref"
     if sp.get("version", 1) >= 2:   # 판 2 (2026-10-17 사용자 결정): 잠근 시험 시즌 없음, 새 시즌은 모두 미래 시험 → 몫은 dev (v2.role_rule)
         return "test" if n in sp["test"] else "dev"
     if n in sp["test"]:

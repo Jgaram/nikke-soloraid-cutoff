@@ -4,6 +4,12 @@
   python3 -I tools/solo_raid/lab7/m3.py stage1 --obs-dir W/obs7/full --seasons S19-S42 --out data/solo-raid/analysis/r7/stage1_M3_D1.json [--chains 4 --warmup 500 --samples 500] [--draws-dir DIR]
   python3 -I tools/solo_raid/lab7/m3.py prior --stage1 STAGE1.json --target S30 [--k 6] [--out P.json] [--prior-cache DIR]
   python3 -I tools/solo_raid/lab7/m3.py predict --stage1 STAGE1.json --obs-dir W/obs7 --seasons S22,S26 --T all|24,48 --out PRED.json [--prior-cache DIR]
+  predict --bind {none,l,r,a} [--map-only] (WP9a 진단 2 「묶어 보기」): 맞힐 시즌 s의 1단계 값(stage1 파일 s 항목의 사후 평균 — 끝난 시즌 자료로 맞춘 값, 정답 표 아님)에
+    침수 계수 cl (l) · 컷 모양 계수 cr (r) · 규모 a (a)를 묶는다. 묶은 모수는 사전에서 상수로 빠진다. --map-only = NUTS 없이 MAP(다중 시작·--pre-full 포함)의 lnC를 칸으로 낸다.
+    둘 다 기본값이면 지금 동작 그대로.
+  prior·predict --pca-block [--pca-block-k R,L] [--pca-block-shrink G] · --r-pcs N · --window-min W · --ratio10 locallevel (WP9 2차 사전 스위치, 모두 기본 끔):
+    A1 블록 주성분 · B1 r 주성분 상한·창 최소 시즌 · B2 10%/3% 비 국소 수준 사전. 자세한 뜻은 아래 「WP9 2차 스위치」 블록 주석과 pca_window_block·season_ratio10의 설명.
+    1단계(stage1)와 무관하다 (1단계 파일을 읽기만 한다 — 다시 내지 않는다). 끄면 지금 동작 그대로. 켠 값은 prior 캐시 폴더·출력 머리(pca_switches)에 들어가고 기존 --out과 다르면 멈춘다.
   stage1·predict에 --dep {dt,dtp} (WP5a): 한섭 성분에 시간 어긋남 δ(t) (dtp는 + 사람 효과). 없으면 지금 코드와 같은 계산.
     stage1 --dep-fit {marg,joint}: 1단계 라플라스의 MAP. joint = 명세 그대로(ζ·hyper 결합 MAP — σ_δ를 10배 넘게 키운다, S30 합성에서 0.008 → 0.099),
     marg = ζ를 적분한 라플라스 보정(+½ log|H_ζζ|, occam_refine; 기본). 칸 예측은 NUTS가 ζ·hyper를 함께 뽑아 이 선택과 무관하다.
@@ -67,6 +73,15 @@ CR_MEAN, CR_SD = math.log(0.3), 1.5
 CL_MEAN, CL_SD = math.log(0.2 / 0.6), 2.0
 TAU_SCALE = 0.5
 CACHE = None                                            # 2단계 창 적합 디스크 캐시 폴더 (CLI --prior-cache)
+
+# ---- WP9 2차 스위치 (2026-11-02, 사전 쪽만 — 1단계와 무관) : 모두 기본 끔, 끄면 prior·predict·pca_window가 지금 코드와 같은 계산 ----
+PCA_BLOCK = False                                       # A1: r 블록·ℓ 블록 주성분을 따로 내고 ξ ~ MVN(0, Σ_ξ) (Σ_ξ = 창 안 시즌들의 블록 점수 공분산)
+PCA_BLOCK_K = None                                      # A1: (K_r, K_l) 직접 지정. None 또는 원소 None = 기본 규칙 (pca_window의 90% 규칙을 블록마다)
+PCA_BLOCK_SHRINK = None                                 # A1: 블록 사이 상관을 0으로 당기는 비율 γ. None = 1/J
+R_PCS = None                                            # B1: r 쪽 주성분 수 상한 (블록이면 r 블록, 아니면 전체 K)
+WINDOW_MIN = None                                       # B1: choose_window_pca가 보는 창 k의 최소 시즌 수 (이보다 작은 k를 뺀다; "all"은 남는다)
+RATIO10 = None                                          # B2: None | "locallevel" — ln(C10/C3)를 직전 시즌 수준에서 출발하는 국소 수준 사전으로
+W10 = math.log(10.0 / 3.0)                              # 10% 점의 w (3% = 0)
 
 
 # ---------- 기저·격자 (numpy) ----------
@@ -388,6 +403,21 @@ class Stage1Prob:
         return lp
 
 
+def ratio10_of(cr, B=BASIS):
+    """곡선 계수 cr의 ln(C10/C3) = -R(ln(10/3)) (jax). R_grid가 R(0) = 0으로 맞춰 둬서 a와 무관. B2 소프트 제약이 쓴다.
+
+    B2 (--ratio10 locallevel) 구현 선택 — 소프트 제약 (CellProb.logprior에 N(ratio10_of(cr); m, sd) 항 하나):
+      m, sd^2 = prior()가 hier.fit_level·level_prior로 만든다. 창 안 시즌 d_j = season_ratio10(1단계 항목)을 a_j처럼 보고
+      짝 차 d_j - d_{j-1} ~ N(0, tau^2 + V_j + V_{j-1}) 로 tau를 배운 뒤 m = 직전 시즌 d, sd^2 = E[tau^2] + V_직전 (a의 국소 수준 사전과 같은 꼴 · 같은 tau 척도 0.3).
+      까닭: (1) 칸의 자유 모수(a, ξ, 서버 모수)를 안 바꾸니 매개화·MAP 사전 펴기·bind/map-only와 그대로 같이 돈다 (cr을 묶은 --bind r이면 상수라 뺀다).
+      (2) 10% 점의 값 하나만 건드려 3% -> 10% 외삽(H3)만 겨냥한다. 기울기(시즌 순서) 항은 없다.
+      곡선 수준의 비다: 최종 컷 비 lnC10 - lnC3는 시간 어긋남 δ(H)만큼 q를 같이 밀어 곡선 비와 조금 다르다 (22시즌 1단계에서 차 0.06 이내, 평균 0.015 — 칸 쪽 제약도 같은 곡선 정의라 서로 맞다).
+      주의: ξ 사전도 창 안 시즌들의 ln(C10/C3) 퍼짐을 이미 들고 있어 이 항은 그 위에 한 번 더 곱해지는 꼴이다 (좁은 쪽이 이긴다; 이중 계산 정도는 보고 때 짚을 것)."""
+    import jax.numpy as jnp
+    R, _, _ = R_grid(cr, B)
+    return -jnp.interp(W10, jnp.asarray(B["wg"]), R)
+
+
 class CellProb:
     """맞힐 시즌 칸: v = [a, xi_1..xi_K, lnsig0, lnrho, 6 offset]. 곡선 계수 = 평균 + sum xi_k phi_k."""
     kind = "cell"
@@ -426,6 +456,21 @@ class CellProb:
         self.nch = np.linalg.cholesky(cov)
         self.am, self.av = pr["a"]["mean"], pr["a"]["var"]
         self.start = np.concatenate([[self.am], np.zeros(self.K + self.ne), self.nmean])
+        self.fixed = {}                                # WP9a 묶어 보기: {"cr": [NR]} {"cl": [NL]} {"a": 값} 중 묶은 것 (비면 본안)
+        # WP9 2차 (사전에 해당 키가 있을 때만 켜진다 — 끈 사전이면 아래 둘 다 None이라 logprior가 지금과 같은 계산)
+        xc = pr.get("xi_cov")                          # A1: ξ ~ N(0, Σ_ξ) (블록 대각이 아닌 시즌 사이 층 공분산)
+        self.xch = np.linalg.cholesky(np.asarray(xc, float).reshape(self.K, self.K) + 1e-9 * np.eye(self.K)) if (xc is not None and self.K) else None
+        r10 = pr.get("ratio10")                        # B2: ln(C10/C3) = -R(ln(10/3)) ~ N(mean, var) 소프트 제약
+        self.r10 = (float(r10["mean"]), math.sqrt(float(r10["var"]))) if r10 else None
+
+    def set_fixed(self, fixed):
+        """묶음 값을 건다 (bind_values의 결과). 묶은 모수의 v 자리는 곡선에 안 쓰이는 더미가 되어 사전 N(0, 1)로 둔다 (헤시안이 퇴화하지 않게).
+        규모 a를 묶으면 더미 v[0]의 시작점은 0. cr·cl을 묶으면 해당 곡선은 ξ·η와 무관하다."""
+        self.fixed = {k: np.asarray(x, float) for k, x in fixed.items()}
+        if "a" in self.fixed:
+            self.start = np.array(self.start, float)
+            self.start[0] = 0.0
+        return self
 
     def bind(self, obs):
         """Stage1Prob.bind와 같다 — ζ는 v 맨 뒤, 사전 N(0, 1)."""
@@ -447,6 +492,8 @@ class CellProb:
             c = c + jnp.asarray(self.M) @ v[1 + K:1 + K + self.ne]
         o = 1 + K + self.ne
         d = {"a": v[0], "cr": c[:NR], "cl": c[NR:]}
+        for k, x in self.fixed.items():                 # 묶음 (비어 있으면 아무것도 안 한다)
+            d[k] = jnp.asarray(x) if x.ndim else jnp.asarray(float(x))
         d.update({n: v[o + i] for i, n in enumerate(NUIS)})
         if self.dep:
             d.update(dep_fields(d, v[o + len(NUIS):], **self.dep))
@@ -456,11 +503,22 @@ class CellProb:
         import jax.numpy as jnp
         from jax.scipy.linalg import solve_triangular
         K = self.K
-        lp = _nlp(v[0], self.am, math.sqrt(self.av))
-        if K:
+        lp = _nlp(v[0], 0.0, 1.0) if "a" in self.fixed else _nlp(v[0], self.am, math.sqrt(self.av))
+        if K and self.xch is not None:                  # A1 (스위치): 다변량 정규 N(0, Σ_ξ)
+            ch_x = jnp.asarray(self.xch)
+            zx = solve_triangular(ch_x, v[1:1 + K], lower=True)
+            lp += -0.5 * (zx ** 2).sum() - jnp.log(jnp.diag(ch_x)).sum() - 0.5 * K * math.log(2 * math.pi)
+        elif K:
             lp += _nlp(v[1:1 + K], 0.0, jnp.sqrt(jnp.asarray(self.lam)))
         if self.ne:
             lp += _nlp(v[1 + K:1 + K + self.ne], 0.0, 1.0)
+        if self.r10 is not None and "cr" not in self.fixed:     # B2 (스위치): 10% 점 소프트 제약 — r을 묶으면 상수라 뺀다
+            c = jnp.asarray(self.mc)
+            if K:
+                c = c + v[1:1 + K] @ jnp.asarray(self.phi)
+            if self.ne:
+                c = c + jnp.asarray(self.M) @ v[1 + K:1 + K + self.ne]
+            lp += _nlp(ratio10_of(c[:NR]), self.r10[0], self.r10[1])
         e = self.o + len(NUIS)
         r = v[1 + K + self.ne:e] - jnp.asarray(self.nmean)
         ch = jnp.asarray(self.nch)
@@ -684,15 +742,17 @@ def occam_refine(obs, prob, pre, rounds=4, tol=0.02):
     return pre
 
 
-def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True, full_ep=False, multistart=True, var=None):
+def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True, full_ep=False, multistart=True, var=None, map_only=False):
     """관측 줄 -> MAP(시작점 8개) -> NUTS (retry False면 한 번만). (samples, info, diag, obs). info에 map·secs·n·N. var = 관측 층 변형 이름.
-    시간 어긋남 변형은 모듈 전역 DEP (set_dep)."""
+    시간 어긋남 변형은 모듈 전역 DEP (set_dep). map_only = NUTS 없이 MAP에서 lnC를 계산해 sm["lnC_q"] = [1, 1]로 낸다 (칸 전용; WP9a)."""
     obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1, var=var, dep=DEP)
     prob.bind(obs)
     jobs = OM.to_jax(obs)
     t0 = time.time()
     pre = multistart_map(jobs, prob, full_ep=full_ep) if multistart else map_precond(jobs, prob, full_ep=full_ep)
     t_map = time.time() - t0
+    if map_only:
+        return _map_only_result(prob, pre, t_map, obs)
     mdl = functools.partial(model, prob=prob, pre=pre)
     lnames = [f"lnC_{q:g}" for q in (1, 3, 10)]
     if prob.kind == "cell":   # 칸: 핵심 모수 + 모든 목표 lnC로 판정 (서버 성분은 따로 보고, 재시도도 핵심이 못 지날 때만)
@@ -720,6 +780,21 @@ def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500
     info["map"] = pre["info"]
     info["pre"] = {"loc": pre["loc"], "chol": pre["chol"]}
     info["n"], info["N"], info["counts"] = obs["n"], obs["N"], obs["counts"]
+    return sm, info, dg, obs
+
+
+def _map_only_result(prob, pre, t_map, obs):
+    """fit(map_only=True)의 끝: MAP 점(v = pre["loc"][:n])의 lnC를 모형과 같은 float32 길로 계산한다. NUTS 없음 -> 진단은 MAP 것만 (conv = 헤시안이 양정치)."""
+    import jax.numpy as jnp
+    v = jnp.asarray(np.asarray(pre["loc"], float)[:prob.n], jnp.float32)
+    th = prob.theta(v)
+    sm = {f"lnC_{q:g}": np.asarray(_lnC_t(th, q), float).reshape(1, 1) for q in OM.Q_TARGETS}
+    mi = pre["info"]
+    info = {"secs": round(t_map, 1), "map_secs": round(t_map, 1), "divergences": 0, "retried": False, "tree_cap_frac": 0.0, "map": mi,
+            "n": obs["n"], "N": obs["N"], "counts": obs["counts"], "pre": {"loc": pre["loc"], "chol": pre["chol"]},
+            "map_a": float(th["a"]), "map_xi": [float(x) for x in np.asarray(pre["loc"], float)[1:1 + prob.K]],
+            "map_cr": [float(x) for x in th["cr"]], "map_cl": [float(x) for x in th["cl"]]}
+    dg = {"rhat_max": None, "ess_min": None, "conv": bool(mi["min_eig"] > 0 and mi["n_floored"] == 0)}
     return sm, info, dg, obs
 
 
@@ -911,6 +986,8 @@ def pca_window(X, V):
     tot = w.sum()
     K = int(np.argmax(np.cumsum(w) / tot >= 0.90)) + 1 if tot > 0 else 0
     K = min(K, 3, max(J - 2, 0))
+    if R_PCS is not None:                            # B1 (스위치): 블록이 아닐 때 전체 K 상한
+        K = min(K, int(R_PCS))
     m = min(J - 1, D)
     disc = w[K:m] if m > K else np.array([])
     sres = float(disc.mean()) if len(disc) else 1e-4
@@ -925,6 +1002,154 @@ def pca_window(X, V):
             "share": (w / tot).tolist() if tot > 0 else [0.0] * D, "J": J}
 
 
+def switches():
+    """켜진 WP9 2차 스위치만 담은 dict (JSON 왕복에 안정 — 튜플은 리스트). 모두 끄면 {} -> 출력 머리·캐시 열쇠에 아무것도 안 더한다."""
+    sw = {}
+    if PCA_BLOCK:
+        sw["pca_block"] = True
+        if PCA_BLOCK_K is not None:
+            sw["pca_block_k"] = list(PCA_BLOCK_K)
+        if PCA_BLOCK_SHRINK is not None:
+            sw["pca_block_shrink"] = float(PCA_BLOCK_SHRINK)
+    if R_PCS is not None:
+        sw["r_pcs"] = int(R_PCS)
+    if WINDOW_MIN is not None:
+        sw["window_min"] = int(WINDOW_MIN)
+    if RATIO10:
+        sw["ratio10"] = RATIO10
+    return sw
+
+
+def set_switches(pca_block=False, pca_block_k=None, pca_block_shrink=None, r_pcs=None, window_min=None, ratio10=None):
+    """WP9 2차 스위치를 정한다 (CLI --pca-block · --pca-block-k · --pca-block-shrink · --r-pcs · --window-min · --ratio10). 인자를 안 주면 끔.
+    pca_block_k = (K_r, K_l) 또는 "r,l" 문자열 (각 원소 None·"auto" = 기본 규칙). 블록이 아닌데 block_k·shrink를 주면 오류."""
+    global PCA_BLOCK, PCA_BLOCK_K, PCA_BLOCK_SHRINK, R_PCS, WINDOW_MIN, RATIO10
+    if isinstance(pca_block_k, str):
+        t = [x.strip() for x in pca_block_k.split(",")]
+        if len(t) != 2:
+            raise ValueError(f"--pca-block-k는 'r,l' 두 값이어야 한다: {pca_block_k}")
+        pca_block_k = tuple(None if x in ("", "auto") else int(x) for x in t)
+    if not pca_block and (pca_block_k is not None or pca_block_shrink is not None):
+        raise ValueError("--pca-block-k·--pca-block-shrink는 --pca-block과 함께만 쓴다")
+    if pca_block_k is not None and all(x is None for x in pca_block_k):
+        pca_block_k = None
+    if pca_block_k is not None and any(x is not None and x < 0 for x in pca_block_k):
+        raise ValueError("--pca-block-k는 0 이상")
+    if pca_block_shrink is not None and not 0.0 <= pca_block_shrink < 1.0:
+        raise ValueError("--pca-block-shrink는 [0, 1)")
+    if ratio10 not in (None, "none", "locallevel"):
+        raise ValueError(f"모르는 --ratio10 {ratio10}")
+    PCA_BLOCK, PCA_BLOCK_K, PCA_BLOCK_SHRINK = bool(pca_block), pca_block_k, pca_block_shrink
+    R_PCS = None if r_pcs is None else int(r_pcs)
+    WINDOW_MIN = None if window_min is None else int(window_min)
+    RATIO10 = None if ratio10 in (None, "none") else ratio10
+    return switches()
+
+
+def _sw_key(sw):
+    return hashlib.sha1(json.dumps(sw, sort_keys=True).encode()).hexdigest()[:8]
+
+
+def pca_window_block(X, V):
+    """A1 블록 주성분 (WP9 2차, 스위치 --pca-block). 창 안 곡선 벡터 X[J,24], 잡음 공분산 V[J,24,24] -> pca_window와 같은 키 + xi_cov[K,K] · block_k[2].
+    BAND를 r 쪽(앞 NE_R 점 중 띠 안)과 ℓ 쪽(나머지)으로 나눠, 블록마다 PACE 주성분을 따로 낸다:
+      S = 표본 공분산 - 평균 V (띠 전체), 블록 대각 S_rr·S_ll의 고윳값분해 -> 블록마다 K_b = 양의 고윳값 합의 90%에 처음 닿는 수 (<= 3, <= J-2; pca_window와 같은 규칙).
+      --pca-block-k r,l로 직접 지정하면 그 값 (<= 블록 차원, <= J-1 — 표본 공분산의 계수). --r-pcs N이 있으면 K_r <= N도 건다.
+    ξ = [ξ_r(K_r), ξ_ℓ(K_l)] (phi 행 순서 = r 블록 -> ℓ 블록; 띠 밖 성분은 pca_window처럼 같은 블록 점수에 회귀).
+    사전 ξ ~ N(0, Σ_ξ): 블록 대각이 아니라 두 블록 점수의 **창 안 시즌 사이 층 공분산** (잡음 V를 뺀 S를 E = blockdiag(e_r, e_ℓ)로 옮긴 E S Eᵀ).
+      대각 = 블록 고윳값 w_k x (1+1/J) — 지금 lambda_scaled와 같은 수축. 블록 사이 상관 R (대각 1)은 고윳값 음수를 0으로 자른 뒤 (1-γ) R + γ I로 당긴다 (γ 기본 1/J; J개 시즌으로 잰 6차원 이하
+      공분산은 계수가 J-1이라 그대로면 특이하다 -> 양정치 보장은 이 수축). 그래서 Σ_ξ = diag(sqrt(lam_scaled)) R_γ diag(sqrt(lam_scaled)) > 0.
+    sres = 블록마다 버린 고윳값(K_b ~ min(J-1, D_b))의 평균, share = [r 블록 설명 비율 앞 3개, ℓ 블록 앞 3개] (보고용)."""
+    J = X.shape[0]
+    D = len(BAND)
+    mu = X.mean(0)
+    Xb = X[:, BAND]
+    Vb = V[:, BAND][:, :, BAND]
+    S = np.cov(Xb.T, ddof=1).reshape(D, D) if J >= 2 else np.zeros((D, D))
+    S = 0.5 * (S - Vb.mean(0) + (S - Vb.mean(0)).T)
+    nbr = sum(1 for i in BAND if i < NE_R)
+    sls = [slice(0, nbr), slice(nbr, D)]
+    outs = [[i for i in OUT if i < NE_R], [i for i in OUT if i >= NE_R]]
+    kreq = list(PCA_BLOCK_K) if PCA_BLOCK_K is not None else [None, None]
+    parts, discs, shares, ks_ = [], [], [], []
+    for b, sl in enumerate(sls):
+        Db = sl.stop - sl.start
+        w, Q = np.linalg.eigh(S[sl, sl]) if Db else (np.zeros(0), np.zeros((0, 0)))
+        o = np.argsort(w)[::-1]
+        w, Q = np.clip(w[o], 0, None), Q[:, o]
+        tot = w.sum()
+        if kreq[b] is None:
+            Kb = int(np.argmax(np.cumsum(w) / tot >= 0.90)) + 1 if tot > 0 else 0
+            Kb = min(Kb, 3, max(J - 2, 0))
+        else:
+            Kb = min(int(kreq[b]), Db, max(J - 1, 0))
+        if b == 0 and R_PCS is not None:
+            Kb = min(Kb, int(R_PCS))
+        m = min(J - 1, Db)
+        discs.append(w[Kb:m] if m > Kb else np.array([]))
+        parts.append((Q[:, :Kb].T, w[:Kb]))
+        shares.append((w / tot).tolist() if tot > 0 else [0.0] * Db)
+        ks_.append(Kb)
+    K = sum(ks_)
+    E = np.zeros((K, D))
+    wv = np.zeros(K)
+    phi = np.zeros((K, DT))
+    row = 0
+    for b, sl in enumerate(sls):
+        e, w = parts[b]
+        for k in range(len(w)):
+            E[row, sl] = e[k]
+            wv[row] = w[k]
+            phi[row, [BAND[i] for i in range(sl.start, sl.stop)]] = e[k]
+            xi_k = (Xb[:, sl] - mu[BAND][sl]) @ e[k]
+            den = float((xi_k ** 2).sum())
+            phi[row, outs[b]] = ((X - mu)[:, outs[b]] * xi_k[:, None]).sum(0) / den if den > 0 else 0.0
+            row += 1
+    lam_scaled = wv * (1 + 1 / J)
+    xi_cov = np.zeros((K, K))
+    if K:
+        S0 = E @ S @ E.T
+        d = np.sqrt(np.clip(np.diag(S0), 0, None))
+        ok = d > 1e-12
+        Rm = np.eye(K)
+        sub = np.ix_(ok, ok)
+        Rm[sub] = S0[sub] / np.outer(d[ok], d[ok])
+        ew, ev = np.linalg.eigh(0.5 * (Rm + Rm.T))
+        Rm = (ev * np.clip(ew, 0, None)) @ ev.T                  # 상관행렬을 양반정치로
+        dd = np.sqrt(np.diag(Rm))
+        Rm = Rm / np.outer(dd, dd)
+        g = (1.0 / J) if PCA_BLOCK_SHRINK is None else float(PCA_BLOCK_SHRINK)
+        Rm = (1 - g) * Rm + g * np.eye(K)
+        sd = np.sqrt(lam_scaled)
+        xi_cov = Rm * np.outer(sd, sd)
+    disc = np.concatenate(discs) if discs else np.array([])
+    sres = float(disc.mean()) if len(disc) else 1e-4
+    return {"mu": mu, "phi": phi, "band_phi": E, "lam": wv, "lam_scaled": lam_scaled, "K": K, "sres": sres,
+            "share": shares[0][:3] + shares[1][:3], "share_block": {"r": shares[0][:3], "l": shares[1][:3]}, "J": J,
+            "xi_cov": xi_cov, "block_k": ks_}
+
+
+def season_ratio10(entry, ndraw=2000, seed=0):
+    """B2 (스위치 --ratio10 locallevel): 1단계 시즌 항목에서 d = ln(C10/C3) = -R(ln(10/3))의 (평균, 분산).
+    r12(평가 격자 값) 사후를 N(평균, 공분산)으로 보고 2000번 뽑아, 정방 B의 역으로 계수로 바꾼 뒤 R_grid와 같은 길(사다리꼴 누적 적분, R(0) = 0 맞춤)로 R(10%)를 셈한다.
+    곡선 자체의 비 — 시간 어긋남 δ(H)로 q를 같이 미는 것은 안 넣는다 (칸 쪽 제약도 곡선 cr에 걸므로 같은 정의)."""
+    x, cov = _xv(entry)
+    xr, cr_ = x[:NE_R], cov[:NE_R, :NE_R]
+    w, Q = np.linalg.eigh(0.5 * (cr_ + cr_.T))
+    z = np.random.default_rng(seed).standard_normal((ndraw, NE_R))
+    draws = xr + (z * np.sqrt(np.clip(w, 0, None))) @ Q.T                    # [n, NE_R]
+    coef = np.linalg.solve(BASIS["Br12"], draws.T).T                          # 정방 B의 정확한 해
+    e = np.exp(coef @ BASIS["Brf"].T)                                         # [n, 160]
+    Rc = np.concatenate([np.zeros((ndraw, 1)), np.cumsum(0.5 * (e[:, 1:] + e[:, :-1]) * BASIS["dw"], axis=1)], axis=1)
+    i0, f0 = BASIS["i0"], BASIS["f0"]
+    R = Rc - ((1 - f0) * Rc[:, [i0]] + f0 * Rc[:, [i0 + 1]])
+    wg = BASIS["wg"]
+    j = int(np.clip(np.searchsorted(wg, W10) - 1, 0, len(wg) - 2))
+    f = (W10 - wg[j]) / (wg[j + 1] - wg[j])
+    d = -((1 - f) * R[:, j] + f * R[:, j + 1])
+    return float(d.mean()), float(d.var(ddof=1))
+
+
 def _logn(x, mu, cov):
     ch = np.linalg.cholesky(cov)
     z = np.linalg.solve(ch, x - mu)
@@ -937,6 +1162,8 @@ def choose_window_pca(stage1, target, ks=(4, 6, 10, "all")):
     evals = [s for i, s in enumerate(before) if i >= 3]
     if len(evals) < 3:
         return "all", {}
+    if WINDOW_MIN is not None:                      # B1 (스위치): 최소 시즌 수보다 작은 창 후보를 뺀다 ("all"은 남는다)
+        ks = tuple(k for k in ks if k == "all" or int(k) >= WINDOW_MIN)
     xv = {s: _xv(stage1[s]) for s in before}
     scores = {}
     for k in ks:
@@ -944,9 +1171,9 @@ def choose_window_pca(stage1, target, ks=(4, 6, 10, "all")):
         for s2 in evals:
             prev = [s for s in before if HR.snum(s) < HR.snum(s2)]
             win = prev if k == "all" else prev[-int(k):]
-            p = pca_window(np.array([xv[s][0] for s in win]), np.array([xv[s][1] for s in win]))
+            p = (pca_window_block if PCA_BLOCK else pca_window)(np.array([xv[s][0] for s in win]), np.array([xv[s][1] for s in win]))
             e = p["band_phi"]
-            cov = e.T @ np.diag(p["lam_scaled"]) @ e + (p["sres"] + 1e-6) * np.eye(len(BAND)) + xv[s2][1][np.ix_(BAND, BAND)]
+            cov = e.T @ (p["xi_cov"] if PCA_BLOCK else np.diag(p["lam_scaled"])) @ e + (p["sres"] + 1e-6) * np.eye(len(BAND)) + xv[s2][1][np.ix_(BAND, BAND)]
             tot += _logn(xv[s2][0][BAND], p["mu"][BAND], cov)
         scores[str(k)] = tot
     best = max(scores, key=scores.get)
@@ -958,6 +1185,9 @@ def prior(stage1, target, k_fixed=None, cache=None):
     cache = cache if cache is not None else CACHE
     if cache and DEP:                                   # 창 적합 캐시 열쇠는 값 해시라 dep가 달라도 안 섞이지만, 폴더도 나눈다
         cache = os.path.join(cache, f"dep_{DEP}")
+    sw = switches()
+    if cache and sw:                                    # WP9 2차 스위치도 폴더를 나눈다 (끄면 폴더 그대로)
+        cache = os.path.join(cache, f"sw_{_sw_key(sw)}")
     before = [s for s in sorted(stage1, key=HR.snum) if HR.snum(s) < HR.snum(target)]
     if not before:
         raise ValueError("앞 시즌이 없다")
@@ -967,39 +1197,97 @@ def prior(stage1, target, k_fixed=None, cache=None):
         k, scores = k_fixed, {}
     win = before if k == "all" else before[-int(k):]
     xv = [_xv(stage1[s]) for s in win]
-    p = pca_window(np.array([x for x, _ in xv]), np.array([v for _, v in xv]))
+    p = (pca_window_block if PCA_BLOCK else pca_window)(np.array([x for x, _ in xv]), np.array([v for _, v in xv]))
     Br, Bl = BASIS["Br12"], BASIS["Bl12"]
     mean_coef = np.concatenate([np.linalg.lstsq(Br, p["mu"][:NE_R], rcond=None)[0], np.linalg.lstsq(Bl, p["mu"][NE_R:], rcond=None)[0]])
     phi_coef = np.array([np.concatenate([np.linalg.lstsq(Br, f[:NE_R], rcond=None)[0], np.linalg.lstsq(Bl, f[NE_R:], rcond=None)[0]])
                          for f in p["phi"]]).reshape(p["K"], NR + NL)
     mu_loc, mu_scale, tau_scale = hier_args3(NUIS)
     pf = HR.prior_for({s: stage1[s] for s in stage1}, target, NUIS, tau_scale, mu_loc, mu_scale, cache=cache, k_fixed=k)
-    return {"target": target, "k": k, "window": win, "J": len(win), "K": p["K"], "lambda": p["lam"], "lambda_scaled": p["lam_scaled"],
-            "sigma2_res": p["sres"], "explained": p["share"][:6], "band": BAND,
-            "pc_band_loadings": p["band_phi"][:2].round(3), "mean_coef": mean_coef, "phi_coef": phi_coef,
-            "scores": scores, "nuisance": {"names": pf["names"], "mean": pf["mean"], "cov": pf["cov"]}, "a": pf["a"],
-            "fit_info": pf["fit_info"]}
+    out = {"target": target, "k": k, "window": win, "J": len(win), "K": p["K"], "lambda": p["lam"], "lambda_scaled": p["lam_scaled"],
+           "sigma2_res": p["sres"], "explained": p["share"][:6], "band": BAND,
+           "pc_band_loadings": p["band_phi"][:2].round(3), "mean_coef": mean_coef, "phi_coef": phi_coef,
+           "scores": scores, "nuisance": {"names": pf["names"], "mean": pf["mean"], "cov": pf["cov"]}, "a": pf["a"],
+           "fit_info": pf["fit_info"]}
+    if sw:                                              # 스위치를 켠 판만 키가 늘어난다 (끄면 위 dict 그대로)
+        out["switches"] = sw
+    if PCA_BLOCK:
+        nbr = sum(1 for i in BAND if i < NE_R)
+        kr, kl = p["block_k"]
+        first = ([0] if kr else []) + ([kr] if kl else [])           # 블록마다 첫 주성분의 띠 적재량
+        out.update({"xi_cov": p["xi_cov"], "block_k": p["block_k"], "n_band_r": nbr, "explained_block": p["share_block"],
+                    "pc_band_loadings": p["band_phi"][first].round(3)})
+    if RATIO10:
+        ds = [season_ratio10(stage1[s]) for s in win]
+        dh, Vd = np.array([m for m, _ in ds]), np.array([v for _, v in ds])
+        ld = HR.fit_level(dh, Vd, 0.3, win)
+        m10, v10 = HR.level_prior(ld, dh[-1], Vd[-1])
+        out["ratio10"] = {"mean": m10, "var": v10, "tau_mean": float(np.mean(ld["tau_a"])), "pairs": ld["pairs"],
+                          "d_win": dh.tolist(), "d_sd_win": np.sqrt(Vd).tolist()}
+    return out
+
+
+def add_switch_args(p):
+    """prior·predict 공통 WP9 2차 스위치 인자 (모두 기본 끔)."""
+    p.add_argument("--pca-block", action="store_true",
+                   help="WP9 A1 블록 주성분: r 부분(띠 격자 r 쪽)과 ℓ 부분의 주성분을 따로 내고, 사전은 ξ ~ N(0, Σ_ξ) (Σ_ξ = 창 안 시즌들의 두 블록 점수 공분산, 블록 사이 상관은 γ로 수축). 기본 끔 = 지금 사전")
+    p.add_argument("--pca-block-k", default=None, help="A1 블록별 주성분 수 'r,l' (예: 2,1; 'auto' = 기본 규칙 — 블록마다 양의 고윳값 합 90%%, <= 3, <= J-2). --pca-block과 함께")
+    p.add_argument("--pca-block-shrink", type=float, default=None, help="A1 블록 사이 상관 수축 γ (R -> (1-γ)R + γI, 양정치 보장). 기본 1/J. --pca-block과 함께")
+    p.add_argument("--r-pcs", type=int, default=None, help="WP9 B1 r 쪽 주성분 수 상한 N (--pca-block이면 r 블록, 아니면 전체 K). 기본 없음")
+    p.add_argument("--window-min", type=int, default=None, help="WP9 B1 창 k의 최소 시즌 수 W: 창 고르기 후보 (4,6,10,all)에서 W보다 작은 k를 뺀다 ('all'은 남음). 기본 없음")
+    p.add_argument("--ratio10", default="none", choices=("none", "locallevel"),
+                   help="WP9 B2 10%%/3%% 컷 비 ln(C10/C3)를 직전 시즌 수준에서 출발하는 국소 수준 사전(소프트 제약)으로. 1단계 값으로 배운다. 기본 none")
+
+
+def apply_switch_args(a):
+    try:
+        return set_switches(a.pca_block, a.pca_block_k, a.pca_block_shrink, a.r_pcs, a.window_min, a.ratio10)
+    except ValueError as e:
+        sys.exit(str(e))
 
 
 def cmd_prior(a):
     global CACHE
     CACHE = a.prior_cache
+    sw = apply_switch_args(a)
     OM.setup_host(4)
     s1 = load_stage1(a.stage1)
+    if a.out and os.path.exists(a.out):
+        with open(a.out, encoding="utf-8") as f:
+            old_sw = json.load(f).get("switches", {})
+        if old_sw != json.loads(json.dumps(sw)):
+            sys.exit(f"스위치 {sw}가 기존 {a.out}의 switches({old_sw})와 다르다 — 다른 --out을 쓴다")
     for t in a.target.split(","):
         p = prior(s1, t, a.k, CACHE)
         if a.out and "," not in a.target:
             _atomic_json(a.out, p)
-        print(json.dumps({k: p[k] for k in ("target", "k", "window", "K", "lambda", "explained", "scores", "a", "pc_band_loadings")},
+        print(json.dumps({k: p[k] for k in ("target", "k", "window", "K", "lambda", "explained", "scores", "a", "pc_band_loadings", "switches", "block_k", "xi_cov", "ratio10") if k in p},
                          default=_js, ensure_ascii=False), flush=True)
 
 
 # ---------- 칸 예측 ----------
 
-def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0, full_ep=False, retry=True, multistart=True, ppca=False, var=None):
+def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0, full_ep=False, retry=True, multistart=True, ppca=False, var=None, K=16,
+             fixed=None, map_only=False):
     prob = CellProb(pr, ppca)
-    sm, info, dg, obs = fit(rows, H, s, err, prob, s, chains, warmup, samples, seed, stage1=False, full_ep=full_ep, retry=retry, multistart=multistart, var=var)
+    if fixed:
+        prob.set_fixed(fixed)
+    sm, info, dg, obs = fit(rows, H, s, err, prob, s, chains, warmup, samples, seed, stage1=False, K=K, full_ep=full_ep, retry=retry, multistart=multistart, var=var,
+                            map_only=map_only)
     return sm, info, dg, obs
+
+
+def bind_values(entry, bind):
+    """WP9a 묶어 보기: 1단계 파일의 시즌 항목(entry)에서 묶을 값. 대표값 = 1단계 사후 평균 (stage1_entry의 mean — 끝난 시즌 자료로 맞춘 곡선·규모).
+    곡선은 prior()가 mean_coef를 만드는 것과 같은 길로 (격자 값 -> 정방 B의 정확한 해) 계수로 바꾼다. -> {"cr": [NR]} | {"cl": [NL]} | {"a": 값} | {}"""
+    if bind == "none":
+        return {}
+    if bind == "a":
+        return {"a": float(entry["mean"][entry["names"].index("a")])}
+    x, _ = _xv(entry)
+    if bind == "r":
+        return {"cr": np.linalg.lstsq(BASIS["Br12"], x[:NE_R], rcond=None)[0]}
+    return {"cl": np.linalg.lstsq(BASIS["Bl12"], x[NE_R:], rcond=None)[0]}
 
 
 def _git_head():
@@ -1013,6 +1301,7 @@ def cmd_predict(a):
     global CACHE
     import obs_table
     CACHE = a.prior_cache
+    sw = apply_switch_args(a)
     OM.setup_host(max(a.chains, 4))   # hier 2단계 적합이 4사슬
     err = OM.load_err()
     with open(a.stage1, encoding="utf-8") as f:
@@ -1023,6 +1312,10 @@ def cmd_predict(a):
     if a.dep != s1_head.get("dep"):
         sys.exit(f"--dep {a.dep}가 1단계 파일의 dep({s1_head.get('dep')})와 다르다 — 같은 dep로 1단계를 낸 파일을 쓴다")
     s1 = load_stage1(a.stage1)
+    if a.bind != "none":
+        miss = [s for s in C.parse_seasons(a.seasons) if s not in s1]
+        if miss:
+            sys.exit(f"--bind {a.bind}: 1단계 파일에 {','.join(miss)}가 없다 — 묶을 1단계 값이 없으면 이 시즌은 못 한다 (1단계 시즌: {','.join(sorted(s1, key=HR.snum))})")
     with open(a.stage1, "rb") as f:
         sha = hashlib.sha1(f.read()).hexdigest()[:12]
     out = {"about": "M3 함수형 주성분 곡면 — T 절단 칸 예측", "method": "M3", "data_ver": C.DATA_VER,
@@ -1033,11 +1326,26 @@ def cmd_predict(a):
         out["made"]["obs_var"] = a.obs_var
     if a.dep:
         out["dep"] = a.dep
+    if a.bind != "none" or a.map_only:      # 둘 다 기본값이면 머리에 안 적는다 (지금 출력과 같은 꼴)
+        out["bind"] = a.bind
+    if a.bind != "none":
+        out["bind_note"] = "그 시즌 1단계 값(stage1 파일의 사후 평균, 끝난 시즌 자료로 맞춘 값; 정답 표 아님)에 묶음. 쓴 값은 bind_used."
+        out["bind_used"] = {}
+    if a.map_only:
+        out["map_only"] = True
+    if sw:                                  # WP9 2차 스위치: 켠 것만 머리에 (모두 끄면 지금 출력과 같은 꼴)
+        out["pca_switches"] = sw
     if os.path.exists(a.out):
         with open(a.out, encoding="utf-8") as f:
             out = json.load(f)
         if out.get("dep") != a.dep:
             sys.exit(f"--dep {a.dep}가 기존 {a.out}의 dep({out.get('dep')})와 다르다 — 다른 --out을 쓴다")
+        if out.get("bind", "none") != a.bind:
+            sys.exit(f"--bind {a.bind}가 기존 {a.out}의 bind({out.get('bind', 'none')})와 다르다 — 다른 --out을 쓴다")
+        if out.get("pca_switches", {}) != json.loads(json.dumps(sw)):
+            sys.exit(f"WP9 스위치 {sw}가 기존 {a.out}의 pca_switches({out.get('pca_switches', {})})와 다르다 — 다른 --out을 쓴다")
+        if bool(out.get("map_only", False)) != a.map_only:
+            sys.exit(f"--map-only({a.map_only})가 기존 {a.out}의 map_only({bool(out.get('map_only', False))})와 다르다 — 다른 --out을 쓴다")
     done = {(i["season"], i["T"]) for i in out["info"]}
     for s in C.parse_seasons(a.seasons):
         Ts = C.t_grid(s) if a.T == "all" else [float(t) for t in a.T.split(",")]
@@ -1052,7 +1360,23 @@ def cmd_predict(a):
                 out["priors"][s] = prior(s1, s, cache=CACHE)
             pr = out["priors"][s]
             head, rows = obs_table.read_cell(path)
-            sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples, full_ep=a.pre_full, multistart=not a.no_multistart, ppca=a.ppca, var=a.obs_var)
+            fixed = {} if a.bind == "none" else bind_values(s1[s], a.bind)   # 1단계가 없는 시즌(S42)도 묶지 않으면 돈다
+            if fixed:
+                out["bind_used"][s] = {k: x.tolist() if np.ndim(x) else float(x) for k, x in fixed.items()}
+            sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples, full_ep=a.pre_full, multistart=not a.no_multistart, ppca=a.ppca, var=a.obs_var, K=a.K,
+                                         fixed=fixed, map_only=a.map_only)
+            if a.map_only:      # 점추정만: pred = exp(MAP의 lnC), 구간 없음
+                out["cells"] += [{"season": s, "T": float(T), "pct": float(q), "server": "KR", "pred": float(np.exp(sm[f"lnC_{q:g}"].item())),
+                                  "i80": None, "i95": None, "own": True, "conv": bool(dg["conv"])} for q in sorted(OM.Q_TARGETS)]
+                out["info"].append({"season": s, "T": T, "secs": info["secs"], "map_secs": info["map_secs"], "conv": dg["conv"], "K": pr["K"], "k": pr["k"],
+                                    "bind": a.bind, "map_only": True, "map_ok": info["map"]["ok"], "map_nit": info["map"]["nit"], "map_fun": info["map"]["fun"],
+                                    "map_min_eig": info["map"]["min_eig"], "map_n_floored": info["map"]["n_floored"], "map_n_escape": info["map"]["n_escape"],
+                                    "n_starts": info["map"].get("multistart", {}).get("n_starts"), "map_a": info["map_a"], "map_xi": info["map_xi"], "map_cr": info["map_cr"], "map_cl": info["map_cl"],
+                                    "n": obs["n"], "N": obs["N"]})
+                _atomic_json(a.out, out)
+                i = out["info"][-1]
+                print(s, T, f"bind={a.bind} n={i['n']} map_secs={i['map_secs']} map_ok={i['map_ok']} conv={i['conv']} lnC3={sm['lnC_3'].item():.4f}", flush=True)
+                continue
             out["cells"] += OM.pred_cells(s, T, {q: sm[f"lnC_{q:g}"] for q in OM.Q_TARGETS}, dg["conv"])
             out["info"].append({"season": s, "T": T, "secs": info["secs"], "map_secs": info["map_secs"], "conv": dg["conv"], "K": pr["K"],
                                 "k": pr["k"], "rhat_max": dg["all"]["rhat"], "ess_min": dg["all"]["ess"], "rhat_core": dg["rhat_max"], "ess_core": dg["ess_min"],
@@ -1445,6 +1769,7 @@ def main():
     p.add_argument("--k", default=None)
     p.add_argument("--out", default=None)
     p.add_argument("--prior-cache", default=None)
+    add_switch_args(p)
     c4 = sub.add_parser("check43")
     c4.add_argument("--obs-dir", required=True)
     c4.add_argument("--seasons", required=True)
@@ -1463,6 +1788,11 @@ def main():
     q.add_argument("--ppca", action="store_true", help="확률 PCA 잔차: 밴드 격자에 등방 잔차 sqrt(sigma2_res) η를 더한다 (주성분이 못 담는 시즌 사이 변동)")
     q.add_argument("--no-multistart", action="store_true", help="MAP 시작점 8개(기본)를 끈다")
     q.add_argument("--pre-full", action="store_true", help="eps·phi도 사전 펴기에 넣는다 (m1과 같은 방식)")
+    q.add_argument("--bind", default="none", choices=("none", "l", "r", "a"),
+                   help="WP9a 묶어 보기: 맞힐 시즌의 1단계 값(stage1 파일 사후 평균)에 l = 침수 계수 cl · r = 컷 모양 계수 cr · a = 규모 a를 묶는다. 기본 none = 본안. 1단계에 그 시즌이 없으면(S42) 멈춘다")
+    q.add_argument("--map-only", action="store_true", help="NUTS 없이 MAP(다중 시작·--pre-full 포함)의 lnC를 칸으로 낸다: pred = exp(MAP의 lnC), i80·i95 = null. --out 파일 머리에 map_only")
+    add_switch_args(q)
+    q.add_argument("--K", type=int, default=16, help="숨은 촬영 시각 노드 수 (기본 16 = 지금까지의 칸 예측과 같음; WP5b는 32 — M1 7절 ⑤ 점검)")
     a = ap.parse_args()
     if a.cmd == "stage1":
         set_dep(a.dep, a.dep_fit)

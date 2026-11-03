@@ -22,7 +22,7 @@ import sys
 import threading
 import time
 from html import unescape
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dcnet  # noqa: E402
@@ -53,6 +53,11 @@ def get_json(url, **kw):
     return json.load(open(TMP, encoding="utf-8"))
 
 
+def is_proxy(u):
+    """네이버 외부 사진 프록시 주소인가 (search.pstatic.net/common/?src=원래 주소&type=…, dthumb-phinf.pstatic.net/?src=… — S4 2026-11-03)."""
+    return (urlparse(u).hostname or "") in ("search.pstatic.net", "dthumb-phinf.pstatic.net")
+
+
 def se_walk(x, texts, imgs):
     """네이버 SmartEditor JSON에서 글자와 본문 사진 주소를 모은다 (스티커·링크 미리보기 제외)."""
     if isinstance(x, dict):
@@ -60,7 +65,8 @@ def se_walk(x, texts, imgs):
         if ct == "textNode" and isinstance(x.get("value"), str):
             texts.append(x["value"])
         elif ct == "image" and "pstatic.net" in (x.get("src") or ""):
-            imgs.append(x["src"].split("?")[0])
+            # 외부 사진 프록시(search.pstatic.net/common/?src=…)는 쿼리가 열쇠라 그대로 둔다 — 잘라 내면 403 (S16 2026-11-02)
+            imgs.append(x["src"] if is_proxy(x["src"]) else x["src"].split("?")[0])
             return
         elif ct in ("sticker", "oglink", "oembed", "video"):
             return
@@ -73,8 +79,8 @@ def se_walk(x, texts, imgs):
 
 def row(no, t, title, body, base_imgs, small, site, url):
     """base_imgs: 쿼리 없는 원본 주소. 사이트 CDN이 아닌 주소(블라블라링크 글의 firebasestorage 등)는 쿼리가 열쇠라 그대로 둔다."""
-    names = [unquote(os.path.basename(urlparse(u).path)) for u in base_imgs]
-    own = lambda u: "pstatic.net" in u or "blablalink.com" in u  # noqa: E731
+    names = [unquote(os.path.basename(urlparse(parse_qs(urlparse(u).query).get("src", [u])[0] if is_proxy(u) else u).path)) for u in base_imgs]
+    own = lambda u: ("pstatic.net" in u and not is_proxy(u)) or "blablalink.com" in u  # noqa: E731
     return {"no": no, "t": t, "type": "icon_pic" if base_imgs else "icon_txt", "title": title, "site": site, "url": url,
             "body": body[:3000], "imgs": [u + small if own(u) else u for u in base_imgs],
             "files": [{"name": n, "href": u} for n, u in zip(names, base_imgs)]}

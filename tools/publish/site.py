@@ -95,6 +95,8 @@ def past(viz_seasons, reg):
             csvc.setdefault((split.snum(c["season"]), c["server"]), {}).setdefault(c["percentile"], c["score_100m"])
     out = []
     for s, r in sorted(reg.items(), key=lambda kv: split.snum(kv[0])):
+        if r.get("role") == "ref":      # 참고 시즌(S4~S18)은 웹에 싣지 않는다 (2026-11-02 사용자 결정, split.json ref_note)
+            continue
         t = table.get(s, {})
         sj = season_json(s)
         start = t.get("start") or sj.get("start") or ""
