@@ -28,6 +28,15 @@ WP9 스위치 (2026-11-02, 「WP9」 — 둘 다 끄면 위 규칙 그대로, �
          켜면 cov·w80(g4 포함)이 **보정 구간** 기준이 되고, 모형 구간의 포함률·폭 중앙(cov_model_*·w80_model)과 시즌별 k(groups[무리].calib)를 함께 낸다
          (「모형이 틀린 크기」 보고용). --ref F도 같은 보정을 해서 참고로 낸다.
 
+WP11 스위치 (2026-11-03, 「WP11」 — 끄면 위 규칙 그대로, 출력 JSON도 바이트까지 같다):
+  --g5-recent   g5를 최근 12시즌(S31~S42)에서도 본다 (사용자 2026-11-03 「최근 12시즌도 조건」). split에 recent가 더해지고,
+         g5는 전체·나머지·최근 셋 다 (채점 집합에 최근 시즌 칸이 없으면 최근은 안 본다). --g5와 함께.
+  --calib emp | emp_loso   실제 오차로 구간 (WP11 ⓒ — 퍼짐 함수를 따로 맞춘 등각 예측, Lei 외 2018 꼴). 칸 잔차 d = ln(정답 ÷ 중앙).
+         맞힐 시즌 s, 창 w, 무리마다: 풀 = 앞 시즌(emp) 또는 s 말고 모든 시즌(emp_loso)의 창 w 칸.
+         퍼짐 s_T = 풀 안 같은 T 칸(tkey)의 |d| 평균 (그 T의 풀 시즌이 2개 미만이면 풀 전체 평균), z = d ÷ s_T(그 칸의 T)를 풀에서 모아 10%·90% 분위
+         → 보정 구간 = 중앙 × exp(s_T · [z10, z90]) (위아래 폭이 달라도 됨, 중앙은 그대로). 풀 10칸 미만이면 모형 구간 그대로.
+         cov·w80은 보정 구간, cov_model_*·w80_model은 모형 구간 (prev와 같은 꼴). calib[시즌][창] = {z10, z90, n, s_T}.
+
 예측 파일 (공통 꼴):
   {"about": str, "method": "F", "data_ver": "D0",
    "made": {"tool_head": git 짧은 sha, "cmd": str, "inputs": {이름: sha1[:12]}},
@@ -221,15 +230,21 @@ CALIB_MIN = 10   # 보정 풀 칸이 이보다 적으면 보정하지 않는다 
 CALIB_Q = 0.8
 
 
-def evaluate_split(cells, truth, lb, pcts, tol, weights=DEFAULT_WEIGHTS):
-    """전체(22시즌) · 조정 6시즌 · 나머지 16시즌 — 앞 둘은 요약만."""
+RECENT = tuple(f"S{n}" for n in range(31, 43))   # 최근 12시즌 (WP11 g5, 2026-11-03)
+
+
+def evaluate_split(cells, truth, lb, pcts, tol, weights=DEFAULT_WEIGHTS, recent=False):
+    """전체(22시즌) · 조정 6시즌 · 나머지 16시즌 (recent면 + 최근 12시즌 S31~S42) — 앞 둘은 요약만."""
     allr = evaluate(cells, truth, lb, pcts, tol, weights=weights)
     tune = evaluate(cells, truth, lb, pcts, tol, seasons=set(TUNE), weights=weights)
     rest_s = {c["season"] for c in cells} - set(TUNE)
     rest = evaluate(cells, truth, lb, pcts, tol, seasons=rest_s, weights=weights)
     keys = SPLIT_KEYS + (CALIB_KEYS if "cov_model_main" in allr else ())
     pick = lambda r: {k: r[k] for k in keys}   # noqa: E731
-    return allr, dict(all=pick(allr), tune=pick(tune), rest=pick(rest))
+    sp = dict(all=pick(allr), tune=pick(tune), rest=pick(rest))
+    if recent:
+        sp["recent"] = pick(evaluate(cells, truth, lb, pcts, tol, seasons=set(RECENT), weights=weights))
+    return allr, sp
 
 
 def quantile(xs, q):
@@ -244,9 +259,60 @@ def snum(s):
     return int(s[1:])
 
 
+def calibrate_emp(cells, truth, pcts, mode):
+    """실제 오차로 구간 (WP11 ⓒ, 위 docstring). mode = "emp"(앞 시즌) | "emp_loso"(그 시즌 빼고). 반환 (칸 목록, 시즌별 정보)."""
+    ds = collections.defaultdict(list)       # (시즌, 창) → [(tkey, d)]
+    for c in cells:
+        s, T, q = c["season"], c["T"], c["pct"]
+        if c.get("server", "KR") != "KR" or q not in pcts:
+            continue
+        tv, m = truth.get((s, "KR", q)), c.get("pred")
+        w = window(s, T)
+        if tv is None or not m or m <= 0 or w is None:
+            continue
+        ds[(s, w)].append((tkey(s, T), math.log(tv / m)))
+    seasons = sorted({c["season"] for c in cells}, key=snum)
+    info = {}
+    for s in seasons:
+        info[s] = {}
+        for w in ("main", "end"):
+            pool_s = [t for t in seasons if (snum(t) < snum(s) if mode == "emp" else t != s) and ds[(t, w)]]
+            pool = [(t, k, d) for t in pool_s for k, d in ds[(t, w)]]
+            if len(pool) < CALIB_MIN:
+                info[s][w] = dict(z10=None, z90=None, n=len(pool), s_T=None)
+                continue
+            allm = st.mean(abs(d) for _, _, d in pool)
+            byk = collections.defaultdict(list)
+            for t, k, d in pool:
+                byk[k].append((t, abs(d)))
+            sT = {k: (st.mean(x for _, x in v) if len({t for t, _ in v}) >= 2 else allm) for k, v in byk.items()}
+            sT["_all"] = allm
+            z = [d / sT[k] if sT[k] > 0 else 0.0 for _, k, d in pool]
+            info[s][w] = dict(z10=quantile(z, 0.1), z90=quantile(z, 0.9), n=len(pool), s_T={k: round(v, 6) for k, v in sT.items()})
+    out = []
+    for c in cells:
+        s, T, q = c["season"], c["T"], c["pct"]
+        w = window(s, T) if c.get("server", "KR") == "KR" and q in pcts else None
+        iv = c.get("i80")
+        if w is None or not c.get("pred") or not iv or None in iv or iv[0] <= 0:
+            out.append(c)
+            continue
+        e = info[s][w]
+        m = c["pred"]
+        if e["z10"] is None:
+            out.append(dict(c, i80_m=list(iv)))
+            continue
+        k = tkey(s, T)
+        sp = e["s_T"].get(k, e["s_T"]["_all"])
+        out.append(dict(c, i80=[m * math.exp(sp * e["z10"]), m * math.exp(sp * e["z90"])], i80_m=list(iv)))
+    return out, info
+
+
 def calibrate(cells, truth, pcts, mode):
-    """구간 보정 층 (WP9, 위 docstring). 반환 (칸 목록 — 창 칸의 i80은 보정 구간·i80_m에 모형 구간, 시즌별 k).
+    """구간 보정 층 (WP9, 위 docstring). mode가 emp·emp_loso면 calibrate_emp (WP11). 반환 (칸 목록 — 창 칸의 i80은 보정 구간·i80_m에 모형 구간, 시즌별 k).
     k = {시즌: {"main": {"k": 배수 또는 None, "n": 풀 칸 수}, "end": ...}}."""
+    if mode in ("emp", "emp_loso"):
+        return calibrate_emp(cells, truth, pcts, mode)
     rs = collections.defaultdict(list)       # (시즌, 창) → [r]
     for c in cells:
         s, T, q = c["season"], c["T"], c["pct"]
@@ -289,21 +355,25 @@ def cell_r(c, tv):
 
 
 def g5_fail(gname, split, Fsplit, name):
-    """g5: 후보 − F score ≤ NEAR, 22시즌 전체(all)와 조정 뺀 나머지(rest) 둘 다. 반환 (fail 문구 목록, 차 dict)."""
+    """g5: 후보 − F score ≤ NEAR, 22시즌 전체(all)와 조정 뺀 나머지(rest) 둘 다 (--g5-recent면 + 최근 12시즌 recent). 반환 (fail 문구 목록, 차 dict)."""
     diffs = {}
-    for part in ("all", "rest"):
+    parts = ("all", "rest") + (("recent",) if "recent" in Fsplit else ())
+    for part in parts:
         a, b = split[name][part]["score"], Fsplit[part]["score"]
         diffs[part] = None if a is None or b is None else a - b
-    if split[name]["rest"]["n"]["main"] + split[name]["rest"]["n"]["end"] == 0 and Fsplit["rest"]["n"]["main"] + Fsplit["rest"]["n"]["end"] == 0:
-        diffs["rest"] = None          # 조정 밖 시즌 없음 — 전체만 본다
-        need = ("all",)
-    else:
-        need = ("all", "rest")
+    empty = lambda p: split[name][p]["n"]["main"] + split[name][p]["n"]["end"] == 0 and Fsplit[p]["n"]["main"] + Fsplit[p]["n"]["end"] == 0   # noqa: E731
+    need = []
+    for p in parts:
+        if p != "all" and empty(p):
+            diffs[p] = None          # 그 나눔에 칸 없음 — 안 본다
+        else:
+            need.append(p)
+    need = tuple(need)
     if any(diffs[p] is None for p in need):
         return [f"g5 {gname} 칸 모자람"], diffs
     if all(diffs[p] <= NEAR + 1e-12 for p in need):
         return [], diffs
-    txt = " / ".join(f"{diffs[p] * 100:+.2f} ({'전체' if p == 'all' else '나머지'})" for p in need)
+    txt = " / ".join(f"{diffs[p] * 100:+.2f} ({ {'all': '전체', 'rest': '나머지', 'recent': '최근 12'}[p]})" for p in need)
     return [f"g5 {gname} {txt}"], diffs
 
 
@@ -368,8 +438,11 @@ def main():
     ap.add_argument("--weights", choices=sorted(WEIGHTS), default=DEFAULT_WEIGHTS,
                     help="third = ⅓·⅔ 새 규칙(기본) · half = 옛 ½·½ 규칙(옛 결과 재현)")
     ap.add_argument("--g5", action="store_true", help="지킬 조건 g5 「F만큼」 (22시즌 전체·나머지 16시즌 둘 다) — WP9")
-    ap.add_argument("--calib", choices=("prev", "loso"), help="구간 보정 층: prev = 앞 시즌만, loso = 그 시즌 빼고 전부 — WP9")
+    ap.add_argument("--calib", choices=("prev", "loso", "emp", "emp_loso"), help="구간 보정 층: prev = 앞 시즌만, loso = 그 시즌 빼고 전부 — WP9 · emp·emp_loso = 실제 오차로 구간 — WP11")
+    ap.add_argument("--g5-recent", action="store_true", help="g5를 최근 12시즌(S31~S42)에서도 본다 — WP11 (--g5와 함께)")
     a = ap.parse_args()
+    if a.g5_recent and not a.g5:
+        sys.exit("--g5-recent는 --g5와 함께 쓴다")
     ref = load_pred(a.ref)
     lbh, lb = load_lb(a.lb)
     preds = [load_pred(p) for p in a.pred]
@@ -388,20 +461,24 @@ def main():
            "weights": a.weights, "w_main": WEIGHTS[a.weights][0], "w_end": WEIGHTS[a.weights][1], "rule": WEIGHTS[a.weights][2], "groups": {}}
     if a.g5:
         out["g5"] = f"후보 score - F score <= {NEAR * 100:.1f}%p, 22시즌 전체와 조정 뺀 나머지 둘 다 (WP9)"
+        if a.g5_recent:
+            out["g5"] += " + 최근 12시즌 S31~S42 (WP11)"
     if a.calib:
         out["calib"] = dict(mode=a.calib, min_cells=CALIB_MIN, q=CALIB_Q, about="구간 보정 층 (WP9, score.py 머리 docstring): cov·w80은 보정 구간, cov_model_*·w80_model은 모형 구간")
+        if a.calib in ("emp", "emp_loso"):
+            out["calib"].update(q=[0.1, 0.9], about="실제 오차로 구간 (WP11 ⓒ, score.py 머리 docstring): cov·w80은 보정 구간, cov_model_*·w80_model은 모형 구간")
     for gname, qs in GROUPS:
         kinfo = {}
         rcells = ref["cells"]
         if a.calib:
             rcells, kinfo["F"] = calibrate(rcells, truth, qs, a.calib)
-        Fres, Fsplit = evaluate_split(rcells, truth, lb, qs, TOL, a.weights)
+        Fres, Fsplit = evaluate_split(rcells, truth, lb, qs, TOL, a.weights, a.g5_recent)
         res, split = {}, {}
         for n, p in zip(names, preds):
             pcells = p["cells"]
             if a.calib:
                 pcells, kinfo[n] = calibrate(pcells, truth, qs, a.calib)
-            res[n], split[n] = evaluate_split(pcells, truth, lb, qs, TOL, a.weights)
+            res[n], split[n] = evaluate_split(pcells, truth, lb, qs, TOL, a.weights, a.g5_recent)
         extra, g5d = None, {}
         if a.g5:
             extra = {}
@@ -418,9 +495,9 @@ def main():
         print(line(ref["method"] + (" (참고)" if a.weights != "half" else ""), Fres))
         for n in names:
             print(line(n, res[n]))
-        print("   -- 22시즌 전체 / 조정 6시즌 / 나머지 16시즌 (score · CRPS)")
+        print("   -- 22시즌 전체 / 조정 6시즌 / 나머지 16시즌" + (" / 최근 12시즌" if a.g5_recent else "") + " (score · CRPS)")
         for n, sp in [(ref["method"], Fsplit)] + [(n, split[n]) for n in names]:
-            print(f"   {n:10s} " + "  ".join(f"{k} {pct(sp[k]['score'])}·{pct(sp[k]['crps'])}" for k in ("all", "tune", "rest")))
+            print(f"   {n:10s} " + "  ".join(f"{k} {pct(sp[k]['score'])}·{pct(sp[k]['crps'])}" for k in ("all", "tune", "rest") + (("recent",) if a.g5_recent else ())))
         if a.calib:
             print(f"   -- 구간 보정 {a.calib} (칸 {CALIB_MIN}개 미만이면 보정 안 함) — 보정 포함·폭 대 모형 포함·폭 (초반/막판), 전체/조정/나머지")
             for n, r0 in [(ref["method"], Fres)] + [(n, res[n]) for n in names]:
@@ -429,7 +506,12 @@ def main():
                     f"{k}: 포함 {pct(sp[k]['cov_main'], 2)}/{pct(sp[k]['cov_end'], 2)} (모형 {pct(sp[k]['cov_model_main'], 2)}/{pct(sp[k]['cov_model_end'], 2)}) "
                     f"폭 {pct(sp[k]['w80']['main'], 1)}/{pct(sp[k]['w80']['end'], 1)} (모형 {pct(sp[k]['w80_model']['main'], 1)}/{pct(sp[k]['w80_model']['end'], 1)})"
                     for k in ("all", "tune", "rest")))
-            for n in [ref["method"]] + names:
+            for n in ([ref["method"]] + names) if a.calib in ("emp", "emp_loso") else []:
+                ki = kinfo["F" if n == ref["method"] else n]
+                for w, wn in (("main", "초반"), ("end", "막판")):
+                    zs = [(s, v[w]["z10"], v[w]["z90"]) for s, v in sorted(ki.items(), key=lambda t: snum(t[0]))]
+                    print(f"   z {n:10s} {wn}: " + " ".join(f"{s}:{'-' if a_ is None else format(a_, '.2f')}/{'-' if b_ is None else format(b_, '.2f')}" for s, a_, b_ in zs))
+            for n in ([ref["method"]] + names) if a.calib in ("prev", "loso") else []:
                 ki = kinfo["F" if n == ref["method"] else n]
                 for w, wn in (("main", "초반"), ("end", "막판")):
                     ks = [(s, v[w]["k"]) for s, v in sorted(ki.items(), key=lambda t: snum(t[0]))]

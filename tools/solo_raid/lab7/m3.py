@@ -14,6 +14,12 @@
     stage1 --dep-fit {marg,joint}: 1단계 라플라스의 MAP. joint = 명세 그대로(ζ·hyper 결합 MAP — σ_δ를 10배 넘게 키운다, S30 합성에서 0.008 → 0.099),
     marg = ζ를 적분한 라플라스 보정(+½ log|H_ζζ|, occam_refine; 기본). 칸 예측은 NUTS가 ζ·hyper를 함께 뽑아 이 선택과 무관하다.
 
+  stage1·predict에 --clock {h,act} [--act-profile P] (WP11a ⓐ): act = 활동 시간 축 u* = A(h)/A(H) (act_clock.py의 그 시즌 g_s). 기본 h = 지금 계산.
+    1단계 파일 머리에 clock을 적고 (h면 안 적음), 칸 예측은 같은 clock의 1단계만 받는다.
+  prior·predict에 --pin (WP11a ⓑ, 2단계 사전만 — 1단계와 무관): 이번 시즌이 움직이는 곡면 모수를 규모 a와 침수 수준 ln m 하나로 줄인다.
+    컷 모양 r과 침수 모양 ℓ은 창 시즌 평균 곡선(지금 사전의 mean_coef)에 묶고, ℓ 계수에 상수 ln m을 더한다 (B-스플라인 합 1 — 곡선 전체가 ln m만큼 움직임, P × m).
+    꼴: 주성분 1개 φ = [r 0 · ℓ 1], 사전 분산 = 창 시즌 ℓ 띠 평균(l12 2..11)의 표본 분산 − 평균 사후 분산 (PACE와 같은 잡음 빼기, 바닥 0.01², 창 2시즌 미만이면 0.3²).
+    창 k 고르기·a의 국소 수준·그 밖 모수 사전은 그대로. 끄면 지금 사전 그대로.
 명세 「WP3 명세」 0·1·2·3·4(M3)·5·6절. 좌표: y = ln 점수, w = ln(q/3), u = h/H.
   컷 곡선  ln C(w) = a - R(w),  R(w) = ∫_0^w exp(r(v)) dv      r = 3차 B-스플라인 12개, w ∈ [ln(0.1/3), ln(40/3)] (밖은 끝값 상수)
   침수     P(u) = ∫_u^1 exp(l(v)) dv  (log10 단위, P(1) = 0)   l = 3차 B-스플라인 12개, s = sqrt(u) 등간격 매듭
@@ -73,6 +79,8 @@ CR_MEAN, CR_SD = math.log(0.3), 1.5
 CL_MEAN, CL_SD = math.log(0.2 / 0.6), 2.0
 TAU_SCALE = 0.5
 CACHE = None                                            # 2단계 창 적합 디스크 캐시 폴더 (CLI --prior-cache)
+PIN = False                                             # WP11a ⓑ: 2단계 사전을 a + ln m으로 (CLI --pin)
+ACT_PROFILE = os.path.join(C.ROOT, "data", "solo-raid", "analysis", "r7", "wp11", "act_profile_D1.json")   # WP11a ⓐ 기본 프로필
 
 # ---- WP9 2차 스위치 (2026-11-02, 사전 쪽만 — 1단계와 무관) : 모두 기본 끔, 끄면 prior·predict·pca_window가 지금 코드와 같은 계산 ----
 PCA_BLOCK = False                                       # A1: r 블록·ℓ 블록 주성분을 따로 내고 ξ ~ MVN(0, Σ_ξ) (Σ_ξ = 창 안 시즌들의 블록 점수 공분산)
@@ -914,6 +922,9 @@ def cmd_stage1(a):
     var = OM.get_var(a.obs_var)
     if out.get("seasons") and out.get("header", {}).get("obs_var") != (var["name"] if var else None):
         sys.exit(f"--obs-var {a.obs_var}가 기존 {a.out}의 obs_var({out.get('header', {}).get('obs_var')})와 다르다 — 다른 --out을 쓴다")
+    OM.set_clock(a.clock, a.act_profile)
+    if out.get("seasons") and out.get("header", {}).get("clock", "h") != a.clock:
+        sys.exit(f"--clock {a.clock}가 기존 {a.out}의 clock({out.get('header', {}).get('clock', 'h')})와 다르다 — 다른 --out을 쓴다")
     if out.get("seasons") and (out.get("header", {}).get("dep") != DEP or (DEP and out["header"].get("dep_fit") != DEP_FIT)):
         sys.exit(f"--dep {a.dep}·--dep-fit {DEP_FIT}가 기존 {a.out}의 dep({out.get('header', {}).get('dep')})·dep_fit({out.get('header', {}).get('dep_fit')})와 다르다 — 다른 --out을 쓴다")
     out["header"] = {"about": "M3 1단계 — 끝난 시즌 전체 표, 약한 사전, P-스플라인 곡선 (정답 표 안 씀)", "method": "M3", "data_ver": C.DATA_VER,
@@ -923,6 +934,10 @@ def cmd_stage1(a):
                              else {"chains": a.chains, "warmup": a.warmup, "samples": a.samples, "target_accept": a.target_accept, "retry": not a.no_retry})}
     if var:
         out["header"]["obs_var"] = var["name"]
+    if a.clock == "act":
+        with open(a.act_profile, "rb") as f:
+            out["header"]["clock"] = "act"
+            out["header"]["act_profile"] = {"path": os.path.relpath(a.act_profile, C.ROOT), "sha1": hashlib.sha1(f.read()).hexdigest()[:12]}
     if DEP:
         out["header"]["dep"] = DEP
         out["header"]["dep_fit"] = DEP_FIT
@@ -1211,6 +1226,8 @@ def prior(stage1, target, k_fixed=None, cache=None):
            "fit_info": pf["fit_info"]}
     if sw:                                              # 스위치를 켠 판만 키가 늘어난다 (끄면 위 dict 그대로)
         out["switches"] = sw
+    if PIN:
+        pin_prior(out, xv)
     if PCA_BLOCK:
         nbr = sum(1 for i in BAND if i < NE_R)
         kr, kl = p["block_k"]
@@ -1224,6 +1241,27 @@ def prior(stage1, target, k_fixed=None, cache=None):
         m10, v10 = HR.level_prior(ld, dh[-1], Vd[-1])
         out["ratio10"] = {"mean": m10, "var": v10, "tau_mean": float(np.mean(ld["tau_a"])), "pairs": ld["pairs"],
                           "d_win": dh.tolist(), "d_sd_win": np.sqrt(Vd).tolist()}
+    return out
+
+
+def pin_prior(out, xv):
+    """WP11a ⓑ: prior()의 결과를 「a + ln m」 사전으로 바꾼다 (제자리). xv = 창 시즌 (격자 값, 사후 공분산) 목록."""
+    li = [NE_R + i for i in range(2, 12)]               # ℓ 띠 (BAND의 ℓ 쪽, u >= 0.089)
+    wv = np.full(len(li), 1.0 / len(li))
+    lb = np.array([x[li] @ wv for x, _ in xv])
+    vb = np.array([wv @ V[np.ix_(li, li)] @ wv for _, V in xv])
+    if len(lb) >= 2:
+        var = max(float(np.var(lb, ddof=1) - vb.mean()), 0.01 ** 2)
+    else:
+        var = 0.3 ** 2
+    out["pin"] = {"about": "WP11a ⓑ — 곡면 모수를 a + ln m (ℓ 상수)으로. r·ℓ 모양은 창 평균 (mean_coef)", "lnm_var": var,
+                  "l_band_mean_win": lb.tolist(), "l_band_postvar_win": vb.tolist(), "pca_K_was": out["K"], "pca_lambda_was": out["lambda"]}
+    out["K"] = 1
+    out["lambda"] = [var]
+    out["lambda_scaled"] = [var]
+    out["phi_coef"] = np.concatenate([np.zeros(NR), np.ones(NL)])[None]
+    out["pc_band_loadings"] = None
+    out["sigma2_res"] = 0.0
     return out
 
 
@@ -1247,8 +1285,9 @@ def apply_switch_args(a):
 
 
 def cmd_prior(a):
-    global CACHE
+    global CACHE, PIN
     CACHE = a.prior_cache
+    PIN = bool(a.pin)
     sw = apply_switch_args(a)
     OM.setup_host(4)
     s1 = load_stage1(a.stage1)
@@ -1261,7 +1300,7 @@ def cmd_prior(a):
         p = prior(s1, t, a.k, CACHE)
         if a.out and "," not in a.target:
             _atomic_json(a.out, p)
-        print(json.dumps({k: p[k] for k in ("target", "k", "window", "K", "lambda", "explained", "scores", "a", "pc_band_loadings", "switches", "block_k", "xi_cov", "ratio10") if k in p},
+        print(json.dumps({k: p[k] for k in ("target", "k", "window", "K", "lambda", "explained", "scores", "a", "pc_band_loadings", "switches", "block_k", "xi_cov", "ratio10", "pin") if k in p},
                          default=_js, ensure_ascii=False), flush=True)
 
 
@@ -1311,6 +1350,15 @@ def cmd_predict(a):
         sys.exit(f"--obs-var {a.obs_var}가 1단계 파일의 obs_var({s1_var})와 다르다 — 같은 변형으로 1단계를 낸 파일을 쓴다")
     if a.dep != s1_head.get("dep"):
         sys.exit(f"--dep {a.dep}가 1단계 파일의 dep({s1_head.get('dep')})와 다르다 — 같은 dep로 1단계를 낸 파일을 쓴다")
+    if a.clock != s1_head.get("clock", "h"):
+        sys.exit(f"--clock {a.clock}가 1단계 파일의 clock({s1_head.get('clock', 'h')})와 다르다 — 같은 clock으로 1단계를 낸 파일을 쓴다")
+    if a.clock == "act":
+        with open(a.act_profile, "rb") as f:
+            if hashlib.sha1(f.read()).hexdigest()[:12] != s1_head["act_profile"]["sha1"]:
+                sys.exit(f"--act-profile {a.act_profile}가 1단계 파일의 프로필과 다르다")
+    OM.set_clock(a.clock, a.act_profile)
+    global PIN
+    PIN = bool(a.pin)
     s1 = load_stage1(a.stage1)
     if a.bind != "none":
         miss = [s for s in C.parse_seasons(a.seasons) if s not in s1]
@@ -1333,6 +1381,10 @@ def cmd_predict(a):
         out["bind_used"] = {}
     if a.map_only:
         out["map_only"] = True
+    if a.clock == "act":
+        out["clock"] = "act"
+    if PIN:
+        out["pin"] = True
     if sw:                                  # WP9 2차 스위치: 켠 것만 머리에 (모두 끄면 지금 출력과 같은 꼴)
         out["pca_switches"] = sw
     if os.path.exists(a.out):
@@ -1344,6 +1396,8 @@ def cmd_predict(a):
             sys.exit(f"--bind {a.bind}가 기존 {a.out}의 bind({out.get('bind', 'none')})와 다르다 — 다른 --out을 쓴다")
         if out.get("pca_switches", {}) != json.loads(json.dumps(sw)):
             sys.exit(f"WP9 스위치 {sw}가 기존 {a.out}의 pca_switches({out.get('pca_switches', {})})와 다르다 — 다른 --out을 쓴다")
+        if out.get("clock", "h") != a.clock or bool(out.get("pin", False)) != PIN:
+            sys.exit(f"--clock {a.clock}·--pin {PIN}가 기존 {a.out}의 clock({out.get('clock', 'h')})·pin({out.get('pin', False)})과 다르다 — 다른 --out을 쓴다")
         if bool(out.get("map_only", False)) != a.map_only:
             sys.exit(f"--map-only({a.map_only})가 기존 {a.out}의 map_only({bool(out.get('map_only', False))})와 다르다 — 다른 --out을 쓴다")
     done = {(i["season"], i["T"]) for i in out["info"]}
@@ -1762,6 +1816,8 @@ def main():
     s.add_argument("--param", choices=("centered", "noncentered"), default="noncentered")
     s.add_argument("--obs-var", default=None, choices=sorted(OM.VARIANTS), help="관측 층 변형 (WP4). 기본 None = 본안")
     s.add_argument("--dep", default=None, choices=("dt", "dtp"), help="시간 어긋남 변형 (WP5a): dt = 한섭 δ(t), dtp = dt + 사람 효과. 기본 None = 본안")
+    s.add_argument("--clock", default="h", choices=("h", "act"), help="WP11a ⓐ 시간 축: h = u = h/H (기본), act = 활동 시간 u* (그 시즌의 g_s)")
+    s.add_argument("--act-profile", default=ACT_PROFILE, help="act 프로필 (act_clock.py fit)")
     s.add_argument("--dep-fit", default="marg", choices=("marg", "joint"), help="dep 1단계 MAP: marg = ζ를 적분한 Occam 보정(기본), joint = ζ까지 결합 MAP(명세 그대로, σ_δ를 키운다)")
     p = sub.add_parser("prior")
     p.add_argument("--stage1", required=True)
@@ -1769,6 +1825,7 @@ def main():
     p.add_argument("--k", default=None)
     p.add_argument("--out", default=None)
     p.add_argument("--prior-cache", default=None)
+    p.add_argument("--pin", action="store_true", help="WP11a ⓑ: 이번 시즌 곡면 모수를 a + ln m으로 (r·ℓ 모양은 창 평균). 기본 끔")
     add_switch_args(p)
     c4 = sub.add_parser("check43")
     c4.add_argument("--obs-dir", required=True)
@@ -1792,6 +1849,9 @@ def main():
                    help="WP9a 묶어 보기: 맞힐 시즌의 1단계 값(stage1 파일 사후 평균)에 l = 침수 계수 cl · r = 컷 모양 계수 cr · a = 규모 a를 묶는다. 기본 none = 본안. 1단계에 그 시즌이 없으면(S42) 멈춘다")
     q.add_argument("--map-only", action="store_true", help="NUTS 없이 MAP(다중 시작·--pre-full 포함)의 lnC를 칸으로 낸다: pred = exp(MAP의 lnC), i80·i95 = null. --out 파일 머리에 map_only")
     add_switch_args(q)
+    q.add_argument("--pin", action="store_true", help="WP11a ⓑ: 이번 시즌 곡면 모수를 a + ln m으로 (r·ℓ 모양은 창 평균). 기본 끔")
+    q.add_argument("--clock", default="h", choices=("h", "act"), help="WP11a ⓐ 시간 축: h = u = h/H (기본), act = 활동 시간 u*. 1단계 파일 머리의 clock과 같아야 한다")
+    q.add_argument("--act-profile", default=ACT_PROFILE, help="act 프로필 (act_clock.py fit)")
     q.add_argument("--K", type=int, default=16, help="숨은 촬영 시각 노드 수 (기본 16 = 지금까지의 칸 예측과 같음; WP5b는 32 — M1 7절 ⑤ 점검)")
     a = ap.parse_args()
     if a.cmd == "stage1":

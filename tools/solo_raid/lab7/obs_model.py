@@ -73,6 +73,32 @@ def setup_host(n=4):
     jax.config.update("jax_enable_x64", False)
 
 
+# ---------- 시간 축 (WP11a ⓐ, 2026-11-03) ----------
+# None = 시계 시간 u = h/H (지금 코드). set_clock("act", 프로필 경로) = 활동 시간 u* = A(h)/A(H) (act_clock.py — 그 시즌의 g_s).
+# 켜면 prepare·simulate_pct의 u만 바뀌고 obs에 "clock" 키가 붙는다. 끄면 배열·키가 지금과 같다.
+CLOCK = None
+CLOCK_PROF = None
+
+
+def set_clock(clock, profile=None):
+    global CLOCK, CLOCK_PROF
+    if clock in (None, "h"):
+        CLOCK, CLOCK_PROF = None, None
+        return
+    if clock != "act":
+        raise ValueError(f"모르는 clock {clock}")
+    import act_clock
+    CLOCK, CLOCK_PROF = "act", act_clock.load(profile)
+
+
+def u_of(season, t, H):
+    """노드 시각 t (시간) -> 곡면 시간 좌표 (0.02~1)."""
+    if CLOCK is None:
+        return np.clip(t / H, 0.02, 1.0)
+    import act_clock
+    return act_clock.ustar(CLOCK_PROF, season, t, H)
+
+
 # ---------- 변형 (WP4 관측 층 빼 보기, 2026-10-31) ----------
 # 이름 -> 설정. 없는 키는 본안 값. base·None은 get_var가 None으로 돌려 기존 코드 경로 그대로 간다.
 VARIANTS = {
@@ -403,7 +429,7 @@ def prepare(rows, H, season, err, K=16, delay_key=None, stage1=False, var=None, 
             if text:
                 zlo2[i], zhi2[i] = zlo[i], zhi[i]
         tt[i] = t
-        u[i] = np.clip(t / H, 0.02, 1.0)
+        u[i] = np.clip(t / H, 0.02, 1.0) if CLOCK is None else u_of(season, t, H)
         lw[i] = np.where(w > 0, np.log(np.maximum(w, 1e-300)), NEG)
         site[i] = SITES.index(r["site"]) if r["site"] in SITES else 3
         lab[i] = SERVERS.index(r["server"]) if r["server"] in SERVERS else -1
@@ -446,6 +472,9 @@ def prepare(rows, H, season, err, K=16, delay_key=None, stage1=False, var=None, 
             obs.update(zlo2=zlo2, zhi2=zhi2, lwi1=lwi1, lwi2=lwi2, eps_row=eps_row)
         if var.get("contam") is False:
             obs["no_contam"] = True
+    if CLOCK:                                       # WP11a: 활동 시간 축 (본안에는 키가 없다)
+        obs["clock"] = CLOCK
+        obs["counts"]["clock"] = CLOCK
     if dep:                                         # WP5a: 시간 어긋남 매듭 배열 (본안에는 없다)
         obs.update(_dep_arrays(dep, H, tt, [r["pid"] for r, _, _ in keep], pos, N))
         obs["counts"]["dep"] = {"kind": dep, "nk": obs["dep_nk"], "n_pid_effects": obs["dep_np"]}
@@ -728,7 +757,7 @@ def pred_cells(season, T, draws_lnC, conv, server="KR"):
 
 # ---------- 합성 % 뽑기 (SBC·PPC·시험 공용; 2026-10-29 더함, 기존 인자 안 바꿈) ----------
 
-def simulate_pct(sel, H, err, mu_sd_fn, eps, phi_true, seed=0, delay_key=None, K=64):
+def simulate_pct(sel, H, err, mu_sd_fn, eps, phi_true, seed=0, delay_key=None, K=64, season=None):
     """select_rows가 고른 줄 배치(점수·종류·시각 정보·서버 라벨·사이트)를 그대로 두고 pct만 곡면에서 새로 뽑는다.
     mu_sd_fn(y[N], u[N]) -> (mu[3,N], sd[3,N]) numpy (서버 성분 KR·JP·GL의 log10 %와 잔차 sd). eps = 오염 확률, phi_true = [4,3] 사이트별 서버 몫.
     순서: 서버(라벨 줄은 elab 확률로 다른 서버, 미상 줄은 phi_true[사이트]) -> 촬영 시각(노드 K개 중 하나) -> 곡면 + 정규 잡음 ->
@@ -758,7 +787,7 @@ def simulate_pct(sel, H, err, mu_sd_fn, eps, phi_true, seed=0, delay_key=None, K
         return [], {"server_true": [], "contam": [], "t_shot": [], "n_dropped": 0}
     y = np.log([r["score"] for r in keep])
     tshot = np.array(tshot)
-    u = np.clip(tshot / H, 0.02, 1.0)
+    u = np.clip(tshot / H, 0.02, 1.0) if CLOCK is None else u_of(season, tshot, H)   # 켠 시간 축으로 뽑는다 (season 필요)
     mu, sd = mu_sd_fn(y, u)
     srv = np.array(srv)
     z = mu[srv, np.arange(n)] + sd[srv, np.arange(n)] * rng.standard_normal(n)
