@@ -1,14 +1,15 @@
 """공개 웹(jgaram/nikke-soloraid-cutoff의 GitHub Pages)에 올릴 솔로레이드 데이터를 만든다 (모델 0, 요청 0, 2026-10-16).
 
-python3 -I tools/publish/site.py --out DIR [--prev 이전_data.json]     # DIR/index.html · DIR/analysis.html · DIR/data.json
+python3 -I tools/publish/site.py --out DIR [--prev 이전_data.json]     # DIR/index.html · DIR/data.json
 
-- index.html: 탭 셋 (2026-10-18 사용자 결정 — 이번 시즌 것과 지난 시즌 것을 나누고, 긴 설명은 「방법」 탭에 모음).
-  「이번 시즌」 = 최종 1·3·10% 컷 예측 · 계산기(세 칸: 최종 % → 지금 %·점수, 지금 % → 최종 %, 점수 → 최종 % · 침수 곡선).
-  「지난 시즌」(#past) = 지난 시즌 커트라인 · 실제로 낸 예측(끝난 시즌 채점) · 되돌려 보기 · 시즌별 침수 비교(실제 관측 점).
-  「방법」(#method) = 작업 흐름(단계별 코드 위치·공개 범위) · 컷 예측 · 계산기 · 지난 시즌 탭 · 검증과 한계. 데이터 탭에는 꼬리표만 둔다.
+2026-11-07 사용자 결정: 웹에는 새 모형 M3만 보인다 (docs/publish.md, docs/solo-raid-method.md 「WP7 정함」).
+- index.html: 탭 셋. 「이번 시즌」 = 한섭 최종 1·3·10% 컷 예측 (M3 가운데 값 + 80% 구간. M3가 실패하거나 시간 한도를 넘은 칸만 F 한섭 값을 「대체(F)」로 표시).
+  「지난 시즌」(#past) = 지난 시즌 커트라인 · 실제로 낸 예측(M3로 낸 끝난 시즌 채점) · 되돌려 보기(M3 22시즌, analysis/backtest_M3.json) · 시즌별 침수 비교(실제 관측 점).
+  「방법」(#method) = 작업 흐름 · M3 설명 · 지난 시즌 탭 · 검증과 한계. 데이터 탭에는 꼬리표만 둔다.
+  일섭·글섭 예측과 계산기(최종 % ↔ 지금 %·점수, 침수 곡선)는 웹에서 뺐다 — M3가 내지 않는다. F의 함수(curve_source·conv)와 backtest_F.json은 레포 기록으로 남겼고 쓰지 않는다.
   tools/publish/site_template.html에 data.json을 넣은 것.
 - boss/S{n}.webp: 시즌별 보스 그림 (data/solo-raid/bosses/, tools/publish/boss_icons.py가 받아 둠 — 2026-10-18). 게임 그림이라 CC0 범위 밖이다.
-- analysis.html: tools/solo_raid/viz.py와 같은 화면(예측 방법·정확도). 공개용으로 위에 안내를 더하고 비공개 경로·수집 상태를 뺀다.
+- analysis.html(F 방법 정확도 화면, tools/solo_raid/viz.py)은 F 것이라 만들지 않는다 (2026-11-07). 함수 analysis_html은 기록으로 남겼다.
 
 공개 규칙 (docs/publish.md)
 - 숫자와 개수만 내보낸다. 글 원문·사진·닉네임·원글 주소·글 번호는 넣지 않는다. 근거는 출처 종류(집계표·관측 곡선)와 사람 수로만 쓴다.
@@ -196,12 +197,44 @@ def one_pred(path):
     return {"T": round(T, 2), "T_kst": o.get("T_kst"), "method": method_label(o), "srv": srv}
 
 
+def m3_pred(path):
+    """M3 운영 예측 파일(S{n}/predict/T{T}/m3_T{T}.json) 하나 → 웹 칸. 한섭만. 대체(F) 칸은 칸마다 src가 "F"다."""
+    o = jload(path)
+    T = float(o["T"])
+    x = ((o.get("servers") or {}).get("KR")) or {}
+    pts = {}
+    for p_ in PCTS:
+        q = (x.get("points") or {}).get(f"{float(p_):.1f}")
+        if q and q.get("median") is not None and q.get("i80") and None not in q["i80"]:
+            pts[p_] = {"m": r2(q["median"]), "lo": r2(q["i80"][0]), "hi": r2(q["i80"][1])}
+            if q.get("src") == "F" or o.get("status") == "fallback":
+                pts[p_]["src"] = "F"
+    return {"T": round(T, 2), "T_kst": o.get("T_kst"), "status": o.get("status"), "pts": pts}
+
+
+def m3_truth(score_path):
+    """끝난 뒤 채점(score.json)의 한섭 실제 컷. 방법별 줄이 있으면 M3 줄만 쓴다 (없으면 M3 예측만 있는 시즌이라 모두)."""
+    rows = jload(score_path).get("rows", [])
+    if any(r.get("method") for r in rows):
+        rows = [r for r in rows if str(r.get("method", "")).upper().startswith("M3")]
+    truth = {}
+    for r in rows:
+        p_ = f"{r['pct']:g}"
+        if r.get("server", "KR") == "KR" and p_ in PCTS and r.get("truth") is not None:
+            truth[p_] = r2(r["truth"])
+    return truth
+
+
 def live(reg):
-    """predict/가 있는 시즌. 예측과, 끝난 뒤 채점(score.json)이 있으면 실제 컷도 싣는다 (공개 결정 A — 몫과 상관없이).
+    """M3 예측(m3_T*.json)이 있는 시즌. 예측과, 끝난 뒤 채점(score.json)이 있으면 실제 컷도 싣는다 (공개 결정 A — 몫과 상관없이).
+    F의 predict_T*.json은 읽지 않는다 (2026-11-07). M3로 낸 시즌만 싣는다 — S42까지는 F라 웹에서 뺀다.
     파일 하나가 깨져도 그 파일(또는 그 시즌)만 빼고 경고를 남긴다 — 나머지 웹은 계속 갱신된다."""
     out = []
     for pdir in sorted(glob.glob(os.path.join(D, "S*", "predict")), key=lambda p: split.snum(os.path.basename(os.path.dirname(p)))):
         s = os.path.basename(os.path.dirname(pdir))
+        files = glob.glob(os.path.join(pdir, "T*", "m3_T*.json"))
+        if not files:
+            continue
         try:
             sj = season_json(s)
             c0 = dt.datetime.strptime(sj["c_start"][:16], "%Y-%m-%d %H:%M")
@@ -212,9 +245,9 @@ def live(reg):
             warn(f"{s}/state/season.json을 읽지 못해 진행 중 예측에서 뺐다 ({type(e).__name__}: {e})")
             continue
         preds = []
-        for p in glob.glob(os.path.join(pdir, "T*", "predict_T*.json")):
+        for p in files:
             try:
-                preds.append(one_pred(p))
+                preds.append(m3_pred(p))
             except (KeyError, ValueError, TypeError, OSError, json.JSONDecodeError) as e:
                 warn(f"{os.path.relpath(p, ROOT)}를 읽지 못해 뺐다 ({type(e).__name__}: {e})")
         preds.sort(key=lambda r: r["T"])
@@ -222,10 +255,7 @@ def live(reg):
         sc = os.path.join(pdir, "score.json")
         if os.path.exists(sc):
             try:
-                for r in jload(sc).get("rows", []):
-                    p_ = f"{r['pct']:g}"
-                    if p_ in PCTS and r.get("truth") is not None:
-                        truth.setdefault(r["server"], {})[p_] = r2(r["truth"])
+                truth = m3_truth(sc)
             except (KeyError, ValueError, TypeError, OSError, json.JSONDecodeError) as e:
                 warn(f"{s}/predict/score.json을 읽지 못해 실제 컷 비교를 뺐다 ({type(e).__name__}: {e})")
                 truth = {}
@@ -396,18 +426,23 @@ def sink(vdata, cvd, reg, src):
             "start": {s: iso(vdata["seasons"][s]["c_start"]) for s in seas}, "obs": obs}
 
 
+BACK_ABOUT = "시즌마다 그 시즌보다 앞선 시즌 자료만으로 낸 예측 (개발 검증 — 22시즌, 시험 시즌 없음)"
+
+
 def back(reg):
-    """지난 시즌 되돌려 보기 (2026-10-18 사용자 요청 — 「S35를 S34 이하 자료만으로」). backtest_web.py가 만든 analysis/backtest_F.json. 없으면 None."""
-    p = os.path.join(D, "analysis", "backtest_F.json")
+    """지난 시즌 되돌려 보기 (2026-10-18 사용자 요청 — 「S35를 S34 이하 자료만으로」, 2026-11-07부터 M3). backtest_web_m3.py가 만든
+    analysis/backtest_M3.json (옛 backtest_F.json은 쓰지 않는다). 한섭만. 없으면 None."""
+    p = os.path.join(D, "analysis", "backtest_M3.json")
     if not os.path.exists(p):
         return None
     try:
         b = jload(p)
-        seasons = [{"season": s, "boss": (reg.get(s) or {}).get("boss"), "train": x["train"], "H": x["H"], "c_start": iso(x["c_start"]), "srv": x["srv"]}
+        seasons = [{"season": s, "boss": (reg.get(s) or {}).get("boss"), "train": x["train"], "H": x["H"], "c_start": iso(x["c_start"]),
+                    "srv": {"KR": (x.get("srv") or {}).get("KR") or {}}}
                    for s, x in sorted(b["seasons"].items(), key=lambda kv: split.snum(kv[0]))]
-        return {"model": b.get("model"), "T": b["T"], "seasons": seasons}
+        return {"model": BACK_ABOUT, "T": b["T"], "seasons": seasons}
     except (KeyError, ValueError, TypeError, OSError) as e:
-        warn(f"analysis/backtest_F.json을 읽지 못해 「지난 시즌」 탭의 되돌려 보기를 뺐다 ({type(e).__name__}: {e})")
+        warn(f"analysis/backtest_M3.json을 읽지 못해 「지난 시즌」 탭의 되돌려 보기를 뺐다 ({type(e).__name__}: {e})")
         return None
 
 
@@ -489,7 +524,7 @@ def fingerprint(data, vdata):
     """웹 내용의 지문: 넣는 자료 + 페이지 틀. 이것이 같으면 웹도 같다."""
     h = hashlib.sha1()
     h.update(json.dumps({"data": data, "vdata": vdata}, ensure_ascii=False).encode("utf-8"))   # 순서는 입력 파일 순서대로라 같은 입력이면 같다
-    for f in (os.path.join(HERE, "site_template.html"), os.path.join(SR, "viz_template.html"), os.path.abspath(__file__)):
+    for f in (os.path.join(HERE, "site_template.html"), os.path.abspath(__file__)):
         with open(f, "rb") as fh:
             h.update(fh.read())
     return h.hexdigest()[:16]
@@ -511,21 +546,14 @@ def build(prev=None):
     split.install_guard(final=False)
     import viz   # 감시를 켠 뒤에 불러온다
     vdata = viz.build(None)
-    # 공개 분석 페이지에는 수집 진행 상태를 싣지 않는다
-    for sv in vdata["notes"]:
-        vdata["notes"][sv]["notes"] = [n for n in vdata["notes"][sv]["notes"] if not n.startswith("아직 분석에 들지 않은")]
     reg = {r["season"]: r for r in jload(os.path.join(D, "registry.json"))["seasons"]}
     lv = live(reg)
-    lastp = [x["preds"][-1] for x in lv if x["preds"]]
-    methods = [lastp[-1]["method"]] if lastp else []   # 가장 최근 예측의 방법 (S42 도중에 바뀜 — 2026-10-18)
     pst = past(vdata["seasons"], reg)
     lat = latest_season(reg)
-    src = curve_source(lat)
-    cvd = conv(vdata, src)
-    data = {"past": pst, "past_pcts": past_pcts(pst), "live": lv, "latest": lat, "conv": cvd,
-            "sink": sink(vdata, cvd, reg, src), "back": back(reg), "boss_img": boss_img(),
+    data = {"past": pst, "past_pcts": past_pcts(pst), "live": lv, "latest": lat,
+            "sink": sink(vdata, None, reg, None), "back": back(reg), "boss_img": boss_img(),
             "boss_info": boss_info(list(reg) + [x["season"] for x in lv]), "el_img": el_img(),
-            "analysis": {"seasons": vdata["season_list"], "live_method": " · ".join(methods) if methods else default_method()}}
+            "analysis": {"seasons": vdata["season_list"]}}
     content = fingerprint(data, vdata)
     data = {"asof": asof_for(content, prev), "content": content, **data}
     return data, vdata
@@ -537,7 +565,7 @@ def js(obj):
 
 
 def analysis_html(vdata, data):
-    with open(os.path.join(SR, "viz_template.html"), encoding="utf-8") as f:
+    with open(encoding="utf-8") as f:
         tpl = f.read()
     seas = vdata["season_list"]
     m = data["analysis"]["live_method"]
@@ -561,7 +589,7 @@ def analysis_html(vdata, data):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="공개 웹 페이지(index.html·analysis.html·data.json)를 만든다")
+    ap = argparse.ArgumentParser(description="공개 웹 페이지(index.html·data.json)를 만든다")
     ap.add_argument("--out", required=True)
     ap.add_argument("--prev", help="지금 공개된 data.json (내용이 같으면 기준 시각을 그대로 둔다)")
     a = ap.parse_args()
@@ -574,8 +602,6 @@ def main():
         html = f.read().replace("/*DATA*/", js(data)).replace("<!--FOOTER-->\n", FOOTER, 1)
     with open(os.path.join(a.out, "index.html"), "w", encoding="utf-8") as f:
         f.write(html)
-    with open(os.path.join(a.out, "analysis.html"), "w", encoding="utf-8") as f:
-        f.write(analysis_html(vdata, data))
     with open(os.path.join(a.out, ".nojekyll"), "w") as f:
         f.write("")
     if data["el_img"]:

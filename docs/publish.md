@@ -6,7 +6,7 @@
 | 무엇 | 어디 |
 |---|---|
 | 공개 레포 | <https://github.com/jgaram/nikke-soloraid-cutoff> (`main`: 코드·문서, `gh-pages`: 웹) |
-| 웹 | <https://jgaram.github.io/nikke-soloraid-cutoff/> — 첫 화면 탭 셋(「이번 시즌」: 최종 컷 예측 · 계산기, 「지난 시즌」 `#past`: 지난 시즌 커트라인 · 실제로 낸 예측 · 되돌려 보기 · 시즌별 침수 비교, 「방법」 `#method`: 작업 흐름 · 로직 · 검증 설명), `analysis.html`(분석 페이지 — 방법 탭에서 링크) |
+| 웹 | <https://jgaram.github.io/nikke-soloraid-cutoff/> — 첫 화면 탭 셋(「이번 시즌」: 한섭 최종 컷 예측 — 새 모형 M3만, 「지난 시즌」 `#past`: 지난 시즌 커트라인 · 실제로 낸 예측 · 되돌려 보기 · 시즌별 침수 비교, 「방법」 `#method`: 작업 흐름 · 로직 · 검증 설명). 2026-11-07부터 계산기·일섭·글섭 예측·`analysis.html`은 없다 |
 | 라이선스 | CC0 1.0 (사용자 결정) |
 | 이름 | 처음 `nikke-solo-percent`로 만들었다가 같은 날 `nikke-soloraid-cutoff`로 바꿨다 (사용자 결정). GitHub가 옛 레포 주소는 넘겨 주지만 Pages 주소는 넘겨 주지 않는다 |
 | 만드는 도구 | `tools/publish/build_public.py`(공개 레포 내용) · `tools/publish/site.py`(웹) · `.github/workflows/publish.yml`(복사 — 손으로 실행) |
@@ -119,6 +119,22 @@
 손으로 확인: `python3 -I tools/publish/build_public.py --out {임시}/pub --site {임시}/site`
 
 ## 웹 화면 (2026-10-16 사용자 결정)
+
+### 2026-11-07 사용자 결정 — 웹에는 새 모형 M3만 (WP7, [docs/solo-raid-method.md](solo-raid-method.md) 「WP7 정함」)
+
+아래 2026-10-16~10-21 항목 가운데 계산기·서버 셋 예측·`analysis.html`·F 설명은 이 절이 바꾼다 (옛 기록으로 남겨 둠).
+
+- **「이번 시즌」**: 한섭 최종 1·3·10% 컷만 (가운데 값 + 80% 구간 — 보정한 `i80`). 읽는 파일은 `data/solo-raid/S{n}/predict/T{T}/m3_T{T}.json`뿐이다 (`site.py`의 `m3_pred`·`live`). F의 `predict_T*.json`은 읽지 않는다.
+  M3가 실패하거나 시간 한도를 넘긴 칸(`status: fallback`, 점마다 `src: "F"`)은 F 한섭 값을 그대로 올리고 숫자 옆에 「대체(F)」를 붙인다 (표·그래프 속이 빈 점·풍선·칸 머리). F의 이름·숫자는 이 표시 말고 웹에 내지 않는다.
+  서버 고르기는 「지난 시즌」 탭(커트라인·침수 관측)에만 남는다. 계산기 카드(세 칸 계산기·침수 곡선)는 뺐다 (M3가 내지 않음).
+- **「지난 시즌」**: 지난 시즌 커트라인(서버 셋 — 관측)과 시즌별 침수 비교(관측 점)는 그대로. 「되돌려 보기」는 M3 22시즌 — `data/solo-raid/analysis/backtest_M3.json`
+  (`tools/solo_raid/backtest_web_m3.py`가 만든다: WP14b `r7/wp14/pred_k4flbudget_D1.json` + `m3_calib.backtest`(시즌마다 앞 시즌만으로 낸 보정) + `answer_key.json` 실제 컷. 한섭 1·3·10%, 줄 `[T, 가운데, 80% 아래, 80% 위]` — 신뢰도·기록 수 없음).
+  끝난 시즌의 되돌려 보기 칸이 `analysis/m3/backtest/pred_S{n}.json`으로 더해지면 도구가 합쳐 읽는다 (새 시즌이 끝날 때 `backtest_web_m3.py`를 다시 돌린다). 옛 `backtest_F.json`·`backtest_web.py`는 기록으로만 남고 웹은 읽지 않는다.
+  「실제로 낸 예측」은 M3 예측 파일이 있는 시즌부터 (S42까지는 F라 웹에서 뺌 — 기록은 레포에 그대로). 채점 `score.json`에 `method` 줄이 있으면 M3 줄만 쓴다.
+- **「방법」**: M3로 다시 썼다 — 컷 예측(M3 설명 · 보정 구간 · 대체(F)), 검증과 한계(개발 검증뿐·시험 시즌 없음, 22시즌 숫자는 WP14 결과, G6 판정: 자료를 다 표현하지 못한 곳이 있음 · 10%는 조정 시즌에 맞춰졌을 수 있음). 계산기 절은 없다.
+- **`analysis.html`**(viz.py 화면)은 F 정확도라 만들지 않는다 (링크도 뺌). `site.py`의 F 함수(`curve_source`·`conv`·`analysis_html`)는 레포 기록으로 남겼고 쓰지 않는다.
+- **공개 레포 허용 목록**에 M3 길을 더했다: `tools/solo_raid/lab7/*.py`·`lab7/requirements.txt`·`lab6/*.py` (lab7이 lab6을 불러 씀). `backtest_M3.json`은 웹 데이터로만 쓰이고(`data/`는 허용 목록 밖, backtest_F.json과 같음) 공개 레포 파일이 아니다.
+  `build_public.py` 검사(BAD_TEXT·1MB·형식)는 이 변경으로 지나는 것을 확인했다 (2026-11-07).
 
 첫 화면(`index.html`, `site_template.html`)은 탭 셋이다. 서버(한섭·일섭·글섭)를 바꾸면 모두 바뀐다 (방법 탭에서는 서버 막대를 숨긴다).
 

@@ -5,6 +5,8 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 처음에는 세션 하나가 `send_later`로 정해진 시점(T = 12·18·24·36·48·72·96)마다 깨는 방식이었다가 같은 날 바꿨다 (사용자 결정).
 
 - **진행 중:** 목적은 진행 중 레이드 예측이다. 6시간 칸마다 수집 → 예측 → 커밋 → 웹.
+  **S43부터 웹에 나가는 예측은 M3다** (2026-11-07 사용자 결정 — [method 「WP7 정함」](solo-raid-method.md#wp7-정함-2026-11-07-kst--사용자-지시-예측모델-만든거-운영에-적용하자-g6-답)).
+  F도 칸마다 함께 내서 커밋한다 (대비·참고, 웹에는 안 나감). M3가 실패하거나 75분을 넘은 칸은 F 한섭 값을 「대체(F)」로 올린다. 웹은 한섭 1·3·10%만.
 - **끝난 뒤:** 마지막 수집(종료 후 인증)과 후처리까지는 시즌 전용 세션(Sonnet)이 한다. 이어서 그 세션이 **끝난 뒤 보강 세션(Opus)** 을 새로 열고,
   데이터 점검·예외 처리·자기 예측 채점·수집 끝 표시·분석 갱신·README를 그 세션이 사람 없이 한다 (2026-11-01 사용자 결정 — 아래 「3. 끝난 뒤」).
 
@@ -31,7 +33,11 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
   - 예외 (사용자 결정 2026-10-19): 시범 기간이라 **로직에 분명한 잘못이 있으면 고치고 지난 예측에 소급한다.** S42는 T60부터 서버 미상 줄 기본이 mono(점수 비교 거르기, 분석 4.7)이고
     T6~T54도 같은 방법으로 다시 냈다 (예측 JSON `recalc`에 원래 커밋).
   기본을 바꾸는 판정은 분석 문서의 기준(개발 시즌 8개 이상, `criteria.json`)으로만 한다.
-  - **예측 방법 = 그 시즌의 고정 모델 파일** `data/solo-raid/analysis/model_S{n}.json` (2026-10-18부터, `predict_run.sh` 기본 — 없으면 예측이 멈춘다).
+  - **S43부터 주 예측 = M3 고정 모델 파일** `data/solo-raid/analysis/model_S{n}_m3.json` (2026-11-07 사용자 결정, `m3_freeze.py`가 만든다 — 사전·꼴·보정 층·고정 코드 커밋을 담는다).
+    `live_tick.sh finish`가 F 다음에 `tools/solo_raid/m3_live.py`로 낸다 → `predict/T{T}/m3_T{T}.json`·`.txt`·`m3_run.log`. 칸 하나 보통 5분 안팎, 최악 약 1시간 (4코어, 한도 75분).
+    M3는 모델 파일의 `code` 커밋 코드로 돈다 (main의 연구 코드가 바뀌어도 진행 중 예측은 그대로). 시즌 안에서는 모델 파일을 다시 만들지 않는다.
+    모델 파일이 없는 시즌은 F만 낸다 (S42까지). 아래 F 설명은 대비로 그대로 돈다.
+  - **예측 방법 = 그 시즌의 고정 모델 파일** `data/solo-raid/analysis/model_S{n}.json` (2026-10-18부터, `predict_run.sh` 기본 — 없으면 예측이 멈춘다). S43부터는 F 대비.
     분석 4.3에서 고른 F: 최근 5시즌 prior + 라벨 줄 수준 갱신 + 지난 시즌 오차로 구간 넓히기. 시즌 안에서는 모델 파일을 다시 만들지 않는다.
     S42만 예외로 도중에 바뀌었다 — T6~T24는 S41 한 시즌 prior, T30부터 F (사용자 결정 2026-10-18, [분석 4.5](solo-raid-analysis.md#45-고정과-미래-시험)).
     그 뒤 T6~T24는 10-18 11시 뒤 F로 다시 냈다 (사용자 결정 2026-10-18 — 시점별 예측을 같은 방법으로. T까지 게시된 것만 남긴 사본, 원래 S41 한 시즌 prior 기록은 커밋 `41cb647`·`152c440`·`51edb28`·`1843660`).
@@ -56,7 +62,7 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 |---|---|
 | 이벤트 오픈 | 10-15(목) 12:00 (공지 2026-10-05 「10월 8일 업데이트 공지」) |
 | 챌린지 시작 `c_start` | 10-17(토) 05:00 (3일차 05:00) |
-| 첫 예측 T=6 | 10-17 11:01 실행 → 웹 11:30~11:50쯤 |
+| 첫 예측 T=6 | 10-17 11:01 실행 → 웹 11:30~11:50쯤 (M3부터는 M3 몇 분~1시간이 더해져 대개 12시 안팎, 늦으면 12:40쯤) |
 | 마지막 예측 T=120 | 10-22(목) 05:01 실행 (종료 04:59:59를 덮는 칸) |
 | 종료 후 수집 | 10-26(월) 05:01 실행 (`e_end` 05:00) → 예약 작업이 저절로 꺼짐 |
 
@@ -81,7 +87,10 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
      응답의 `next_run_at`이 다음 칸 1분 뒤인지 확인한다.
    - 지난 시즌 예약 작업이 남아 있으면 `delete_trigger`로 지운다 (전용 세션은 예약 작업이 띄운 세션이 아니라 함께 지워지지 않는다).
 5. `data/solo-raid/live.json`: `{"season": "S{n}", "trigger": "trig_…", "session": "session_…", "cron": "…", "model": "…", "on": "켠 KST 시각", "by": "세션 id"}`.
-   **고정 모델 파일 `data/solo-raid/analysis/model_S{n}.json`이 있는지 본다** — 없으면 첫 칸 예측이 멈춘다. 지난 시즌 채점·수집 끝 뒤 `freeze_model.py`로 만든다
+   **M3 모델 파일 `data/solo-raid/analysis/model_S{n}_m3.json`과 F 대비 `model_S{n}.json`이 둘 다 있는지 본다** (S43은 2026-11-07에 만듦 — `m3_freeze.py --season S43`).
+   M3 모델 파일이 없으면 그 시즌은 F만 웹에 나간다 — 켜기 전에 사용자에게 알린다. 모델 파일의 `schedule`(H 120 · 05시 시작)이 이번 `season.json`과 다르면 M3가 모든 칸에서 대체(F)가 된다
+   (꼴이 05시 시작 120시간 시즌용) — 켜기 전에 사용자에게 알린다.
+   F 모델 파일이 없으면 첫 칸 F 예측이 멈춘다. 지난 시즌 채점·수집 끝 뒤 `freeze_model.py`로 만든다
    ([분석 4.5 「S43용 다시 고정」](solo-raid-analysis.md#45-고정과-미래-시험)). 없으면 켜기 전에 사용자에게 알린다.
    **S43은 다시 고정하지 않고 `model_S42.json`을 그대로 옮긴다** (2026-10-20 사용자 결정 — [분석 5.0](solo-raid-analysis.md#50-운영--f-그대로-사용자-결정-2026-10-20), 만드는 법은 [순서표 8](solo-raid-todo.md#8-s43-모델-파일--f-그대로-마지막-s43-c_start-전)).
 6. 커밋(`S{n} 자동 수집 켬`) → push. `season.json`이 올라가 웹에 「챌린지 진행 중 · 첫 예측은 6시간 뒤」가 뜬다 (시작 뒤부터).
@@ -121,9 +130,10 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
    - 종료 3 (빠진 배치) → 출력 끝 줄 JSON 목록을 `args.skip`으로 더해 3을 **한 번만** 다시 → `merge` 다시. 또 3이면 그대로 5로 (빠진 칸은 merge.json에 남는다).
    - 종료 5 (final만, 원본 대기 사진) → `bash tools/solo_raid/live_tick.sh collect --orig`(2처럼 background) → 3 → 4 (한 번만).
    - 그 밖 → `bash tools/solo_raid/live_tick.sh fail merge` → 7.
-5. **마무리:** `bash tools/solo_raid/live_tick.sh finish`.
-   - `run`: 내보내기·커밋(`S{n} 받기 T{T}`)·push → 예측(`predict_run.sh`, 몇 초~1분) → `predict/T{T}/`·후처리 파일·README 줄 커밋(`S{n} 예측 T{T}`)·push.
-     출력 끝에 `[요약]` 줄과 경고(`!!`)가 나온다. 예측이 커밋됐으면 `publish.yml`을 한 번 돌려 웹을 바꾼다 — push로는 돌지 않는다 (2026-11-01,
+5. **마무리:** `bash tools/solo_raid/live_tick.sh finish`를 **Bash `run_in_background`(timeout 7200000)** 로 띄우고 완료 알림을 기다린다 (M3 계산이 최대 약 80분 — 대기 루프를 짜지 않는다, 2026-11-07).
+   - `run`: 내보내기·커밋(`S{n} 받기 T{T}`)·push → F 예측(`predict_run.sh`, 몇 초~1분) → M3 예측(`m3_live.py`, 몇 분~1시간, 실패·75분 넘음이면 대체(F)) →
+     `predict/T{T}/`·후처리 파일·README 줄 커밋(`S{n} 예측 T{T}`, 대체면 `(대체(F))`)·push.
+     출력 끝에 M3 `[요약]` 줄과 경고(`!!`), 이어서 F 요약(참고)이 나온다. 종료 1은 F·M3 둘 다 못 낸 것이다 (이미 기록·커밋됨). 예측이 커밋됐으면 `publish.yml`을 한 번 돌려 웹을 바꾼다 — push로는 돌지 않는다 (2026-11-01,
      [publish 「언제 복사하나」](publish.md#언제-복사하나)). `final`이 끝난 뒤에도 한 번.
    - `final`: 내보내기·커밋·push → `post_all.sh` → `live/final_done.json`, `live.json`의 `season`을 비움 → 커밋(`S{n} 종료 후 수집 끝`)·push.
    - 종료 1 (예측 실패) → 이미 기록·커밋됐다. 7로.
@@ -134,10 +144,10 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
    - 도구가 없거나 실패해도 수집은 돈다 — 반복 일정이 매일 05:01에 깨우므로 e_end 05:01에 종료 후 수집이 그대로 돌고, 그사이 깨우기는 `idle`이다.
      이때 7의 답과 알림에 「예약 작업을 못 바꿨다 — 끝나면 사람이 꺼야 함」을 적는다.
 7. **마지막 답** (세션 기록에 남는다. 해석을 덧붙여 확신을 키우지 않는다).
-   **알림:** 실패·멈춤, 첫 예측(T=6), 마지막 예측(T_end), 종료 후 수집 끝, 예약 작업을 못 바꿨을 때만 `PushNotification`(status proactive)으로 첫 줄과 등급·사유를 한두 줄 보낸다
+   **알림:** 실패·멈춤, 첫 예측(T=6), 마지막 예측(T_end), M3 대체(F) 칸, 종료 후 수집 끝, 예약 작업을 못 바꿨을 때만 `PushNotification`(status proactive)으로 첫 줄과 등급·사유를 한두 줄 보낸다
    (지연 도구라 처음 쓸 때 `ToolSearch`의 `select:PushNotification`으로 불러온다).
    그 밖의 칸은 알리지 않는다 (하루 4번 알림을 피함).
-   - `run`: 첫 줄 `S{n} T{T} 예측 — {칸 시각} 칸, {올린 시각} 올림`. 다음에 `finish` 출력의 `[요약]` 줄과 `!!` 경고를 그대로, 받은 글·시트·요청 수를 한 줄로.
+   - `run`: 첫 줄 `S{n} T{T} 예측 — {칸 시각} 칸, {올린 시각} 올림` (대체면 끝에 「· 대체(F)」). 다음에 `finish` 출력의 M3 `[요약]` 줄과 `!!` 경고를 그대로 (F 요약은 한 줄로 줄여 「F 참고」), 받은 글·시트·요청 수를 한 줄로.
      맨 끝에 「검증 안 된 예측」.
    - `final`: 받은 글·관측 수 한 줄과 8에서 연 끝난 뒤 보강 세션 주소 (못 열었으면 「끝난 뒤 보강 세션을 못 열었다 — 「S{n} 끝난 뒤 보강 해」를 시켜야 함」, 알림에도).
    - `idle`: `reason` 한 줄 (예약 작업을 손봤으면 그것도).
@@ -167,6 +177,8 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
    **판단은 Opus가 원본 사진을 직접 보고 [예외 처리 규칙](solo-raid-backfill.md#예외-처리-규칙)대로 한다.** 규칙으로도 못 정하는 후보는 고치지 않고 `decision: later`(`note`에 사유)로 둔 채 다음 단계로 간다 — 관측은 그대로 남는다.
    `later` 수와 항목은 7의 끝 알림에 적어 사람이 나중에 본다.
 4. **자기 예측 채점 (먼저):** `python3 -I tools/solo_raid/score_live.py S{n}` → `predict/score.json` 커밋, 표를 채팅에 옮긴다 (판 2에는 잠긴 시즌이 없어 `--final`은 쓰지 않는다).
+   M3 시즌(S43부터)은 표가 [M3]·[F] 둘로 나오고 끝에 M3 score 한 줄 (연구와 같은 셈 — `m3_summary`)이 나온다. **M3 줄이 웹에 나간 예측의 미래 시험이다** (대체(F) 칸 포함, 칸 수를 적는다) —
+   S43이 M3의 첫 실전 시험이다 ([method 「WP7」 4](solo-raid-method.md#wp7-운영-반영--사용자가-wp6에서-지시할-때만-2026-11-01-계획만--원칙-1)). 결과 한 줄을 method 문서 「WP7 결과」에도 적는다.
    끝나기 전에 커밋된 예측을 고치기 전에 한 번 채점한 결과라 독립 시험 기록이다 (모든 새 시즌, split 판 2 — 2026-10-17 사용자 결정).
    T마다 도구 커밋이 다를 수 있으니 `run.tool_head`별로 적는다 — `score.json`의 `runs`(T마다 도구 커밋·prior·core sha1)·`tool_heads`에 있고, 표준 출력 표에도 T마다 나온다 (2026-10-17).
    방법(고정 모델 이름 또는 「prior 하나」)이 둘 이상이면 방법별로 나눠 적는다 (`methods`, 줄의 `method`). S42는 T6~T24를 F로 다시 내서 파일로는 모두 F다 — T6~T24는 T30 뒤에 낸 재산정이라 T30~ 진행 중 예측과 나눠 적는다 (`recalc`, 2026-10-18).
@@ -176,6 +188,14 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 6. **분석 갱신:** [일괄 수집 「8. 분석 갱신」](solo-raid-backfill.md#8-분석-갱신)의 3~5와 같다.
    채점(4)이 먼저다 — 채점 뒤에는 어느 시즌이든 개발에 넣는다 (split 판 2).
    (전에는 「시험 시즌은 채점·분석을 하지 않고 정답 수치를 쓰지 않는다」였다 — 공개 결정 A로 끝난 시즌 정답은 공개한다.)
+6b. **다음 시즌 M3 고정 (M3 시즌만, 6 뒤 — 2026-11-07):** `python3 -I tools/solo_raid/m3_post.py all --season S{n}` (`--season`은 **끝난 시즌**). 4~7시간 걸린다 —
+   `setsid nohup python3 -I tools/solo_raid/m3_post.py all --season S{n} > ${TMPDIR:-/tmp}/m3_post.log 2>&1 < /dev/null &`로 띄우고,
+   Bash `run_in_background`(timeout 7200000)로 `while pgrep -f "m3_post.py all" > /dev/null; do sleep 60; done; tail -30 ${TMPDIR:-/tmp}/m3_post.log` 대기를 건다.
+   2시간 한도로 대기가 끝나면 같은 대기를 다시 건다. 컨테이너가 바뀌어 프로세스가 없고 끝 줄도 없으면 같은 명령을 다시 띄운다 (이미 된 단계·칸은 건너뛴다 — 칸마다 저장, 묶음마다 커밋·push).
+   하는 일: 끝난 시즌을 1단계에 더함 (`analysis/m3/stage1.json` + 고정 사본 `stage1_through_S{n}.json`, 약 6분) → 그 시즌 되돌려 보기 20칸 (고정 S{n} 모델·끝난 자료 → `analysis/m3/backtest/pred_S{n}.json`, 3~6시간 — 다음 보정 풀·웹)
+   → 다음 시즌 꼴 (`analysis/m3/shape_hist.json` · `S{n+1}/shape.json`) → `m3_freeze.py --season S{n+1}` (M3·F 모델 파일) → 웹 되돌려 보기 `backtest_M3.json`. 단계마다 스스로 커밋·push한다.
+   필요한 것: 채점(4)·수집 끝 표시(5)·분석 갱신(6 — 정답 표 `answer_key.json`에 그 시즌이 있어야 꼴 단계가 돈다)이 먼저, `tools/solo_raid`에 커밋 안 된 변경 없음, 그동안 다른 무거운 계산 없음.
+   실패하면 멈추고 알림에 단계와 로그 끝을 적는다 (다음 시즌 켜기 전에 사람이 본다). 다음 시즌 일정이 05시 시작 120시간이 아니면 고정 단계가 멈춘다 — 그대로 알린다.
 7. README 「시즌 요약」을 채우고 (일괄 수집 형식 + 「예측」 칸: 시점마다 커밋 시각과 등급 — 「자동 실행」 표에 있다 — + 4의 채점 한 줄) 사용자에게 끝을 알린다.
    마지막 push 뒤 `publish.yml`을 한 번 돌린다 ([publish 「언제 복사하나」](publish.md#언제-복사하나) — `analysis/**`·`registry.json`이 바뀌었다).
    알림은 `PushNotification`(status proactive) 한 번: `S{n} 끝난 뒤 보강 끝 — 채점 {1·3% |e| 요약}, 점검 후보 {c}·고침 {f}·later {l}, 분석 갱신 {등급}`. 실패·멈춤도 알린다.
@@ -204,4 +224,6 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 - 2026-10-18: 예측 방법이 시즌 고정 모델 파일(`analysis/model_S{n}.json`)로 바뀜 — S42 T30부터 (사용자 결정, 분석 4.5). 켜기에 모델 파일 확인, 끝난 뒤 채점은 방법별로.
 - 2026-10-18: S42 T6~T24를 F로 다시 내 덮어씀 (사용자 결정 — 웹 시점별 예측을 한 방법으로). 채점은 재산정(T6~T24)·진행 중(T30~)으로 나눔.
 - 2026-10-20: S43도 F 그대로 — 켜기의 모델 파일은 `model_S42.json`을 옮긴 것 (사용자 결정, 분석 5.0 — 피팅 개선 보류).
+- 2026-11-07: **M3 운영** (사용자 지시 「예측모델 만든거 운영에 적용하자」, method 「WP7 정함」) — 주 예측 M3 (`model_S{n}_m3.json`·`m3_live.py`), F는 칸마다 함께 (대비·참고, 웹 안 나감), 실패·75분 넘음이면 대체(F).
+  「2」의 5를 background로 (최대 약 80분), 알림에 대체(F) 칸, 「1」의 5에 M3 모델 파일·일정 확인, 「3」의 4에 M3 채점 (첫 실전 시험), 6b 다음 시즌 M3 고정.
 - 2026-11-01: 끝난 뒤 3~7을 자동으로 (사용자 결정 — 「점검까지 자동으로」, 「마지막 갱신 작업은 Opus가 — Sonnet이 end 이후에 Opus를 여는 거지」). 「2」에 8 끝난 뒤 보강 세션 열기, 「3」의 2·3·7과 보강 프롬프트. 애매한 점검 후보는 `later`로 두고 진행.

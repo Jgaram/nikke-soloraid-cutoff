@@ -7,7 +7,8 @@
 #   bash tools/solo_raid/live_tick.sh collect --orig    (final만) 원본 대기 실행: [e_end − 1시간, e_end)를 한 번 더
 #   bash tools/solo_raid/live_tick.sh merge             merge_obs.py. 종료 코드 3 = 빠진 배치(표준 출력 끝 줄이 Workflow skip 목록),
 #                                                       5 = (final만) 원본 대기 실행이 필요함
-#   bash tools/solo_raid/live_tick.sh finish            내보내기·커밋·push → run: 예측 T → 커밋·push / final: 후처리 → 커밋·push
+#   bash tools/solo_raid/live_tick.sh finish            내보내기·커밋·push → run: F 예측 → M3 예측 (m3_live.py, 최대 약 75분 — 세션은 background로) → 커밋·push
+#                                                       / final: 후처리 → 커밋·push. 종료 1 = F·M3 모두 예측 못 냄
 #   bash tools/solo_raid/live_tick.sh fail STEP [NOTE]  받은 데까지 내보내고 실패를 기록·커밋·push (예측은 내지 않는다)
 #
 # 종료 코드: collect 4 = 403·429 (그 시즌 받기를 멈춘다, docs/solo-raid-backfill.md 「멈출 때」), 1 = 두 번 실패.
@@ -140,18 +141,38 @@ finish)
   push
   if [ "$ACT" = run ]; then
     OUT=$DEST/predict/T$T
-    # 다른 실행이 같은 칸을 먼저 올렸으면 겹쳐 쓰지 않는다
-    if [ "${LIVE_DRY:-0}" != 1 ] && git -C "$REPO" cat-file -e "origin/main:$DEST_REL/predict/T$T/predict_T$T.json" 2>/dev/null; then
+    # 다른 실행이 같은 칸을 먼저 올렸으면 겹쳐 쓰지 않는다 (M3 운영부터는 m3_T가 칸 끝 표시 — F만 있는 옛 칸도 건너뛴다)
+    if [ "${LIVE_DRY:-0}" != 1 ] && { git -C "$REPO" cat-file -e "origin/main:$DEST_REL/predict/T$T/m3_T$T.json" 2>/dev/null \
+         || { [ ! -f "$REPO/data/solo-raid/analysis/model_${NAME}_m3.json" ] && git -C "$REPO" cat-file -e "origin/main:$DEST_REL/predict/T$T/predict_T$T.json" 2>/dev/null; }; }; then
       echo "T$T 예측이 이미 main에 있다 — 예측을 건너뛴다"
       exit 0
     fi
+    # 1) F (대비·참고, 몇 초~1분). 실패해도 M3는 낸다.
+    fnote=""
     bash "$REPO/tools/solo_raid/predict_run.sh" "$DEST/state" "$T" --out "$OUT" > "$WORK/predict_stdout.txt" 2>&1 \
-      || { tail -20 "$WORK/predict_stdout.txt" >&2; $TICK record "$PLAN" "예측 실패" "$RUN" "predict_run.sh" > /dev/null; commit "$NAME 예측 T$T 실패"; push; exit 1; }
-    $TICK record "$PLAN" ok "$RUN" > /dev/null
-    commit "$NAME 예측 T$T"
+      || { tail -20 "$WORK/predict_stdout.txt" >&2; fnote="F 예측 실패 (predict_run.sh)"; }
+    # 2) M3 (주 예측, WP7 2026-11-07 — 칸 최악 약 1시간, 한도 75분). 모델 파일이 없는 시즌(S42까지)은 F만.
+    m3rc=none
+    if [ -f "$REPO/data/solo-raid/analysis/model_${NAME}_m3.json" ]; then
+      m3rc=0
+      python3 -I "$REPO/tools/solo_raid/m3_live.py" "$DEST/state" "$T" --out "$OUT" > "$WORK/m3_stdout.txt" 2>&1 || m3rc=$?
+    fi
+    case $m3rc in
+      0) st=ok ;;
+      3) st="대체(F)" ;;
+      none) st=$([ -z "$fnote" ] && echo ok || echo "예측 실패") ;;
+      *) st="예측 실패" ;;
+    esac
+    $TICK record "$PLAN" "$st" "$RUN" "$fnote" > /dev/null
+    commit "$NAME 예측 T$T$([ "$st" = ok ] || echo " ($st)")"
     push
-    echo "=== 예측 T$T 요약 ($OUT/predict_T$T.txt)"
-    grep -E '^(\[요약\]|!! )' "$OUT/predict_T$T.txt" || head -5 "$OUT/predict_T$T.txt"
+    if [ "$m3rc" != none ]; then
+      echo "=== M3 예측 T$T 요약 ($OUT/m3_T$T.txt)"
+      cat "$OUT/m3_T$T.txt" 2>/dev/null || tail -5 "$WORK/m3_stdout.txt"
+    fi
+    echo "=== F 예측 T$T 요약 — 참고, 웹에는 안 나감 ($OUT/predict_T$T.txt)"
+    grep -E '^(\[요약\]|!! )' "$OUT/predict_T$T.txt" 2>/dev/null || echo "(F 없음 — $fnote)"
+    if [ "$st" = "예측 실패" ]; then exit 1; fi
   else
     note=""
     bash "$REPO/tools/solo_raid/post_all.sh" "$DEST/state" > "$WORK/post_all.txt" 2>&1 || { note="post_all.sh 실패 — $(tail -3 "$WORK/post_all.txt" | tr '\n' ' ')"; echo "$note" >&2; }

@@ -28,6 +28,9 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 ALLOW = [
     "tools/solo_raid/*.py",
     "tools/solo_raid/*.sh",
+    "tools/solo_raid/lab7/*.py",   # M3 길 (2026-11-07 — WP7)
+    "tools/solo_raid/lab7/requirements.txt",
+    "tools/solo_raid/lab6/*.py",   # lab7이 불러 쓴다 (anchor 등)
     "tools/solo_raid/*.html",
     "tools/publish/*.py",
     "tools/publish/*.html",

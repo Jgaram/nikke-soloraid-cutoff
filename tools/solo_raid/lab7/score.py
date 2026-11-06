@@ -36,6 +36,8 @@ WP11 스위치 (2026-11-03, 「WP11」 — 끄면 위 규칙 그대로, 출력 J
          퍼짐 s_T = 풀 안 같은 T 칸(tkey)의 |d| 평균 (그 T의 풀 시즌이 2개 미만이면 풀 전체 평균), z = d ÷ s_T(그 칸의 T)를 풀에서 모아 10%·90% 분위
          → 보정 구간 = 중앙 × exp(s_T · [z10, z90]) (위아래 폭이 달라도 됨, 중앙은 그대로). 풀 10칸 미만이면 모형 구간 그대로.
          cov·w80은 보정 구간, cov_model_*·w80_model은 모형 구간 (prev와 같은 꼴). calib[시즌][창] = {z10, z90, n, s_T}.
+  --calib emp1   WP14c C1 (2026-11-06): emp와 같고 z 분위만 유한 표본 분위 — 풀 n칸이면 z를 작은 순으로 놓아 아래 ⌊(n+1)·0.1⌋번째 · 위 ⌈(n+1)·0.9⌉번째
+         (분할 등각 예측의 표준 보정, Vovk 외 2005 · Lei 외 2018). 풀은 앞 시즌만 (emp와 같음).
 
 예측 파일 (공통 꼴):
   {"about": str, "method": "F", "data_ver": "D0",
@@ -260,7 +262,7 @@ def snum(s):
 
 
 def calibrate_emp(cells, truth, pcts, mode):
-    """실제 오차로 구간 (WP11 ⓒ, 위 docstring). mode = "emp"(앞 시즌) | "emp_loso"(그 시즌 빼고). 반환 (칸 목록, 시즌별 정보)."""
+    """실제 오차로 구간 (WP11 ⓒ, 위 docstring). mode = "emp"(앞 시즌) | "emp_loso"(그 시즌 빼고) | "emp1"(앞 시즌, 유한 표본 분위 — WP14c). 반환 (칸 목록, 시즌별 정보)."""
     ds = collections.defaultdict(list)       # (시즌, 창) → [(tkey, d)]
     for c in cells:
         s, T, q = c["season"], c["T"], c["pct"]
@@ -276,7 +278,7 @@ def calibrate_emp(cells, truth, pcts, mode):
     for s in seasons:
         info[s] = {}
         for w in ("main", "end"):
-            pool_s = [t for t in seasons if (snum(t) < snum(s) if mode == "emp" else t != s) and ds[(t, w)]]
+            pool_s = [t for t in seasons if (snum(t) < snum(s) if mode in ("emp", "emp1") else t != s) and ds[(t, w)]]
             pool = [(t, k, d) for t in pool_s for k, d in ds[(t, w)]]
             if len(pool) < CALIB_MIN:
                 info[s][w] = dict(z10=None, z90=None, n=len(pool), s_T=None)
@@ -288,7 +290,12 @@ def calibrate_emp(cells, truth, pcts, mode):
             sT = {k: (st.mean(x for _, x in v) if len({t for t, _ in v}) >= 2 else allm) for k, v in byk.items()}
             sT["_all"] = allm
             z = [d / sT[k] if sT[k] > 0 else 0.0 for _, k, d in pool]
-            info[s][w] = dict(z10=quantile(z, 0.1), z90=quantile(z, 0.9), n=len(pool), s_T={k: round(v, 6) for k, v in sT.items()})
+            if mode == "emp1":      # 유한 표본 분위: 아래 ⌊(n+1)·0.1⌋번째 · 위 ⌈(n+1)·0.9⌉번째 (1부터 셈, n >= CALIB_MIN이라 1..n 안)
+                zs, nn = sorted(z), len(z)
+                z10, z90 = zs[max(1, math.floor((nn + 1) * 0.1)) - 1], zs[min(nn, math.ceil((nn + 1) * 0.9)) - 1]
+            else:
+                z10, z90 = quantile(z, 0.1), quantile(z, 0.9)
+            info[s][w] = dict(z10=z10, z90=z90, n=len(pool), s_T={k: round(v, 6) for k, v in sT.items()})
     out = []
     for c in cells:
         s, T, q = c["season"], c["T"], c["pct"]
@@ -311,7 +318,7 @@ def calibrate_emp(cells, truth, pcts, mode):
 def calibrate(cells, truth, pcts, mode):
     """구간 보정 층 (WP9, 위 docstring). mode가 emp·emp_loso면 calibrate_emp (WP11). 반환 (칸 목록 — 창 칸의 i80은 보정 구간·i80_m에 모형 구간, 시즌별 k).
     k = {시즌: {"main": {"k": 배수 또는 None, "n": 풀 칸 수}, "end": ...}}."""
-    if mode in ("emp", "emp_loso"):
+    if mode in ("emp", "emp_loso", "emp1"):
         return calibrate_emp(cells, truth, pcts, mode)
     rs = collections.defaultdict(list)       # (시즌, 창) → [r]
     for c in cells:
@@ -438,7 +445,7 @@ def main():
     ap.add_argument("--weights", choices=sorted(WEIGHTS), default=DEFAULT_WEIGHTS,
                     help="third = ⅓·⅔ 새 규칙(기본) · half = 옛 ½·½ 규칙(옛 결과 재현)")
     ap.add_argument("--g5", action="store_true", help="지킬 조건 g5 「F만큼」 (22시즌 전체·나머지 16시즌 둘 다) — WP9")
-    ap.add_argument("--calib", choices=("prev", "loso", "emp", "emp_loso"), help="구간 보정 층: prev = 앞 시즌만, loso = 그 시즌 빼고 전부 — WP9 · emp·emp_loso = 실제 오차로 구간 — WP11")
+    ap.add_argument("--calib", choices=("prev", "loso", "emp", "emp_loso", "emp1"), help="구간 보정 층: prev = 앞 시즌만, loso = 그 시즌 빼고 전부 — WP9 · emp·emp_loso = 실제 오차로 구간 — WP11 · emp1 = emp + 유한 표본 분위 — WP14c")
     ap.add_argument("--g5-recent", action="store_true", help="g5를 최근 12시즌(S31~S42)에서도 본다 — WP11 (--g5와 함께)")
     a = ap.parse_args()
     if a.g5_recent and not a.g5:
@@ -465,7 +472,7 @@ def main():
             out["g5"] += " + 최근 12시즌 S31~S42 (WP11)"
     if a.calib:
         out["calib"] = dict(mode=a.calib, min_cells=CALIB_MIN, q=CALIB_Q, about="구간 보정 층 (WP9, score.py 머리 docstring): cov·w80은 보정 구간, cov_model_*·w80_model은 모형 구간")
-        if a.calib in ("emp", "emp_loso"):
+        if a.calib in ("emp", "emp_loso", "emp1"):
             out["calib"].update(q=[0.1, 0.9], about="실제 오차로 구간 (WP11 ⓒ, score.py 머리 docstring): cov·w80은 보정 구간, cov_model_*·w80_model은 모형 구간")
     for gname, qs in GROUPS:
         kinfo = {}
@@ -506,7 +513,7 @@ def main():
                     f"{k}: 포함 {pct(sp[k]['cov_main'], 2)}/{pct(sp[k]['cov_end'], 2)} (모형 {pct(sp[k]['cov_model_main'], 2)}/{pct(sp[k]['cov_model_end'], 2)}) "
                     f"폭 {pct(sp[k]['w80']['main'], 1)}/{pct(sp[k]['w80']['end'], 1)} (모형 {pct(sp[k]['w80_model']['main'], 1)}/{pct(sp[k]['w80_model']['end'], 1)})"
                     for k in ("all", "tune", "rest")))
-            for n in ([ref["method"]] + names) if a.calib in ("emp", "emp_loso") else []:
+            for n in ([ref["method"]] + names) if a.calib in ("emp", "emp_loso", "emp1") else []:
                 ki = kinfo["F" if n == ref["method"] else n]
                 for w, wn in (("main", "초반"), ("end", "막판")):
                     zs = [(s, v[w]["z10"], v[w]["z90"]) for s, v in sorted(ki.items(), key=lambda t: snum(t[0]))]

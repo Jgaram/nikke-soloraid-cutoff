@@ -165,6 +165,11 @@ def record(plan_f, status, run=None, note=""):
     if pl["action"] == "run" and os.path.exists(pj):
         o = json.load(open(pj, encoding="utf-8"))
         row["grade"] = {k: ((v or {}).get("warning") or {}).get("level") for k, v in (o.get("servers") or {}).items()} or None
+    mj = os.path.join(dest, "predict", f"T{pl.get('T')}", f"m3_T{pl.get('T')}.json")   # M3 (WP7, 2026-11-07) — 웹에 나가는 예측
+    if pl["action"] == "run" and os.path.exists(mj):
+        o = json.load(open(mj, encoding="utf-8"))
+        row["m3"] = {"status": o.get("status"), "secs": (o.get("run") or {}).get("secs"), "conv": (o.get("fit") or {}).get("conv"),
+                     "fallback": (o.get("fallback") or {}).get("reason")}
     os.makedirs(os.path.join(dest, "live"), exist_ok=True)
     with open(os.path.join(dest, "live", "ticks.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -178,6 +183,10 @@ def record(plan_f, status, run=None, note=""):
     win = f"{(w[0] or '')[5:16]} ~ {(w[1] or '')[5:16]}" if w[0] else "—"
     nums = f"{row.get('new_posts', '—')}·{row.get('sheets', '—')}·{row.get('requests', '—')}({row.get('req_fail', '—')})"
     grade = " ".join(f"{k}{v}" for k, v in (row.get("grade") or {}).items() if v) or "—"
+    if row.get("m3"):   # M3 운영부터: 「M3 n분」 또는 「대체(F)」, 그 뒤에 F 등급 (참고)
+        m = row["m3"]
+        head = f"M3 {round((m.get('secs') or 0) / 60)}분" if m.get("status") == "ok" else ("대체(F)" if m.get("status") == "fallback" else "M3 실패")
+        grade = f"{head} · F {grade}"
     label = f"T{row['T']}" if pl["action"] == "run" else "종료 후"
     line = f"| {label} | {win} | {status}{(' — ' + note) if note else ''} | {row['done'][5:16]} | {nums} | {grade} |\n"
     open(rd, "w", encoding="utf-8").write(txt.rstrip("\n") + "\n" + line)   # 「자동 실행」 표는 README 맨 끝에 둔다

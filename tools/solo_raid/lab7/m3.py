@@ -20,6 +20,22 @@
     컷 모양 r과 침수 모양 ℓ은 창 시즌 평균 곡선(지금 사전의 mean_coef)에 묶고, ℓ 계수에 상수 ln m을 더한다 (B-스플라인 합 1 — 곡선 전체가 ln m만큼 움직임, P × m).
     꼴: 주성분 1개 φ = [r 0 · ℓ 1], 사전 분산 = 창 시즌 ℓ 띠 평균(l12 2..11)의 표본 분산 − 평균 사후 분산 (PACE와 같은 잡음 빼기, 바닥 0.01², 창 2시즌 미만이면 0.3²).
     창 k 고르기·a의 국소 수준·그 밖 모수 사전은 그대로. 끄면 지금 사전 그대로.
+  prior·predict --shape FILE [--dev] (WP13a, 모두 기본 끔 — 끄면 지금 계산·출력 그대로): FILE = r7/wp13/shape_D1.json (wp13_shape.py merge; 형식은 docs 「WP13」·wp13_*_shape.py).
+    곡면을 앞 시즌만으로 낸 실제 꼴에 박는다. 침수 P(h) = m·P̄_s(h) (h 격자 위 선형 보간, u = h/H), 컷 R(w) = m_c·G_s(w) (w 격자 wg 위, R(0) = 0). 서버 성분(d_k·κ_k·ψ_k)·x항 β·관측 층은 그대로.
+    칸 모수 v = [a, ln m, ln m_c, (dev) ln t_d, (dev) ξ_k, NUIS...]. 사전: a는 지금 규칙(국소 수준) · ln m ~ N(lnm_prior) · ln m_c ~ N(lnmc_prior) · nuisance 지금 그대로.
+    --dev 편차 층: 맞힐 칸 T에서 시작 h < T인 일차 d마다 ln t_d ~ N(0, τ_d²) (P = m·Σ_d t_d·A_day[d], 아직 안 온 일차는 t_d = 1) + 컷 주성분 점수 ξ_k ~ N(0, λ_k)
+    (ΔR_i = m_c·ΔG_i + Σ ξ_k Δφ_k,i, 증가 지킴 ΔR ≥ 1e-3·m_c·ΔG). 편차 크기(τ·λ)는 꼴 파일의 앞 시즌 값으로 고정 — 이번 시즌에서 배우지 않는다.
+    --dev-parts flood,m1,cut 중 쉼표 목록 (기본 flood,cut = 위 그대로; --dev와 함께만; WP13c): flood = 지난 일차 전부의 t_d · m1 = 첫날 t_1만 (flood와 함께 못 씀) · cut = 컷 PC ξ.
+    빼면 그 층 모수가 없다 (cut이 없으면 n_xi = 0; flood·m1 둘 다 없으면 P = m·P̄). --dev-tau in|oos (기본 in = 꼴 파일 tau.per_day 시즌 안 분산 · oos = flood.tau_oos.per_day 앞 시즌 t_true의 시즌 밖 흩어짐; 파일에 없으면 멈춘다).
+    기본이 아닐 때만 출력 머리 shape·prior shape·shape_info에 dev_parts·dev_tau가 붙고 (기본 출력은 그대로), --out이 다르게 만들어졌으면 멈춘다.
+    prior --shape: 지금 prior() 결과(a 사전·nuisance·창 k) 위에 out["shape"] = {sha1, dev, flood, cut}을 붙인다 (캐시 폴더는 안 나눔). predict --shape: 출력 머리에 shape {sha1, dev}.
+    칸 info에 shape_info (shape·dev·n_t·n_xi·bind, ln m·ln m_c·ln t_d·ξ의 사후 중앙·sd). --out이 shape와 다르게 만들어졌으면 멈춘다. --clock act·--pin·--ppca와는 함께 못 쓴다.
+    predict --bind m|m0 (--shape와 함께만; WP13b 진단 O1·O3): ln m을 꼴 파일 m_true.lnm (그 시즌 끝난 자료로 맞춘 값, 정답을 쓴 진단) 또는 lnm_prior.mean (앞 시즌 평균)에 묶는다.
+    묶은 자리는 N(0,1) 더미. 쓴 값은 출력 bind_used. (l·r은 shape에 곡선 계수가 없어 못 쓴다; a는 그대로 가능.)
+  predict --save-fit PATH (WP13a, 기본판·shape 모두): 칸마다 끝나고 PATH (gzip JSONL, 칸 한 줄, 이미 있는 (시즌, T)는 건너뛰므로 이어 돌릴 수 있다)에 곡면 값을 덧붙인다.
+    사후에서 고르게 <= 1000뽑기(100개씩 vmap) 위에서: rows_A (A 줄마다 관측 %·KR mu 사후 중앙·잔차 resid·p_contam·p_kr), pit (T − 6 < h <= T A 줄의 PSIS-LOO PIT·pareto_k),
+    pairs (기록 쌍의 곡면 ΔP 사후 중앙·10·90%), 머리 (season·T·H·c0h·variant·bind·n_draws·contam_share_A·n_rows). 글 번호·사람/사진 열쇠 없음. NUTS 칸만 (--map-only와 함께 못 씀).
+    R1~R5 셈은 lab7/wp13_fit_check.py.
 명세 「WP3 명세」 0·1·2·3·4(M3)·5·6절. 좌표: y = ln 점수, w = ln(q/3), u = h/H.
   컷 곡선  ln C(w) = a - R(w),  R(w) = ∫_0^w exp(r(v)) dv      r = 3차 B-스플라인 12개, w ∈ [ln(0.1/3), ln(40/3)] (밖은 끝값 상수)
   침수     P(u) = ∫_u^1 exp(l(v)) dv  (log10 단위, P(1) = 0)   l = 3차 B-스플라인 12개, s = sqrt(u) 등간격 매듭
@@ -264,9 +280,15 @@ def w_of_R(t, R, e0, e1, B=BASIS):
 def surface(theta, y, u, B=BASIS):
     """obs_model 곡면 함수 약속: y[N], u[N,K] -> (mu[3,N,K], P[3,N,K])."""
     import jax.numpy as jnp
-    R, e0, e1 = R_grid(theta["cr"], B)
-    Pg = P_grid(theta["cl"], B)
-    P = jnp.interp(jnp.sqrt(u), jnp.asarray(B["sg"]), Pg)
+    if "Rg" in theta:         # WP13 --shape: 꼴을 박은 격자 값 (ShapeCellProb.theta). 없으면 지금 코드 그대로
+        R, e0, e1 = theta["Rg"], theta["e0"], theta["e1"]
+    else:
+        R, e0, e1 = R_grid(theta["cr"], B)
+    if "Pu" in theta:         # 침수: u = h/H 위 P (log10), 격자 ug는 상수
+        P = jnp.interp(u, theta["ug"], theta["Pu"])
+    else:
+        Pg = P_grid(theta["cl"], B)
+        P = jnp.interp(jnp.sqrt(u), jnp.asarray(B["sg"]), Pg)
     z = jnp.zeros(())
     dl = [z, theta["dJP"], theta["dGL"]]
     ps = [z, theta["pJP"], theta["pGL"]]
@@ -286,7 +308,10 @@ def surface(theta, y, u, B=BASIS):
 def lnC(theta, q, B=BASIS):
     """KR 최종 컷 ln 점수. q = 목표 % (숫자 또는 배열). 0.005~100% 밖은 직선 외삽."""
     import jax.numpy as jnp
-    R, e0, e1 = R_grid(theta["cr"], B)
+    if "Rg" in theta:
+        R, e0, e1 = theta["Rg"], theta["e0"], theta["e1"]
+    else:
+        R, e0, e1 = R_grid(theta["cr"], B)
     w = jnp.log(jnp.asarray(q, jnp.float32) / 3.0)
     wg = jnp.asarray(B["wg"])
     Rq = jnp.where(w < wg[0], R[0] + e0 * (w - wg[0]), jnp.where(w > wg[-1], R[-1] + e1 * (w - wg[-1]), jnp.interp(w, wg, R)))
@@ -537,6 +562,223 @@ class CellProb:
         return lp
 
 
+class ShapeCellProb:
+    """WP13 --shape: 실제 꼴을 박은 칸 모수. CellProb과 같은 인터페이스 (kind·n·n0·start·K·ne·o·off_ix·nz·dep·fixed·bind·set_fixed·theta·logprior).
+    v = [a, ln m, ln m_c, (dev) ln t_d (맞힐 칸 T에서 시작 h < T인 일차마다), (dev) ξ_k (k < pcs.K), NUIS...].  K = 2 + n_t + n_ξ (model()의 core가 그대로 돈다).
+    침수  P(h) = m·P̄(h)  (shape) · m·Σ_d t_d·A_day[d](h)  (dev, 모수 없는 일차의 t_d = 1).  컷  ΔR_i = m_c·ΔG_i + Σ_k ξ_k Δφ_k,i (증가 지킴), R(0) = 0.
+    dev_parts (WP13c): flood = t_d 전부 (기본) · m1 = 첫날 t_1만 · cut = ξ. 없는 층은 모수 없음 (cut 없으면 n_ξ = 0). dev_tau: in = tau.per_day · oos = tau_oos.per_day.
+    bind = "m" (ln m을 m_true에 묶음, 진단 O1) · "m0" (ln m을 lnm_prior.mean에 묶음, 진단 O3). 묶은 자리는 N(0,1) 더미."""
+    kind = "cell"
+
+    def __init__(self, pr, T, bind=None):
+        sh = pr["shape"]
+        fl, ct = sh["flood"], sh["cut"]
+        self.pr, self.shape, self.dev, self.T = pr, sh, bool(sh["dev"]), float(T)
+        self.parts = set(sh.get("dev_parts", DEV_PARTS_DEFAULT).split(","))
+        self.dev_tau = sh.get("dev_tau", "in")
+        self.ne = 0
+        self.nz = 0
+        self.dep = None
+        self.am, self.av = pr["a"]["mean"], pr["a"]["var"]
+        self.H = float(fl["H"])
+        self.hg = np.asarray(fl["h"], float)
+        self.Pbar = np.asarray(fl["P"], float)
+        self.lnm_mu, self.lnm_sd = float(fl["lnm_prior"]["mean"]), math.sqrt(float(fl["lnm_prior"]["var"]))
+        self.lnmc_mu, self.lnmc_sd = float(ct["lnmc_prior"]["mean"]), math.sqrt(float(ct["lnmc_prior"]["var"]))
+        self.wg = np.asarray(ct["wg"], float)
+        if len(self.wg) != len(BASIS["wg"]) or not np.allclose(self.wg, BASIS["wg"], atol=1e-9):
+            raise ValueError("꼴 파일 cut.wg가 m3.BASIS['wg']와 다르다")
+        self.Gc = np.asarray(ct["G"], float)
+        self.dG = np.diff(self.Gc)
+        self.slope0, self.slope1 = float(ct["slopes"][0]), float(ct["slopes"][-1])
+        self.t_days, self.t_sd, self.Aday, self.nxi = [], [], None, 0
+        self.lam = np.zeros(0)
+        self.dphi = np.zeros((0, len(self.dG)))
+        self.use_aday = self.dev and bool(self.parts & {"flood", "m1"})     # 일차 합 Σ A_day 길 (= P̄)
+        if self.dev:
+            edges = [float(x) for x in fl["day_edges"]]
+            self.Aday = np.asarray(fl["A_day"], float)
+            per = [float(x) for x in (fl["tau_oos"] if self.dev_tau == "oos" else fl["tau"])["per_day"]]
+            days = [d for d in range(len(edges) - 1) if edges[d] < self.T - 1e-9]
+            self.t_days = days if "flood" in self.parts else ([d for d in days if d == 0] if "m1" in self.parts else [])
+            self.t_sd = [per[min(d + 1, 5) - 1] for d in self.t_days]
+            pcs = ct["pcs"]
+            self.nxi = int(pcs["K"]) if "cut" in self.parts else 0
+            if self.nxi:
+                self.lam = np.asarray(pcs["lambda"], float).reshape(self.nxi)
+                self.dphi = np.diff(np.asarray(pcs["phi"], float).reshape(self.nxi, -1), axis=1)
+        self.nt = len(self.t_days)
+        self.K = 2 + self.nt + self.nxi
+        o = 1 + self.K
+        self.o = o
+        self.n = self.n0 = o + len(NUIS)
+        self.off_ix = tuple(o + NUIS.index(n) for n in OFF)
+        nu = pr["nuisance"]
+        assert nu["names"] == NUIS
+        self.nmean = np.asarray(nu["mean"], float)
+        cov = np.asarray(nu["cov"], float) + 1e-6 * np.eye(len(NUIS))
+        self.nch = np.linalg.cholesky(cov)
+        self.start = np.concatenate([[self.am, self.lnm_mu, self.lnmc_mu], np.zeros(self.nt + self.nxi), self.nmean])
+        self.fixed = {}
+        self.bind_m = bind if bind in ("m", "m0") else None
+        self.bound = {}
+        if self.bind_m:
+            self.bound = {"lnm": float(fl["m_true"]["lnm"]) if self.bind_m == "m" else self.lnm_mu}
+            self.start[1] = 0.0
+        self.ug = None
+
+    def set_fixed(self, fixed):
+        self.fixed = {k: np.asarray(x, float) for k, x in fixed.items()}
+        if "a" in self.fixed:
+            self.start = np.array(self.start, float)
+            self.start[0] = 0.0
+        return self
+
+    def bind(self, obs):
+        if abs(float(obs["H"]) - self.H) > 1e-6:
+            raise ValueError(f"꼴 파일 H {self.H}가 관측 표 H {obs['H']}와 다르다")
+        self.ug = self.hg / float(obs["H"])
+        if not obs.get("dep"):
+            return self
+        self.dep = {"nk": obs["dep_nk"], "npid": obs["dep_np"], "jH": obs["dep_jH"], "wH": obs["dep_wH"]}
+        self.nz = self.dep["nk"] + self.dep["npid"]
+        self.n = self.n0 + self.nz
+        self.start = np.concatenate([self.start[:self.n0], np.zeros(self.nz)])
+        return self
+
+    def theta(self, v):
+        import jax.numpy as jnp
+        nt, nxi = self.nt, self.nxi
+        lnm = jnp.asarray(self.bound["lnm"]) if "lnm" in self.bound else v[1]
+        m, mc = jnp.exp(lnm), jnp.exp(v[2])
+        if self.use_aday:
+            wd = jnp.ones(self.Aday.shape[0])
+            if nt:
+                wd = wd.at[jnp.asarray(self.t_days)].set(jnp.exp(v[3:3 + nt]))
+            Pu = m * (wd @ jnp.asarray(self.Aday))
+        else:
+            Pu = m * jnp.asarray(self.Pbar)
+        dG = jnp.asarray(self.dG)
+        dR = mc * dG
+        if nxi:
+            dR = dR + v[3 + nt:3 + nt + nxi] @ jnp.asarray(self.dphi)
+        dR = jnp.maximum(dR, 1e-3 * mc * dG)
+        Rc = jnp.concatenate([jnp.zeros(1), jnp.cumsum(dR)])
+        i0, f0 = BASIS["i0"], BASIS["f0"]
+        R = Rc - ((1 - f0) * Rc[i0] + f0 * Rc[i0 + 1])
+        d = {"a": v[0], "Rg": R, "e0": mc * self.slope0, "e1": mc * self.slope1, "Pu": Pu, "ug": jnp.asarray(self.ug)}
+        for k, x in self.fixed.items():
+            d[k] = jnp.asarray(x) if x.ndim else jnp.asarray(float(x))
+        o = self.o
+        d.update({n: v[o + i] for i, n in enumerate(NUIS)})
+        if self.dep:
+            d.update(dep_fields(d, v[o + len(NUIS):], **self.dep))
+        return d
+
+    def logprior(self, v):
+        import jax.numpy as jnp
+        from jax.scipy.linalg import solve_triangular
+        nt, nxi = self.nt, self.nxi
+        lp = _nlp(v[0], 0.0, 1.0) if "a" in self.fixed else _nlp(v[0], self.am, math.sqrt(self.av))
+        lp += _nlp(v[1], 0.0, 1.0) if self.bind_m else _nlp(v[1], self.lnm_mu, self.lnm_sd)
+        lp += _nlp(v[2], self.lnmc_mu, self.lnmc_sd)
+        if nt:
+            lp += _nlp(v[3:3 + nt], 0.0, jnp.asarray(self.t_sd))
+        if nxi:
+            lp += _nlp(v[3 + nt:3 + nt + nxi], 0.0, jnp.sqrt(jnp.asarray(self.lam)))
+        e = self.o + len(NUIS)
+        r = v[self.o:e] - jnp.asarray(self.nmean)
+        ch = jnp.asarray(self.nch)
+        zz = solve_triangular(ch, r, lower=True)
+        lp = lp - 0.5 * (zz ** 2).sum() - jnp.log(jnp.diag(ch)).sum() - 0.5 * len(NUIS) * math.log(2 * math.pi)
+        if self.nz:
+            lp = lp + _nlp(v[e:], 0.0, 1.0)
+        return lp
+
+    def describe(self, vs):
+        """v 뽑기 [S, n] (또는 MAP 한 점 [n])의 ln m·ln m_c·ln t_d·ξ 사후 중앙·sd (13b 진단 O1~O3 재료). MAP 한 점이면 sd = None."""
+        vs = np.atleast_2d(np.asarray(vs, float))[:, :self.n0]
+        nt = self.nt
+
+        def st(x):
+            return {"med": float(np.median(x)), "sd": float(np.std(x)) if len(x) > 1 else None}
+        out = {"shape": True, "dev": self.dev, "n_t": nt, "n_xi": self.nxi, "bind": self.bind_m or "none",
+               "lnm": st(vs[:, 1]), "lnmc": st(vs[:, 2])}
+        if "dev_parts" in self.shape:       # 기본이 아닐 때만
+            out["dev_parts"] = self.shape["dev_parts"]
+        if "dev_tau" in self.shape:
+            out["dev_tau"] = self.shape["dev_tau"]
+        if self.bound:       # 묶은 ln m은 v 자리가 더미라 묶은 값을 적는다
+            out["lnm"] = {"med": self.bound["lnm"], "sd": 0.0}
+            out["bind_used"] = dict(self.bound)
+        if nt:
+            out["lnt"] = {str(d + 1): st(vs[:, 3 + j]) for j, d in enumerate(self.t_days)}
+        if self.nxi:
+            out["xi"] = [st(vs[:, 3 + nt + k]) for k in range(self.nxi)]
+        return out
+
+
+def load_shape(path):
+    """WP13 꼴 파일(shape_D1.json) -> (dict, sha1[:12])."""
+    with open(path, "rb") as f:
+        raw = f.read()
+    return json.loads(raw.decode("utf-8")), hashlib.sha1(raw).hexdigest()[:12]
+
+
+DEV_PARTS_DEFAULT = "flood,cut"
+DEV_PARTS_ALL = ("flood", "m1", "cut")
+
+
+def dev_extras(a):
+    """WP13c --dev-parts·--dev-tau -> 기본이 아닌 것만 담은 dict ({} = 기본). 검사: --dev와 함께만, flood·m1 함께 못 씀."""
+    parts, tau = getattr(a, "dev_parts", None), getattr(a, "dev_tau", None)
+    if (parts is not None or tau is not None) and not getattr(a, "dev", False):
+        sys.exit("--dev-parts·--dev-tau는 --dev와 함께만 쓴다")
+    ex = {}
+    if parts is not None:
+        ps = [x.strip() for x in parts.split(",") if x.strip()]
+        bad = [x for x in ps if x not in DEV_PARTS_ALL]
+        if bad or len(set(ps)) != len(ps):
+            sys.exit(f"--dev-parts는 {','.join(DEV_PARTS_ALL)} 중 겹치지 않게 쉼표로: {parts}")
+        if "flood" in ps and "m1" in ps:
+            sys.exit("--dev-parts의 flood와 m1은 함께 못 쓴다")
+        norm = ",".join(x for x in DEV_PARTS_ALL if x in ps)
+        if norm != DEV_PARTS_DEFAULT:
+            ex["dev_parts"] = norm
+    if tau is not None and tau != "in":
+        ex["dev_tau"] = tau
+    return ex
+
+
+def shape_head(shp, a):
+    """출력 머리 shape 칸: {sha1, dev} + 기본이 아닌 dev_parts·dev_tau (기본이면 키가 없다)."""
+    return {"sha1": shp[1], "dev": bool(a.dev), **dev_extras(a)}
+
+
+def shape_prior(out, shape, sha, target, dev=False, extras=None):
+    """WP13 --shape: prior()의 결과(out) 위에 꼴 칸을 붙인다 (제자리; a의 국소 수준 사전·nuisance 사전·창 k는 그대로).
+    out["shape"] = {sha1, dev (+기본 아닌 dev_parts·dev_tau), flood: {H·Ht·c0h·h·P·lnm_prior·m_true (+dev: day_edges·A_day·tau (+oos: tau_oos))}, cut: {wg·G·slopes·lnmc_prior (+dev: pcs)}}."""
+    t = shape.get("targets", {}).get(target)
+    if not t:
+        raise ValueError(f"꼴 파일에 {target} 항목이 없다")
+    fl, ct = t["flood"], t["cut"]
+    f = {k: fl[k] for k in ("H", "Ht", "c0h", "h", "P", "lnm_prior", "m_true")}
+    c = {k: ct[k] for k in ("wg", "G", "slopes", "lnmc_prior")}
+    f["lnm_prior"] = {k: fl["lnm_prior"][k] for k in ("mean", "var")}
+    c["lnmc_prior"] = {k: ct["lnmc_prior"][k] for k in ("mean", "var")}
+    f["m_true"] = {k: fl["m_true"][k] for k in ("lnm", "se")}
+    extras = extras or {}
+    if dev:
+        f.update(day_edges=fl["day_edges"], A_day=fl["A_day"], tau={"per_day": fl["tau"]["per_day"]})
+        if extras.get("dev_tau") == "oos":
+            if "tau_oos" not in fl:
+                raise ValueError(f"꼴 파일 {target}에 flood.tau_oos가 없다 (wp13_shape.py 새 판으로 합친 파일이 필요)")
+            f["tau_oos"] = {"per_day": fl["tau_oos"]["per_day"]}
+        c["pcs"] = {k: ct["pcs"][k] for k in ("K", "phi", "lambda")}
+    out["shape"] = {"sha1": sha, "dev": bool(dev), **extras, "flood": f, "cut": c}
+    return out
+
+
 # ---------- 모형·MAP ----------
 
 def _eps_phi(e, obs):
@@ -750,17 +992,40 @@ def occam_refine(obs, prob, pre, rounds=4, tol=0.02):
     return pre
 
 
-def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True, full_ep=False, multistart=True, var=None, map_only=False):
+def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500, seed=0, stage1=False, K=16, target_accept=0.9, retry=True, full_ep=False, multistart=True, var=None, map_only=False,
+        engine="nuts", ctx=None):
     """관측 줄 -> MAP(시작점 8개) -> NUTS (retry False면 한 번만). (samples, info, diag, obs). info에 map·secs·n·N. var = 관측 층 변형 이름.
-    시간 어긋남 변형은 모듈 전역 DEP (set_dep). map_only = NUTS 없이 MAP에서 lnC를 계산해 sm["lnC_q"] = [1, 1]로 낸다 (칸 전용; WP9a)."""
+    시간 어긋남 변형은 모듈 전역 DEP (set_dep). map_only = NUTS 없이 MAP에서 lnC를 계산해 sm["lnC_q"] = [1, 1]로 낸다 (칸 전용; WP9a).
+    engine (칸 전용): nuts = 지금 그대로 · budget = 표집을 자식 프로세스에서 시간 한도 안에 (ctx에 t_cell·child_dir 등; _budget_run) · laplace = NUTS 없이 MAP 라플라스 4000뽑기.
+    ctx["child"]가 참이면 자식: MAP을 건너뛰고 ctx["dir"]에서 pre를 읽고, 재시도는 시간 규칙(ctx["t_cell"] 기준 50분 x scale)을 따른다."""
     obs = OM.prepare(rows, H, season, err, K=K, delay_key=delay_key, stage1=stage1, var=var, dep=DEP)
     prob.bind(obs)
     jobs = OM.to_jax(obs)
-    t0 = time.time()
-    pre = multistart_map(jobs, prob, full_ep=full_ep) if multistart else map_precond(jobs, prob, full_ep=full_ep)
-    t_map = time.time() - t0
+    child = bool(ctx and ctx.get("child"))
+    if child:
+        pre = _load_pre(ctx["dir"])
+        t_map = ctx["t_map"]
+    else:
+        t0 = time.time()
+        pre = multistart_map(jobs, prob, full_ep=full_ep) if multistart else map_precond(jobs, prob, full_ep=full_ep)
+        t_map = time.time() - t0
     if map_only:
         return _map_only_result(prob, pre, t_map, obs)
+    if engine == "laplace":
+        sm, info, dg = _laplace_cell(prob, pre, jobs)
+    elif engine == "budget" and not child:
+        sm, info, dg = _budget_run(ctx, prob, pre, jobs, obs, t_map)
+    else:
+        sm, info, dg = _nuts_cell(prob, pre, jobs, chains, warmup, samples, seed, target_accept, retry, multistart, child, ctx, stage1)
+    info["map_secs"] = round(t_map, 1)
+    info["map"] = pre["info"]
+    info["pre"] = {"loc": pre["loc"], "chol": pre["chol"]}
+    info["n"], info["N"], info["counts"] = obs["n"], obs["N"], obs["counts"]
+    return sm, info, dg, obs
+
+
+def _nuts_cell(prob, pre, jobs, chains, warmup, samples, seed, target_accept, retry, multistart, child, ctx, stage1):
+    """MAP 뒤의 NUTS (+ 재시도) + 칸 보조 진단. (sm, info, dg). child면 재시도에 시간 규칙을 건다."""
     mdl = functools.partial(model, prob=prob, pre=pre)
     lnames = [f"lnC_{q:g}" for q in (1, 3, 10)]
     if prob.kind == "cell":   # 칸: 핵심 모수 + 모든 목표 lnC로 판정 (서버 성분은 따로 보고, 재시도도 핵심이 못 지날 때만)
@@ -769,8 +1034,11 @@ def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500
         names = (["th24", "r12", "l12"] if stage1 else ["v"]) + lnames
     init = M1.map_init(len(pre["loc"])) if multistart else None      # 모든 사슬을 MAP(z = 0)에서 시작 (m1과 같다)
     if retry:
+        kw = {}
+        if child:   # 재시도 규칙: 지금까지 + 첫 표집 2배가 50분(x scale) 안일 때만
+            kw["retry_ok"] = lambda first: (time.time() - ctx["t_cell"]) + 2 * first <= 50 * 60 * ctx["scale"]
         sm, info, dg = OM.fit_with_retry(mdl, {"obs": jobs}, names=names, seed=seed, chains=chains, warmup=warmup, samples=samples,
-                                         target_accept=target_accept, init=init)
+                                         target_accept=target_accept, init=init, **kw)
     else:
         sm, info = OM.run_nuts(mdl, {"obs": jobs}, seed=seed, chains=chains, warmup=warmup, samples=samples, target_accept=target_accept, init=init)
         dg = OM.diagnose(sm, names, divergences=info["divergences"])
@@ -784,11 +1052,148 @@ def fit(rows, H, season, err, prob, delay_key, chains=4, warmup=500, samples=500
         al = OM.diagnose(sm, ["vh" if prob.nz else "v"] + (["eps"] if "eps" in sm else []), divergences=0)
         dg["aux"] = {"rhat": ax["rhat_max"], "ess": ax["ess_min"]}
         dg["all"] = {"rhat": max(al["rhat_max"], dg["rhat_max"]), "ess": min(al["ess_min"], dg["ess_min"])}
-    info["map_secs"] = round(t_map, 1)
-    info["map"] = pre["info"]
-    info["pre"] = {"loc": pre["loc"], "chol": pre["chol"]}
-    info["n"], info["N"], info["counts"] = obs["n"], obs["N"], obs["counts"]
-    return sm, info, dg, obs
+    # 걸린 시간 쪼개기 (cmd_predict가 wall에 옮긴다)
+    info["wall_parts"] = {"sample_first": info.get("secs_first_try", info["secs"]), "retry": info["secs"] if info["retried"] else 0.0}
+    return sm, info, dg
+
+
+# ---------- 칸 예측 속도 선택 (--engine budget · laplace) ----------
+
+def _save_pre(d, pre):
+    """pre(loc·chol float64 + info)를 폴더 d에 쓴다 (np.savez는 dtype·값 그대로)."""
+    np.savez(os.path.join(d, "pre.npz"), loc=np.asarray(pre["loc"]), chol=np.asarray(pre["chol"]))
+    _atomic_json(os.path.join(d, "pre_info.json"), pre["info"])
+
+
+def _load_pre(d):
+    z = np.load(os.path.join(d, "pre.npz"))
+    with open(os.path.join(d, "pre_info.json"), encoding="utf-8") as f:
+        info = json.load(f)
+    return {"loc": z["loc"], "chol": z["chol"], "info": info}
+
+
+def _laplace_cell(prob, pre, jobs, ndraw=4000, seed=0, chunk=200):
+    """MAP 라플라스: z ~ N(0, I) ndraw개를 모형의 deterministic에 통과시켜 NUTS와 같은 이름·모양([1, ndraw, ...])의 뽑기를 낸다.
+    PSIS k-hat (보고만): log w = 모형의 비정규 로그 결합 - log N(z; 0, I) (v에 안 닿는 z 성분은 q에서 뺀다). (sm, info, dg)"""
+    import jax
+    import jax.numpy as jnp
+    from numpyro.infer.util import log_density
+    t0 = time.time()
+    nfull = len(pre["loc"])
+    z = np.random.default_rng(seed).standard_normal((ndraw, nfull)).astype(np.float32)
+    mdl = functools.partial(model, prob=prob, pre=pre)
+
+    def one(zz):
+        lp, tr = log_density(mdl, (), {"obs": jobs}, {"z": zz})
+        return lp, {k: x["value"] for k, x in tr.items() if x["type"] == "deterministic"}
+
+    f = jax.jit(jax.vmap(one))
+    lps, outs = [], []
+    for i in range(0, ndraw, chunk):
+        lp, d = f(jnp.asarray(z[i:i + chunk]))
+        lps.append(np.asarray(lp, float))
+        outs.append({k: np.asarray(x) for k, x in d.items()})
+    lp = np.concatenate(lps)
+    sm = {"z": z[None]}
+    for k in outs[0]:
+        sm[k] = np.concatenate([o[k] for o in outs])[None]
+    mask = np.any(np.asarray(pre["chol"]) != 0, axis=0)
+    logw = lp + 0.5 * (z[:, mask].astype(float) ** 2).sum(1)
+    psis_k, err = None, None
+    try:
+        from arviz.stats import psislw
+        psis_k = float(np.asarray(psislw(logw)[1]))
+    except Exception as e:   # 보고용이라 멈추지 않는다
+        err = f"{type(e).__name__}: {e}"
+    mi = pre["info"]
+    secs = round(time.time() - t0, 1)
+    info = {"secs": secs, "divergences": 0, "retried": False, "tree_cap_frac": 0.0, "approx": "laplace", "psis_k": psis_k,
+            **({"psis_err": err} if err else {}), "wall_parts": {"sample_first": secs, "retry": 0.0}}
+    na = {"rhat": None, "ess": None}
+    dg = {"rhat_max": None, "ess_min": None, "conv": bool(mi["min_eig"] > 0 and mi["n_floored"] == 0), "all": dict(na), "aux": dict(na)}
+    if prob.nz:
+        dg["zeta"] = dict(na)
+    return sm, info, dg
+
+
+def _child_argv(a_argv, d, seasons, T):
+    """부모의 predict 인자에서 칸마다 다른 것(--seasons·--T·--out·--save-fit·--engine)을 빼고 자식용으로 바꾼다."""
+    drop = {"--seasons", "--T", "--out", "--save-fit", "--engine", "--_child-dir"}
+    out, skip = [], False
+    for x in a_argv:
+        if skip:
+            skip = False
+            continue
+        k = x.split("=", 1)[0]
+        if k in drop:
+            skip = "=" not in x
+            continue
+        out.append(x)
+    return out + ["--seasons", seasons, "--T", repr(float(T)), "--out", os.path.join(d, "dummy_out.json"), "--_child-dir", d]
+
+
+def _budget_run(ctx, prob, pre, jobs, obs, t_map):
+    """표집을 자식 프로세스에서 돌리고 ctx["t_cell"] + 55분(x scale)에 죽인다. 죽으면 같은 pre로 라플라스 (approx = laplace_timeout).
+    자식이 죽으면(0이 아닌 종료·출력 없음) 로그 꼬리와 함께 오류. (sm, info, dg)"""
+    import shutil
+    import signal
+    import tempfile
+    d = tempfile.mkdtemp(prefix="m3cell_")
+    try:
+        _save_pre(d, pre)
+        _atomic_json(os.path.join(d, "prior.json"), ctx["pr"])
+        _atomic_json(os.path.join(d, "meta.json"), {"t_cell": ctx["t_cell"], "scale": ctx["scale"], "t_map": t_map})
+        argv = [sys.executable, "-I", os.path.abspath(__file__), "predict"] + _child_argv(ctx["argv"], d, ctx["season"], ctx["T"])
+        log = os.path.join(d, "child.log")
+        t_launch = time.time()
+        with open(log, "wb") as lf:
+            proc = subprocess.Popen(argv, stdout=lf, stderr=subprocess.STDOUT, start_new_session=True, env=os.environ.copy())
+            left = ctx["t_cell"] + 55 * 60 * ctx["scale"] - time.time()
+            timeout = False
+            try:
+                proc.wait(timeout=max(left, 0))
+            except subprocess.TimeoutExpired:
+                timeout = True
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait()
+        child_secs = time.time() - t_launch
+        if timeout:
+            print(ctx["season"], ctx["T"], f"budget: 자식을 {child_secs:.0f}s에 죽이고 라플라스로 대신한다", flush=True)
+            sm, info, dg = _laplace_cell(prob, pre, jobs)
+            info["approx"] = "laplace_timeout"
+            info["timeout"] = True
+            info["retry_skipped"] = False
+            info["wall_parts"] = {"sample_first": round(child_secs, 1), "retry": 0.0, "laplace": info["secs"], "child_overhead": 0.0}
+            return sm, info, dg
+        if proc.returncode != 0 or not os.path.exists(os.path.join(d, "done")):
+            with open(log, encoding="utf-8", errors="replace") as lf:
+                tail = "".join(lf.readlines()[-40:])
+            raise RuntimeError(f"자식 프로세스 실패 (종료 {proc.returncode}); 로그 꼬리:\n{tail}")
+        z = np.load(os.path.join(d, "sm.npz"))
+        sm = {k: z[k] for k in z.files}
+        with open(os.path.join(d, "info.json"), encoding="utf-8") as f:
+            info = json.load(f)
+        with open(os.path.join(d, "dg.json"), encoding="utf-8") as f:
+            dg = json.load(f)
+        wp = info.pop("wall_parts")
+        info["timeout"] = False
+        info.setdefault("retry_skipped", False)
+        info["wall_parts"] = {"sample_first": wp["sample_first"], "retry": wp["retry"], "child_overhead": round(child_secs - wp["sample_first"] - wp["retry"], 1)}
+        return sm, info, dg
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def _child_save(d, sm, info, dg):
+    """자식의 끝: 뽑기·info·진단을 폴더 d에 쓴다 (done 표식은 마지막)."""
+    info = {k: v for k, v in info.items() if k not in ("pre", "prob", "map")}
+    np.savez(os.path.join(d, "sm.npz"), **sm)
+    _atomic_json(os.path.join(d, "info.json"), info)
+    _atomic_json(os.path.join(d, "dg.json"), dg)
+    open(os.path.join(d, "done"), "w").close()
 
 
 def _map_only_result(prob, pre, t_map, obs):
@@ -801,7 +1206,7 @@ def _map_only_result(prob, pre, t_map, obs):
     info = {"secs": round(t_map, 1), "map_secs": round(t_map, 1), "divergences": 0, "retried": False, "tree_cap_frac": 0.0, "map": mi,
             "n": obs["n"], "N": obs["N"], "counts": obs["counts"], "pre": {"loc": pre["loc"], "chol": pre["chol"]},
             "map_a": float(th["a"]), "map_xi": [float(x) for x in np.asarray(pre["loc"], float)[1:1 + prob.K]],
-            "map_cr": [float(x) for x in th["cr"]], "map_cl": [float(x) for x in th["cl"]]}
+            "map_cr": [float(x) for x in th["cr"]] if "cr" in th else [], "map_cl": [float(x) for x in th["cl"]] if "cl" in th else []}
     dg = {"rhat_max": None, "ess_min": None, "conv": bool(mi["min_eig"] > 0 and mi["n_floored"] == 0)}
     return sm, info, dg, obs
 
@@ -1284,36 +1689,199 @@ def apply_switch_args(a):
         sys.exit(str(e))
 
 
+def shape_args(a):
+    """WP13 --shape FILE [--dev]: 꼴 파일을 읽는다 -> (dict, sha1) 또는 None (끔). --dev는 --shape와 함께만."""
+    if getattr(a, "dev", False) and not a.shape:
+        sys.exit("--dev는 --shape와 함께만 쓴다")
+    dev_extras(a)       # --dev-parts·--dev-tau 검사
+    if not a.shape:
+        return None
+    if getattr(a, "pin", False) or getattr(a, "ppca", False) or getattr(a, "clock", "h") != "h":
+        sys.exit("--shape는 --pin·--ppca·--clock act와 함께 쓰지 않는다")
+    return load_shape(a.shape)
+
+
 def cmd_prior(a):
     global CACHE, PIN
     CACHE = a.prior_cache
     PIN = bool(a.pin)
     sw = apply_switch_args(a)
+    shp = shape_args(a)
     OM.setup_host(4)
     s1 = load_stage1(a.stage1)
     if a.out and os.path.exists(a.out):
         with open(a.out, encoding="utf-8") as f:
-            old_sw = json.load(f).get("switches", {})
+            old = json.load(f)
+        old_sw = old.get("switches", {})
         if old_sw != json.loads(json.dumps(sw)):
             sys.exit(f"스위치 {sw}가 기존 {a.out}의 switches({old_sw})와 다르다 — 다른 --out을 쓴다")
+        old_sh = {k: old["shape"][k] for k in ("sha1", "dev", "dev_parts", "dev_tau") if k in old["shape"]} if old.get("shape") else None
+        if old_sh != (None if shp is None else shape_head(shp, a)):
+            sys.exit(f"--shape/--dev가 기존 {a.out}의 shape({old_sh})와 다르다 — 다른 --out을 쓴다")
     for t in a.target.split(","):
         p = prior(s1, t, a.k, CACHE)
+        if shp is not None:
+            shape_prior(p, shp[0], shp[1], t, bool(a.dev), dev_extras(a))
         if a.out and "," not in a.target:
             _atomic_json(a.out, p)
-        print(json.dumps({k: p[k] for k in ("target", "k", "window", "K", "lambda", "explained", "scores", "a", "pc_band_loadings", "switches", "block_k", "xi_cov", "ratio10", "pin") if k in p},
-                         default=_js, ensure_ascii=False), flush=True)
+        pr_ = {k: p[k] for k in ("target", "k", "window", "K", "lambda", "explained", "scores", "a", "pc_band_loadings", "switches", "block_k", "xi_cov", "ratio10", "pin") if k in p}
+        if shp is not None:
+            pr_["shape"] = {**{k: p["shape"][k] for k in ("sha1", "dev", "dev_parts", "dev_tau") if k in p["shape"]}, "lnm_prior": p["shape"]["flood"]["lnm_prior"], "lnmc_prior": p["shape"]["cut"]["lnmc_prior"]}
+        print(json.dumps(pr_, default=_js, ensure_ascii=False), flush=True)
 
 
 # ---------- 칸 예측 ----------
 
 def cell_fit(rows, H, s, err, pr, chains=4, warmup=500, samples=500, seed=0, full_ep=False, retry=True, multistart=True, ppca=False, var=None, K=16,
-             fixed=None, map_only=False):
-    prob = CellProb(pr, ppca)
+             fixed=None, map_only=False, T=None, bind_m=None, engine="nuts", ctx=None):
+    """T, bind_m은 WP13 --shape 전용 (pr에 "shape"가 있을 때만 쓴다). info["prob"] = 쓴 칸 모수 (save-fit·shape 진단용)."""
+    if pr.get("shape"):
+        if T is None:
+            raise ValueError("shape 칸 예측은 T가 필요하다")
+        prob = ShapeCellProb(pr, T, bind_m)
+    else:
+        prob = CellProb(pr, ppca)
     if fixed:
         prob.set_fixed(fixed)
     sm, info, dg, obs = fit(rows, H, s, err, prob, s, chains, warmup, samples, seed, stage1=False, K=K, full_ep=full_ep, retry=retry, multistart=multistart, var=var,
-                            map_only=map_only)
+                            map_only=map_only, engine=engine, ctx=ctx)
+    info["prob"] = prob
     return sm, info, dg, obs
+
+
+# ---------- WP13 --save-fit: 칸 곡면 값 저장 (R1~R5 셈용; 기본판·shape 모두) ----------
+
+def cell_pairs(rows, H, T):
+    """그 칸 관측 표 줄에서 wp12_tables.pairs와 같은 거르기로 쌍을 만든다: A·B 사진, use, pct·점수·h·pid 있음, 서버 한섭 또는 미상,
+    시각을 [0, H]로 자름, 같은 (사람, 점수) 안 (시각, %) 순 이웃, 간격 >= 1시간, t1 < H, dL >= -0.02, 두 시각 <= T. pid는 결과에 안 넣는다."""
+    g = {}
+    for r in rows:
+        if r["kind"] not in ("A", "B") or not r.get("pct") or not r.get("score") or not r.get("pid") or not r.get("use"):
+            continue
+        if r.get("server") not in (None, "KR") or r.get("h") is None:
+            continue
+        g.setdefault((r["pid"], round(r["score"], 2)), {}).setdefault((min(max(r["h"], 0.0), H), r["pct"]), (r["kind"], r["score"]))
+    out = []
+    for (_, sc), d in g.items():
+        L = sorted(d)
+        for (t1, p1), (t2, p2) in zip(L, L[1:]):
+            if t2 - t1 < 1.0 or t1 >= H or t2 > T + 1e-9:
+                continue
+            dL = math.log10(p2 / p1)
+            if dL < -0.02:
+                continue
+            var = ((0.005 / p1) ** 2 + (0.005 / p2) ** 2) / math.log(10) ** 2 + 0.004 ** 2
+            out.append({"t1": t1, "t2": t2, "dL": dL, "var": var, "p1": p1, "p2": p2, "score": d[(t1, p1)][1]})
+    return out
+
+
+def _rd(x, nd=4):
+    x = float(x)
+    return round(x, nd) if math.isfinite(x) else None
+
+
+def save_fit_done(path):
+    """save-fit 파일에 이미 있는 (시즌, T) 집합 (이어 돌리기용)."""
+    done = set()
+    if path and os.path.exists(path):
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    h = json.loads(line)
+                    done.add((h["season"], float(h["T"])))
+    return done
+
+
+def save_fit_cell(path, season, T, rows, H, obs, sm, prob, bind="none", max_draws=1000, chunk=100):
+    """칸 하나의 곡면 값을 path (gzip JSONL, 칸 한 줄)에 덧붙인다. 이미 있는 (시즌, T)는 건너뛴다 (이어 돌리기).
+    사후 뽑기에서 고르게 <= max_draws개를 100개씩 묶어 vmap으로, 뽑기마다 theta = prob.theta(v), mu·P = surface, OM.row_loglik(parts=True).
+    rows_A = A 줄(촬영 시각 정확, 노드 0만)마다 {i·h·pct·lab·zmid·mu_kr_med·resid·p_contam·p_kr}; pit = T-6 < h <= T 인 A 줄의 PSIS-LOO PIT;
+    pairs = 기록 쌍마다 곡면 ΔP = P_KR(y, t1) − P_KR(y, t2)의 사후 중앙·10·90%. 글 번호·사람 열쇠·사진 열쇠는 쓰지 않는다. -> 쓴 한 줄의 dict 또는 None(건너뜀)"""
+    import jax
+    import jax.numpy as jnp
+    from arviz.stats import psislw
+    import wp12_tables as WT
+    if (season, float(T)) in save_fit_done(path):
+        return None
+    jobs = OM.to_jax(obs)
+    meta, pos = obs["meta"], np.asarray(obs["pos"])
+    n = obs["n"]
+    iA = [i for i, m in enumerate(meta) if m["tg"] == "A"]
+    iP = [i for i in iA if T - 6 < meta[i]["h"] <= T + 1e-9]
+    idxA, idxP = pos[iA].astype(int), pos[iP].astype(int)
+    zlo, zhi = np.asarray(obs["zlo"]), np.asarray(obs["zhi"])
+    zmidA = 0.5 * (zlo[idxA] + zhi[idxA])
+    zmidP = jnp.asarray(0.5 * (zlo[idxP] + zhi[idxP]), jnp.float32)
+    subP = {k: (jobs[k][idxP] if hasattr(jobs[k], "shape") and getattr(jobs[k], "ndim", 0) >= 1 and k not in ("dirichlet",) else jobs[k]) for k in jobs}
+    subP["lw"] = jobs["lw"][idxP]
+    prs = cell_pairs(rows, H, T)
+    npr = len(prs)
+    t1 = np.array([p["t1"] for p in prs], float)
+    t2 = np.array([p["t2"] for p in prs], float)
+    if npr:
+        y2 = jnp.asarray(np.log(np.array([p["score"] for p in prs] * 2, float)), jnp.float32)
+        tt = np.concatenate([t1, t2])
+        u2 = np.clip(tt / H, 0.02, 1.0) if OM.CLOCK is None else np.array([OM.u_of(season, float(t), H) for t in tt])
+        u2 = jnp.asarray(u2[:, None], jnp.float32)
+    v = np.asarray(sm["v"]).reshape(-1, np.asarray(sm["v"]).shape[-1])
+    eps = np.asarray(sm["eps"]).reshape(-1)
+    phi = np.asarray(sm["phi"]).reshape((-1,) + np.asarray(sm["phi"]).shape[-2:])
+    S = len(v)
+    sel = np.unique(np.linspace(0, S - 1, min(max_draws, S)).astype(int))
+
+    def one(vv, ee, pp):
+        th = prob.theta(vv)
+        mu, P = surface(th, jobs["y"], jobs["u"])
+        if prob.nz:
+            mu = OM.dep_add(jobs, mu, th["delta"], th.get("bp"))
+        s0, rho = jnp.exp(th["lnsig0"]), jnp.exp(th["lnrho"])
+        parts = OM.row_loglik(jobs, mu, P, s0, rho, ee, pp, parts=True)
+        o = {"mu": mu[0, idxA, 0], "pc": parts["p_contam"][idxA], "pk": parts["p_server"][idxA, 0],
+             "F": M1.row_pred_cdf(subP, mu[:, idxP], P[:, idxP], s0, rho, ee, pp, zmidP), "ll": parts["ll"][idxP]}
+        if npr:
+            _, P2 = surface(th, y2, u2)
+            o["dP"] = P2[0, :npr, 0] - P2[0, npr:, 0]
+        return o
+
+    f = jax.jit(jax.vmap(one))
+    acc = {}
+    for i0 in range(0, len(sel), chunk):
+        ii = sel[i0:i0 + chunk]
+        r = f(jnp.asarray(v[ii], jnp.float32), jnp.asarray(eps[ii], jnp.float32), jnp.asarray(phi[ii], jnp.float32))
+        for k, x in r.items():
+            acc.setdefault(k, []).append(np.asarray(x))
+    acc = {k: np.concatenate(x, 0) for k, x in acc.items()}                       # [S', .]
+    mu_med = np.median(acc["mu"], axis=0) if len(iA) else np.zeros(0)
+    pc, pk = acc["pc"].mean(0), acc["pk"].mean(0)
+    rows_A = []
+    for j, i in enumerate(iA):
+        m = meta[i]
+        pct = 10.0 ** zhi[idxA[j]] - 0.01
+        rows_A.append({"i": i, "h": _rd(m["h"]), "pct": _rd(pct, 3), "lab": m["server"], "zmid": _rd(zmidA[j]), "mu_kr_med": _rd(mu_med[j]),
+                       "resid": _rd(zmidA[j] - mu_med[j]), "p_contam": _rd(pc[j]), "p_kr": _rd(pk[j])})
+    pit = []
+    for jj, i in enumerate(iP):
+        lw, kk = psislw(-acc["ll"][:, jj])
+        w = np.exp(lw - lw.max())
+        w /= w.sum()
+        m = meta[i]
+        pit.append({"i": i, "h": _rd(m["h"]), "pct": rows_A[iA.index(i)]["pct"], "pit": _rd((w * acc["F"][:, jj]).sum()), "pareto_k": _rd(np.asarray(kk).reshape(-1)[0], 3)})
+    pairs_out = []
+    if npr:
+        q = np.quantile(acc["dP"], [0.1, 0.5, 0.9], axis=0)
+        for j, p in enumerate(prs):
+            pairs_out.append({"t1": _rd(p["t1"]), "t2": _rd(p["t2"]), "dL": _rd(p["dL"], 5), "var": float(f"{p['var']:.6g}"), "p1": p["p1"], "dP_med": _rd(q[1, j], 5),
+                              "dP_q10": _rd(q[0, j], 5), "dP_q90": _rd(q[2, j], 5)})
+    sh = getattr(prob, "shape", None)
+    variant = "base" if sh is None else ("shape" if not sh["dev"] else "shape+dev" + (
+        f"[{sh.get('dev_parts', DEV_PARTS_DEFAULT)}{';' + sh['dev_tau'] if 'dev_tau' in sh else ''}]" if ("dev_parts" in sh or "dev_tau" in sh) else ""))
+    head = {"season": season, "T": float(T), "H": float(H), "c0h": WT.season_info()[season]["c0h"], "variant": variant, "bind": bind, "n_draws": int(len(sel)),
+            "contam_share_A": _rd(float((pc > 0.5).mean()), 4) if len(iA) else None, "n_rows": int(n), "n_A": len(iA), "n_pit": len(iP), "n_pairs": npr,
+            "rows_A": rows_A, "pit": pit, "pairs": pairs_out}
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with gzip.open(path, "at", encoding="utf-8") as g:
+        g.write(json.dumps(head, ensure_ascii=False) + "\n")
+    return head
 
 
 def bind_values(entry, bind):
@@ -1341,6 +1909,17 @@ def cmd_predict(a):
     import obs_table
     CACHE = a.prior_cache
     sw = apply_switch_args(a)
+    shp = shape_args(a)
+    if a.bind in ("m", "m0") and shp is None:
+        sys.exit(f"--bind {a.bind}는 --shape와 함께만 쓴다")
+    if shp is not None and a.bind in ("l", "r"):
+        sys.exit(f"--bind {a.bind}: --shape에는 곡선 계수 cl·cr이 없다 (m·m0·a만)")
+    if a.save_fit and a.map_only:
+        sys.exit("--save-fit은 NUTS 뽑기가 있어야 한다 (--map-only와 함께 못 쓴다)")
+    if a.map_only and a.engine != "nuts":
+        sys.exit(f"--engine {a.engine}은 --map-only와 함께 못 쓴다")
+    child_dir = getattr(a, "_child_dir", None)      # 숨은 옵션: --engine budget의 자식 프로세스 (표집만 하고 폴더에 쓴다)
+    budget_scale = float(os.environ.get("M3_BUDGET_SCALE", "1"))   # 시험용: 50·55분 한도에 곱한다
     OM.setup_host(max(a.chains, 4))   # hier 2단계 적합이 4사슬
     err = OM.load_err()
     with open(a.stage1, encoding="utf-8") as f:
@@ -1360,14 +1939,14 @@ def cmd_predict(a):
     global PIN
     PIN = bool(a.pin)
     s1 = load_stage1(a.stage1)
-    if a.bind != "none":
+    if a.bind in ("l", "r", "a"):
         miss = [s for s in C.parse_seasons(a.seasons) if s not in s1]
         if miss:
             sys.exit(f"--bind {a.bind}: 1단계 파일에 {','.join(miss)}가 없다 — 묶을 1단계 값이 없으면 이 시즌은 못 한다 (1단계 시즌: {','.join(sorted(s1, key=HR.snum))})")
     with open(a.stage1, "rb") as f:
         sha = hashlib.sha1(f.read()).hexdigest()[:12]
     out = {"about": "M3 함수형 주성분 곡면 — T 절단 칸 예측", "method": "M3", "data_ver": C.DATA_VER,
-           "made": {"tool_head": _git_head(), "cmd": " ".join(["m3.py predict"] + sys.argv[2:]), "inputs": {"stage1": sha}},
+           "made": {"tool_head": _git_head(), "cmd": " ".join(["m3.py predict"] + sys.argv[2:]), "inputs": {"stage1": sha}, "engine": a.engine},
            "cells": [], "info": [], "priors": {}}
     if a.obs_var and a.obs_var != "base":
         out["obs_var"] = a.obs_var
@@ -1376,6 +1955,9 @@ def cmd_predict(a):
         out["dep"] = a.dep
     if a.bind != "none" or a.map_only:      # 둘 다 기본값이면 머리에 안 적는다 (지금 출력과 같은 꼴)
         out["bind"] = a.bind
+    if shp is not None:                     # WP13 --shape: 켠 판만 머리에 키가 늘어난다
+        out["shape"] = shape_head(shp, a)
+        out["made"]["inputs"]["shape"] = shp[1]
     if a.bind != "none":
         out["bind_note"] = "그 시즌 1단계 값(stage1 파일의 사후 평균, 끝난 시즌 자료로 맞춘 값; 정답 표 아님)에 묶음. 쓴 값은 bind_used."
         out["bind_used"] = {}
@@ -1398,6 +1980,10 @@ def cmd_predict(a):
             sys.exit(f"WP9 스위치 {sw}가 기존 {a.out}의 pca_switches({out.get('pca_switches', {})})와 다르다 — 다른 --out을 쓴다")
         if out.get("clock", "h") != a.clock or bool(out.get("pin", False)) != PIN:
             sys.exit(f"--clock {a.clock}·--pin {PIN}가 기존 {a.out}의 clock({out.get('clock', 'h')})·pin({out.get('pin', False)})과 다르다 — 다른 --out을 쓴다")
+        if out.get("shape") != (None if shp is None else shape_head(shp, a)):
+            sys.exit(f"--shape/--dev가 기존 {a.out}의 shape({out.get('shape')})와 다르다 — 다른 --out을 쓴다")
+        if out.get("made", {}).get("engine", "nuts") != a.engine:
+            sys.exit(f"--engine {a.engine}이 기존 {a.out}의 engine({out.get('made', {}).get('engine', 'nuts')})과 다르다 — 다른 --out을 쓴다")
         if bool(out.get("map_only", False)) != a.map_only:
             sys.exit(f"--map-only({a.map_only})가 기존 {a.out}의 map_only({bool(out.get('map_only', False))})와 다르다 — 다른 --out을 쓴다")
     done = {(i["season"], i["T"]) for i in out["info"]}
@@ -1410,15 +1996,37 @@ def cmd_predict(a):
             if not os.path.exists(path):
                 print(s, T, "표 없음", flush=True)
                 continue
+            if child_dir:      # 자식: 부모가 쓴 사전 그대로
+                with open(os.path.join(child_dir, "prior.json"), encoding="utf-8") as f:
+                    out["priors"][s] = json.load(f)
             if s not in out["priors"]:
                 out["priors"][s] = prior(s1, s, cache=CACHE)
+                if shp is not None:
+                    shape_prior(out["priors"][s], shp[0], shp[1], s, bool(a.dev), dev_extras(a))
             pr = out["priors"][s]
             head, rows = obs_table.read_cell(path)
-            fixed = {} if a.bind == "none" else bind_values(s1[s], a.bind)   # 1단계가 없는 시즌(S42)도 묶지 않으면 돈다
+            fixed = {} if a.bind in ("none", "m", "m0") else bind_values(s1[s], a.bind)   # 1단계가 없는 시즌(S42)도 묶지 않으면 돈다
             if fixed:
                 out["bind_used"][s] = {k: x.tolist() if np.ndim(x) else float(x) for k, x in fixed.items()}
+            t_cell = time.time()
+            ctx = None
+            if child_dir:
+                with open(os.path.join(child_dir, "meta.json"), encoding="utf-8") as f:
+                    ctx = dict(json.load(f), child=True, dir=child_dir)
+                t_cell = ctx["t_cell"]
+            elif a.engine == "budget":
+                ctx = {"t_cell": t_cell, "scale": budget_scale, "pr": pr, "argv": sys.argv[2:], "season": s, "T": T}
             sm, info, dg, obs = cell_fit(rows, head["H"], s, err, pr, a.chains, a.warmup, a.samples, full_ep=a.pre_full, multistart=not a.no_multistart, ppca=a.ppca, var=a.obs_var, K=a.K,
-                                         fixed=fixed, map_only=a.map_only)
+                                         fixed=fixed, map_only=a.map_only, T=T, bind_m=a.bind if a.bind in ("m", "m0") else None, engine=a.engine, ctx=ctx)
+            if child_dir:
+                _child_save(child_dir, sm, info, dg)
+                return
+            prob = info["prob"]
+            shape_info = None
+            if shp is not None:
+                shape_info = prob.describe(np.asarray(info["pre"]["loc"], float)[:prob.n] if a.map_only else np.asarray(sm["v"]).reshape(-1, prob.n))
+                if prob.bound:
+                    out["bind_used"][s] = dict(prob.bound)
             if a.map_only:      # 점추정만: pred = exp(MAP의 lnC), 구간 없음
                 out["cells"] += [{"season": s, "T": float(T), "pct": float(q), "server": "KR", "pred": float(np.exp(sm[f"lnC_{q:g}"].item())),
                                   "i80": None, "i95": None, "own": True, "conv": bool(dg["conv"])} for q in sorted(OM.Q_TARGETS)]
@@ -1426,7 +2034,7 @@ def cmd_predict(a):
                                     "bind": a.bind, "map_only": True, "map_ok": info["map"]["ok"], "map_nit": info["map"]["nit"], "map_fun": info["map"]["fun"],
                                     "map_min_eig": info["map"]["min_eig"], "map_n_floored": info["map"]["n_floored"], "map_n_escape": info["map"]["n_escape"],
                                     "n_starts": info["map"].get("multistart", {}).get("n_starts"), "map_a": info["map_a"], "map_xi": info["map_xi"], "map_cr": info["map_cr"], "map_cl": info["map_cl"],
-                                    "n": obs["n"], "N": obs["N"]})
+                                    "n": obs["n"], "N": obs["N"], **({"shape_info": shape_info} if shape_info else {})})
                 _atomic_json(a.out, out)
                 i = out["info"][-1]
                 print(s, T, f"bind={a.bind} n={i['n']} map_secs={i['map_secs']} map_ok={i['map_ok']} conv={i['conv']} lnC3={sm['lnC_3'].item():.4f}", flush=True)
@@ -1436,10 +2044,24 @@ def cmd_predict(a):
                                 "k": pr["k"], "rhat_max": dg["all"]["rhat"], "ess_min": dg["all"]["ess"], "rhat_core": dg["rhat_max"], "ess_core": dg["ess_min"],
                                 "rhat_aux": dg["aux"]["rhat"], "ess_aux": dg["aux"]["ess"], "divergences": info["divergences"],
                                 "retried": info["retried"], "tree_cap_frac": info["tree_cap_frac"], "n": obs["n"], "N": obs["N"],
-                                **({"rhat_zeta": dg["zeta"]["rhat"], "ess_zeta": dg["zeta"]["ess"], "nz": obs["dep_nk"] + obs["dep_np"], "n_pid": obs["dep_np"]} if DEP else {})})
+                                **({"rhat_zeta": dg["zeta"]["rhat"], "ess_zeta": dg["zeta"]["ess"], "nz": obs["dep_nk"] + obs["dep_np"], "n_pid": obs["dep_np"]} if DEP else {}),
+                                **({"shape_info": shape_info} if shape_info else {}),
+                                "engine": a.engine, **{k: info[k] for k in ("approx", "psis_k", "retry_skipped", "timeout") if k in info}})
+            t_sf = time.time()
+            if a.save_fit:
+                sf = save_fit_cell(a.save_fit, s, T, rows, head["H"], obs, sm, prob, a.bind)
+                if sf is not None:
+                    print(s, T, f"save-fit: A {sf['n_A']} pit {sf['n_pit']} pairs {sf['n_pairs']} contam_A {sf['contam_share_A']} ({time.time() - t_cell:.0f}s 합)", flush=True)
+            wp = info["wall_parts"]
+            out["info"][-1]["wall"] = {"map": round(info["map_secs"], 1), "sample_first": round(wp["sample_first"], 1), "retry": round(wp["retry"], 1),
+                                       **{k: round(wp[k], 1) for k in ("laplace", "child_overhead") if k in wp},
+                                       "save_fit": round(time.time() - t_sf, 1), "total": round(time.time() - t_cell, 1)}
             _atomic_json(a.out, out)
             i = out["info"][-1]
-            print(s, T, f"n={i['n']} secs={i['secs']} rhat={i['rhat_max']:.3f} ess={i['ess_min']:.0f} div={i['divergences']} conv={i['conv']}", flush=True)
+            rh = f"{i['rhat_max']:.3f}" if i["rhat_max"] is not None else "-"
+            es = f"{i['ess_min']:.0f}" if i["ess_min"] is not None else "-"
+            print(s, T, f"n={i['n']} secs={i['secs']} rhat={rh} ess={es} div={i['divergences']} conv={i['conv']}"
+                  + ("" if a.engine == "nuts" else f" engine={a.engine} approx={i.get('approx')} wall_total={i['wall']['total']}"), flush=True)
 
 
 # ---------- 4.3 1단계 점검 (명세 7절 ③) ----------
@@ -1826,6 +2448,10 @@ def main():
     p.add_argument("--out", default=None)
     p.add_argument("--prior-cache", default=None)
     p.add_argument("--pin", action="store_true", help="WP11a ⓑ: 이번 시즌 곡면 모수를 a + ln m으로 (r·ℓ 모양은 창 평균). 기본 끔")
+    p.add_argument("--shape", default=None, help="WP13: 꼴 파일(shape_D1.json)에서 그 시즌 꼴 칸을 사전 JSON에 붙인다. 기본 끔")
+    p.add_argument("--dev", action="store_true", help="WP13: --shape와 함께만. 편차 층 칸(A_day·tau·pcs)도 붙인다")
+    p.add_argument("--dev-parts", default=None, help="WP13c: --dev와 함께만. flood,m1,cut 중 쉼표 목록 (기본 flood,cut). flood·m1은 함께 못 씀")
+    p.add_argument("--dev-tau", default=None, choices=("in", "oos"), help="WP13c: --dev와 함께만. 일차 수준 t의 사전 sd — in = tau.per_day (기본) · oos = tau_oos.per_day")
     add_switch_args(p)
     c4 = sub.add_parser("check43")
     c4.add_argument("--obs-dir", required=True)
@@ -1845,13 +2471,21 @@ def main():
     q.add_argument("--ppca", action="store_true", help="확률 PCA 잔차: 밴드 격자에 등방 잔차 sqrt(sigma2_res) η를 더한다 (주성분이 못 담는 시즌 사이 변동)")
     q.add_argument("--no-multistart", action="store_true", help="MAP 시작점 8개(기본)를 끈다")
     q.add_argument("--pre-full", action="store_true", help="eps·phi도 사전 펴기에 넣는다 (m1과 같은 방식)")
-    q.add_argument("--bind", default="none", choices=("none", "l", "r", "a"),
+    q.add_argument("--bind", default="none", choices=("none", "l", "r", "a", "m", "m0"),
                    help="WP9a 묶어 보기: 맞힐 시즌의 1단계 값(stage1 파일 사후 평균)에 l = 침수 계수 cl · r = 컷 모양 계수 cr · a = 규모 a를 묶는다. 기본 none = 본안. 1단계에 그 시즌이 없으면(S42) 멈춘다")
     q.add_argument("--map-only", action="store_true", help="NUTS 없이 MAP(다중 시작·--pre-full 포함)의 lnC를 칸으로 낸다: pred = exp(MAP의 lnC), i80·i95 = null. --out 파일 머리에 map_only")
     add_switch_args(q)
+    q.add_argument("--shape", default=None, help="WP13: 꼴 파일(shape_D1.json) — 침수 P = m·P̄(h), 컷 R = m_c·G(w) + Σ ξφ로 곡면을 꼴에 박는다. 기본 끔 = 지금 계산")
+    q.add_argument("--dev", action="store_true", help="WP13: --shape와 함께만. 편차 층 — 지난 일차 수준 ln t_d + 컷 주성분 점수 ξ (사전 크기는 꼴 파일의 앞 시즌 값으로 고정)")
+    q.add_argument("--dev-parts", default=None, help="WP13c: --dev와 함께만. flood = 지난 일차 전부 t_d · m1 = 첫날 t_1만 · cut = 컷 PC ξ 의 쉼표 목록 (기본 flood,cut). flood·m1은 함께 못 씀")
+    q.add_argument("--dev-tau", default=None, choices=("in", "oos"), help="WP13c: --dev와 함께만. t_d 사전 sd — in = 꼴 파일 tau.per_day (기본) · oos = flood.tau_oos.per_day (앞 시즌 t_true의 시즌 밖 흩어짐)")
+    q.add_argument("--save-fit", default=None, help="WP13: 칸마다 곡면 값 (A 줄 잔차·PSIS-LOO PIT·기록 쌍 ΔP)을 이 gzip JSONL에 덧붙인다 (이미 있는 칸은 건너뜀). NUTS 칸만")
     q.add_argument("--pin", action="store_true", help="WP11a ⓑ: 이번 시즌 곡면 모수를 a + ln m으로 (r·ℓ 모양은 창 평균). 기본 끔")
     q.add_argument("--clock", default="h", choices=("h", "act"), help="WP11a ⓐ 시간 축: h = u = h/H (기본), act = 활동 시간 u*. 1단계 파일 머리의 clock과 같아야 한다")
     q.add_argument("--act-profile", default=ACT_PROFILE, help="act 프로필 (act_clock.py fit)")
+    q.add_argument("--engine", default="nuts", choices=("nuts", "budget", "laplace"),
+                   help="칸 표집 방식. nuts = 지금 그대로 · budget = NUTS를 자식 프로세스에서 칸 시작 + 55분 안에 (재시도는 지금까지 + 첫 표집 2배가 50분 안일 때만, 55분에 죽이면 라플라스 approx=laplace_timeout) · laplace = NUTS 없이 MAP 라플라스 4000뽑기 (approx=laplace)")
+    q.add_argument("--_child-dir", dest="_child_dir", default=None, help=argparse.SUPPRESS)
     q.add_argument("--K", type=int, default=16, help="숨은 촬영 시각 노드 수 (기본 16 = 지금까지의 칸 예측과 같음; WP5b는 32 — M1 7절 ⑤ 점검)")
     a = ap.parse_args()
     if a.cmd == "stage1":

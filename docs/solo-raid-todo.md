@@ -135,7 +135,8 @@ S43도 F 그대로다 ([분석 5.0](solo-raid-analysis.md#50-운영--f-그대로
 
 S43도 F 그대로다 (사용자 결정 2026-10-20, [분석 5.0](solo-raid-analysis.md#50-운영--f-그대로-사용자-결정-2026-10-20)). `freeze_model.py`로 다시 고정하지 않는다.
 
-- [ ] `data/solo-raid/analysis/model_S43.json`을 만든다 — `model_S42.json` 내용 그대로, `season`만 `"S43"`,
+- [x] (2026-11-07 — `m3_freeze.py --season S43`가 옮김, 확인: S42 state T120 지점 값 차 0) **S43부터 F는 대비다** — 주 예측은 M3 `model_S43_m3.json` (사용자 지시 2026-11-07, [method 「WP7 정함」](solo-raid-method.md#wp7-정함-2026-11-07-kst--사용자-지시-예측모델-만든거-운영에-적용하자-g6-답)).
+  `data/solo-raid/analysis/model_S43.json`을 만든다 — `model_S42.json` 내용 그대로, `season`만 `"S43"`,
   `about` 끝에 「S42 설정 그대로 (2026-10-20 사용자 결정 — 피팅 개선 보류, 분석 5.0). 원본 model_S42.json sha1 …」.
   prior 두 파일(`model_S42_main_prior.json`·`model_S42_ref_prior.json`)·빌릴 시즌·M1 배율은 그대로 가리킨다 (prior는 복사하지 않는다 — 모델 파일이 경로·sha1로 가리킴).
   확인: 마지막 S42 state로 `predict_run.sh … --model data/solo-raid/analysis/model_S43.json`과 `--model …/model_S42.json`의 지점 값이 같은지 (다른 것은 「모델은 S43용인데 이 state는 S42」 경고뿐).
@@ -160,3 +161,4 @@ S43도 F 그대로다 (사용자 결정 2026-10-20, [분석 5.0](solo-raid-analy
 - 2026-10-27: 주 작업은 분석 5.3 새 방법이라고 맨 위에 적음 (사용자 지시 — 순서표가 S43 운영을 우선인 것처럼 읽혀서). 「언제」의 금지가 실시간 예측 도구에만 걸린다고 밝힘.
 - 2026-10-28: 3·5를 분석 5.3 계획 0단계로 (사용자 결정 — 계산 전에 자료 고침).
 - 2026-10-28: 맨 위에 「운영 줄은 사용자가 지시할 때만, 먼저 꺼내지 않음」(사용자 지시), 2·4를 새 방법 연구 WP2로 옮김.
+- 2026-11-07: 8의 F 모델 파일 끝 (`m3_freeze.py`) — S43부터 주 예측은 M3, F는 대비 (사용자 지시, method 「WP7」). 켜기는 그대로 사용자가 지시할 때.
