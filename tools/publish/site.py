@@ -6,6 +6,7 @@ python3 -I tools/publish/site.py --out DIR [--prev 이전_data.json]     # DIR/i
 - index.html: 탭 셋. 「이번 시즌」 = 한섭 최종 1·3·10% 컷 예측 (M3 가운데 값 + 80% 구간. M3가 실패하거나 시간 한도를 넘은 칸만 F 한섭 값을 「대체(F)」로 표시).
   「지난 시즌」(#past) = 지난 시즌 커트라인 · 실제로 낸 예측(M3로 낸 끝난 시즌 채점) · 되돌려 보기(M3 22시즌, analysis/backtest_M3.json) · 시즌별 침수 비교(실제 관측 점).
   「방법」(#method) = 작업 흐름 · M3 설명 · 지난 시즌 탭 · 검증과 한계. 데이터 탭에는 꼬리표만 둔다.
+  2026-11-10: 웹 전체를 한섭만 (서버 고르기 없음 — 지난 시즌 커트라인·침수 비교도 한섭, WEB_SRV). 방법 탭의 M3 사전 창·학습 시즌은 고정 모델 파일에서 읽는다 (m3_info).
   일섭·글섭 예측과 계산기(최종 % ↔ 지금 %·점수, 침수 곡선)는 웹에서 뺐다 — M3가 내지 않는다. F의 함수(curve_source·conv)와 backtest_F.json은 레포 기록으로 남겼고 쓰지 않는다.
   tools/publish/site_template.html에 data.json을 넣은 것.
 - boss/S{n}.webp: 시즌별 보스 그림 (data/solo-raid/bosses/, tools/publish/boss_icons.py가 받아 둠 — 2026-10-18). 게임 그림이라 CC0 범위 밖이다.
@@ -49,6 +50,7 @@ FOOTER = (
 )
 
 SERVERS = ["KR", "JP", "GL"]
+WEB_SRV = ["KR"]   # 웹에 싣는 서버 (2026-11-10 — M3가 한섭만 내서 웹 전체를 한섭만. 옛 F 함수는 SERVERS 그대로)
 PCTS = ["1", "3", "10"]
 # 지난 시즌 컷과 계산기가 고르는 지점 (2026-10-16 사용자 결정 — 서버를 정해 두지 않고 아래 기준을 넘는 지점만 그린다)
 CAND = ["1", "3", "10", "30"]
@@ -106,13 +108,13 @@ def past(viz_seasons, reg):
                "cuts": {}, "basis": {}}
         if s in viz_seasons:
             key = viz_seasons[s]["key"]
-            for sv in SERVERS:
+            for sv in WEB_SRV:
                 c = {p: c for p, c in key.get(sv, {}).items() if p in CAND}
                 if c:
                     row["cuts"][sv] = {p: r2(v["v"]) for p, v in c.items()}
                     row["basis"][sv] = {p: v["basis"] for p, v in c.items()}
         else:
-            for sv in SERVERS:
+            for sv in WEB_SRV:
                 c = {p: r2(v) for p, v in csvc.get((row["n"], sv), {}).items()}
                 if sv == "KR":
                     c.update({p: r2(t[f"kr_cut_{p}"]) for p in ("3", "10") if t.get(f"kr_cut_{p}")})
@@ -126,7 +128,7 @@ def past(viz_seasons, reg):
 def past_pcts(rows):
     """서버마다 지난 시즌 열·선을 넣을 지점: 값이 있는 시즌이 PAST_MIN개 이상. 그런 지점이 없으면 값이 있는 지점을 표로만."""
     out = {}
-    for sv in SERVERS:
+    for sv in WEB_SRV:
         n = {p: sum(1 for r in rows if p in r["cuts"].get(sv, {})) for p in CAND}
         out[sv] = [p for p in CAND if n[p] >= PAST_MIN] or [p for p in CAND if n[p]]
     return out
@@ -405,9 +407,12 @@ def sink(vdata, cvd, reg, src):
     seas = vdata["season_list"]
     levels = {s: cv["levels"][s] for s in seas if s in cv["levels"]}
     rows = [{"season": s, "boss": (reg.get(s) or {}).get("boss"), "lev": v, "se": se.get(s)} for s, v in levels.items()]
-    obs = {sv: [] for sv in SERVERS}
+    obs = {sv: [] for sv in WEB_SRV}
+    n_by = {sv: 0 for sv in SERVERS}   # 서버별 관측 칸 수 — 방법 탭 「서버」 절 (웹이 한섭만인 까닭, 2026-11-10)
     for s in seas:
         for u in cv["units"][s]:
+            if u["sv"] in n_by and u["P"] is not None:
+                n_by[u["sv"]] += 1
             if u["sv"] in obs and u["P"] is not None:
                 obs[u["sv"]].append([s, round(u["h"], 1), round(u["x"], 3), round(u["x"] * 10 ** u["P"], 3)])
     live = None
@@ -421,9 +426,9 @@ def sink(vdata, cvd, reg, src):
                 "lev": round(math.exp(sum(L) / len(L)), 4), "sd": round(src["level"]["sd"], 4), "persons": src["level"].get("persons")}
     ps = (pd.get("season") or "").split("+")
     return {"seasons": rows, "live": live, "prior": f"{ps[0]}~{ps[-1]} ({len(ps)}시즌)" if len(ps) > 1 else pd.get("season"),
-            "dev": {sv: [[r[0], r[1]] for i, r in enumerate(cv["srv"][sv]) if i % 2 == 0] for sv in SERVERS},
-            "borrow": {sv: (cv["m_src"].get(sv) or "").startswith("borrow") for sv in SERVERS},
-            "start": {s: iso(vdata["seasons"][s]["c_start"]) for s in seas}, "obs": obs}
+            "dev": {sv: [[r[0], r[1]] for i, r in enumerate(cv["srv"][sv]) if i % 2 == 0] for sv in WEB_SRV},
+            "borrow": {sv: (cv["m_src"].get(sv) or "").startswith("borrow") for sv in WEB_SRV},
+            "start": {s: iso(vdata["seasons"][s]["c_start"]) for s in seas}, "obs": obs, "n_by_srv": n_by}
 
 
 BACK_ABOUT = "시즌마다 그 시즌보다 앞선 시즌 자료만으로 낸 예측 (개발 검증 — 22시즌, 시험 시즌 없음)"
@@ -443,6 +448,28 @@ def back(reg):
         return {"model": BACK_ABOUT, "T": b["T"], "seasons": seasons}
     except (KeyError, ValueError, TypeError, OSError) as e:
         warn(f"analysis/backtest_M3.json을 읽지 못해 「지난 시즌」 탭의 되돌려 보기를 뺐다 ({type(e).__name__}: {e})")
+        return None
+
+
+def m3_info():
+    """방법 탭에 넣을 M3 고정 모델의 사실 (가장 최근 analysis/model_S{n}_m3.json — 읽기만). 사전 창은 시즌마다 시간 순 교차검증으로 고르므로
+    글에 박지 않고 여기서 읽는다 (2026-11-10). 없으면 None."""
+    ms = []
+    for p in glob.glob(os.path.join(D, "analysis", "model_S*_m3.json")):
+        k = re.search(r"model_(S\d+)_m3\.json$", p)
+        if k:
+            ms.append((split.snum(k.group(1)), p))
+    if not ms:
+        return None
+    try:
+        m = jload(max(ms)[1])
+        win, st1 = (m.get("prior") or {}).get("window") or [], (m.get("stage1") or {}).get("seasons") or []
+        pool = m.get("calib_pool_seasons") or []
+        return {"season": m.get("season"), "prior": {"from": win[0], "to": win[-1], "n": len(win), "K": (m.get("prior") or {}).get("K")} if win else None,
+                "stage1": {"from": st1[0], "to": st1[-1], "n": len(st1)} if st1 else None,
+                "pool": {"from": pool[0], "to": pool[-1], "n": len(pool)} if pool else None, "limit_min": m.get("limit_min")}
+    except (OSError, ValueError, KeyError, TypeError, IndexError) as e:
+        warn(f"M3 모델 파일을 읽지 못해 방법 탭의 사전 창 문장을 뺐다 ({type(e).__name__}: {e})")
         return None
 
 
@@ -552,7 +579,7 @@ def build(prev=None):
     lat = latest_season(reg)
     data = {"past": pst, "past_pcts": past_pcts(pst), "live": lv, "latest": lat,
             "sink": sink(vdata, None, reg, None), "back": back(reg), "boss_img": boss_img(),
-            "boss_info": boss_info(list(reg) + [x["season"] for x in lv]), "el_img": el_img(),
+            "boss_info": boss_info(list(reg) + [x["season"] for x in lv]), "el_img": el_img(), "m3": m3_info(),
             "analysis": {"seasons": vdata["season_list"]}}
     content = fingerprint(data, vdata)
     data = {"asof": asof_for(content, prev), "content": content, **data}
