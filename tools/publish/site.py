@@ -8,6 +8,8 @@ python3 -I tools/publish/site.py --out DIR [--prev 이전_data.json]     # DIR/i
   「방법」(#method) = 작업 흐름 · M3 설명 · 지난 시즌 탭 · 검증과 한계. 데이터 탭에는 꼬리표만 둔다.
   2026-11-10: 웹 전체를 한섭만 (서버 고르기 없음 — 지난 시즌 커트라인·침수 비교도 한섭, WEB_SRV). 방법 탭의 M3 사전 창·학습 시즌은 고정 모델 파일에서 읽는다 (m3_info).
   일섭·글섭 예측과 계산기(최종 % ↔ 지금 %·점수, 침수 곡선)는 웹에서 뺐다 — M3가 내지 않는다. F의 함수(curve_source·conv)와 backtest_F.json은 레포 기록으로 남겼고 쓰지 않는다.
+  2026-11-14 사용자 요청: 「이번 시즌」에 점수 계산기만 다시 (최종 % ↔ 최종 점수 — M3 최근 칸의 0.5~10% 지점, live()의 calc). 지금 % ↔ 최종 %는
+  M3 안의 침수 곡선을 꺼내야 해서 할 일로 남겼다 (F 침수 곡선과 섞으면 컷 칸과 답이 어긋난다) → docs/solo-raid-todo.md 「M3 침수 계산기」.
   tools/publish/site_template.html에 data.json을 넣은 것.
 - boss/S{n}.webp: 시즌별 보스 그림 (data/solo-raid/bosses/, tools/publish/boss_icons.py가 받아 둠 — 2026-10-18). 게임 그림이라 CC0 범위 밖이다.
 - analysis.html(F 방법 정확도 화면, tools/solo_raid/viz.py)은 F 것이라 만들지 않는다 (2026-11-07). 함수 analysis_html은 기록으로 남겼다.
@@ -211,7 +213,13 @@ def m3_pred(path):
             pts[p_] = {"m": r2(q["median"]), "lo": r2(q["i80"][0]), "hi": r2(q["i80"][1])}
             if q.get("src") == "F" or o.get("status") == "fallback":
                 pts[p_]["src"] = "F"
-    return {"T": round(T, 2), "T_kst": o.get("T_kst"), "status": o.get("status"), "pts": pts}
+    # 계산기 곡선 (2026-11-14 사용자 요청): M3가 낸 모든 지점 [%, 가운데, 80% 아래, 80% 위] (% 오름차순). 컷 칸과 같은 값이다.
+    curve, fb = [], o.get("status") == "fallback"
+    for k, q in sorted((x.get("points") or {}).items(), key=lambda t: float(t[0])):
+        if q and q.get("median") is not None and q.get("i80") and None not in q["i80"]:
+            curve.append([float(k), r2(q["median"]), r2(q["i80"][0]), r2(q["i80"][1])])
+            fb = fb or q.get("src") == "F"
+    return {"T": round(T, 2), "T_kst": o.get("T_kst"), "status": o.get("status"), "pts": pts, "curve": curve, "curve_fb": fb}
 
 
 def m3_truth(score_path):
@@ -253,6 +261,12 @@ def live(reg):
             except (KeyError, ValueError, TypeError, OSError, json.JSONDecodeError) as e:
                 warn(f"{os.path.relpath(p, ROOT)}를 읽지 못해 뺐다 ({type(e).__name__}: {e})")
         preds.sort(key=lambda r: r["T"])
+        # 계산기는 최근(한섭 값이 있는 마지막) 칸의 곡선만 쓴다 — 나머지 칸의 곡선은 data.json에 넣지 않는다
+        withc = [r for r in preds if len(r["curve"]) >= 2]
+        calc = {"T": withc[-1]["T"], "T_kst": withc[-1]["T_kst"], "curve": withc[-1]["curve"], "fb": withc[-1]["curve_fb"]} if withc else None
+        for r in preds:
+            r.pop("curve", None)
+            r.pop("curve_fb", None)
         truth = {}
         sc = os.path.join(pdir, "score.json")
         if os.path.exists(sc):
@@ -263,7 +277,7 @@ def live(reg):
                 truth = {}
         out.append({"season": s, "boss": sj.get("boss") or (reg.get(s) or {}).get("boss"),
                     "c_start": iso(sj["c_start"]), "end": iso(sj["end"]), "e_end": iso(e_end), "H": round((end - c0).total_seconds() / 3600),
-                    "preds": preds, "truth": truth})
+                    "preds": preds, "calc": calc, "truth": truth})
     return out
 
 

@@ -103,6 +103,18 @@ sup.cv { color: var(--text-muted); font-size: 11px; margin-left: 1px; }
 .pbox { border: 1px solid var(--border); border-radius: 10px; padding: 10px 10px 2px; background: var(--surface-0); min-width: 0; }
 .ptitle { display: flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--text-secondary); }
 .boss-sm { display: none; }
+/* 점수 계산기 (2026-11-14 사용자 요청 — M3 최근 칸의 0.5~10% 곡선으로 최종 % ↔ 최종 점수만. 지금 % ↔ 최종 %는 할 일) */
+.calcgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+@media (max-width: 700px) { .calcgrid { grid-template-columns: 1fr; } }
+.calcbox { background: var(--surface-0); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 14px; min-width: 0; }
+.calcbox .q { line-height: 2.2; }
+.calcbox .res { margin-top: 6px; }
+.calcbox .lab { display: block; color: var(--text-secondary); font-size: 13px; }
+.calcbox .big { display: block; font-size: 30px; font-weight: 700; margin: 0; font-variant-numeric: tabular-nums; }
+.calcbox .big small { font-size: 16px; font-weight: 600; color: var(--text-secondary); margin-left: 2px; }
+.calcbox .rng { color: var(--text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
+.calcbox input[type=number] { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
+.calcgrid.weak .big { color: var(--text-muted); }
 /* 보스 그림 (2026-10-18 사용자 요청 — 배경이 투명한 WebP라 두 테마에 그대로). 그림이 없는 시즌은 이름만 */
 .bimg { width: 26px; height: 26px; object-fit: contain; vertical-align: middle; margin: -5px 6px -5px 0; }
 .hero { display: flex; align-items: center; gap: 14px; }
@@ -208,6 +220,19 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
     <div id="liveBody"></div>
   </section>
 
+  <!-- 점수 계산기 (2026-11-14 사용자 요청): 진행 중 시즌의 최근 M3 칸 곡선(위 컷 칸과 같은 값)으로 최종 % ↔ 최종 점수 -->
+  <section class="card" id="calcCard" hidden>
+    <div class="ch"><h2>점수 계산기<span class="tag">한섭</span></h2><a class="how" href="#method-calc">설명</a></div>
+    <p class="short" id="cSrc"></p>
+    <div id="cNote"></div>
+    <div class="calcgrid" id="cGrid">
+      <div class="calcbox"><div class="q">최종 <input type="number" id="cTgt" value="3" min="0.5" max="10" step="0.5" aria-label="목표 최종 %">% 안에 들려면</div>
+        <div class="res"><span class="lab">→ 최종 점수</span><span class="big" id="cS"></span><span class="rng" id="cSR"></span></div></div>
+      <div class="calcbox"><div class="q">내 점수가 <input type="number" id="cSc" min="0" step="0.1" aria-label="내 점수 (억)">억이면</div>
+        <div class="res"><span class="lab">→ 최종</span><span class="big" id="cQ"></span><span class="rng" id="cQR"></span></div></div>
+    </div>
+  </section>
+
   </div>
 
   <!-- 「지난 시즌」 (#past): 끝난 시즌의 예측 기록·되돌려 보기·침수 비교·컷 (2026-10-18 사용자 결정 — 커트라인은 같은 날 맨 아래로) -->
@@ -262,7 +287,7 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
   <!-- 「방법」 (#method): 로직·작업 흐름·검증 설명. 다른 탭의 긴 설명을 여기로 모음 (2026-10-18 사용자 결정) -->
   <div id="tab-method" role="tabpanel" aria-labelledby="tabBtn-method" hidden>
   <nav class="toc" aria-label="방법 목차">
-    <a href="#method-flow">작업 흐름</a><a href="#method-pred">컷 예측</a><a href="#method-past">지난 시즌 탭</a><a href="#method-limit">검증과 한계</a>
+    <a href="#method-flow">작업 흐름</a><a href="#method-pred">컷 예측</a><a href="#method-calc">점수 계산기</a><a href="#method-past">지난 시즌 탭</a><a href="#method-limit">검증과 한계</a>
   </nav>
 
   <section class="card prose" id="m-flow">
@@ -315,6 +340,18 @@ details summary { cursor: pointer; color: var(--text-secondary); font-size: 13.5
     <p>6시간 칸의 경계(05·11·17·23시)까지 올라온 글만 씁니다. 경계 뒤에 올라온 글은 다음 칸에 들어갑니다.
       「T시간」은 챌린지 시작(3일차 05:00)부터 잰 시간입니다. 시작 뒤 18시간 안(첫날 초반) 예측은 오차가 커서 숫자와 그래프 점을 흐리게 보입니다.
       시즌 도중에는 방법을 바꾸지 않습니다. 끝난 뒤 정직하게 채점하기 위해서입니다.</p>
+  </section>
+
+  <section class="card prose" id="m-calc">
+    <h2>점수 계산기</h2>
+    <p>「이번 시즌」 탭의 최근 컷 예측(M3)이 낸 최종 컷 여섯 지점(0.5·1·2·3·5·10%)을 그대로 씁니다. 위 컷 칸과 같은 값이라 1·3·10%에서는 컷 칸 숫자와 똑같습니다.
+      지점 사이는 로그 눈금(점수와 % 둘 다)에서 직선으로 잇습니다. 0.5%보다 위, 10%보다 아래는 계산하지 않습니다.</p>
+    <p>「최종 X% 안에 들려면」은 그 %의 최종 컷 점수입니다. 「내 점수가 X억이면」은 그 점수가 최종에 몇 %쯤인지입니다.
+      점수는 기록을 다시 올리기 전까지 그대로이므로, 지금 점수를 넣으면 더 올리지 않았을 때의 최종 %가 나옵니다.
+      80% 구간은 컷 예측의 구간 위·아래 곡선을 각각 같은 방식으로 읽은 근사입니다. 6시간마다 컷 예측이 바뀌면 계산기도 같이 바뀝니다.</p>
+    <p>「지금 몇 시에 몇 %이면 최종 몇 %」(지금 % ↔ 최종 %)는 지금은 없습니다. 같은 점수의 %가 시간이 지나며 밀려 내려가는 정도(침수)를 컷 예측과 같은 모형에서 꺼내야 하는데,
+      아직 6시간 예측이 그 값을 남기지 않습니다. 다른 방식의 침수 곡선을 섞으면 점수로 넣을 때와 %로 넣을 때 답이 달라질 수 있어 넣지 않았습니다.
+      게임 화면의 내 점수를 넣으면 같은 질문에 답할 수 있습니다.</p>
   </section>
 
   <section class="card prose" id="m-past">
@@ -602,6 +639,64 @@ function renderPred(S, body) {
       ? `<td><b>${fmt(r.pts[p].m)}</b> <span class="muted rng-sm">${fmt(r.pts[p].lo)}~${fmt(r.pts[p].hi)}</span>${r.pts[p].src === "F" ? `<span class="muted rng-sm" style="margin-left:4px">${FB}</span>` : ""}</td>` : "<td>–</td>").join("") + "</tr>");
   wrap.innerHTML = `<table><thead><tr><th>시점</th><th class="l hide-sm">KST</th>${PCTS.map(p => `<th>${p}%</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
+
+// ---------- 점수 계산기 (2026-11-14 사용자 요청): 최종 % ↔ 최종 점수 ----------
+// 곡선 C = [[%, 가운데, 80% 아래, 80% 위], ...] (% 오름차순, 점수는 내림) — 진행 중 시즌의 최근 M3 칸 (site.py live()의 calc). 지점 사이는 log-log 직선.
+const qf = q => (q < 1 ? +q.toFixed(2) : q < 10 ? +q.toFixed(1) : Math.round(q)) + "%";
+function kAtQ(C, q, i) {
+  for (let k = 0; k < C.length - 1; k++) if (q <= C[k + 1][0]) {
+    const a = C[k], b = C[k + 1], t = (Math.log(q) - Math.log(a[0])) / (Math.log(b[0]) - Math.log(a[0]));
+    return Math.exp(Math.log(a[i]) + t * (Math.log(b[i]) - Math.log(a[i])));
+  }
+  return C[C.length - 1][i];
+}
+function kQAt(C, s, i) {   // 점수 s가 곡선 i에서 몇 %인가. side −1 = 맨 위 지점보다 높음, +1 = 맨 아래 지점보다 낮음
+  const n = C.length;
+  if (s >= C[0][i]) return {q: C[0][0], side: -1};
+  if (s <= C[n - 1][i]) return {q: C[n - 1][0], side: 1};
+  for (let k = 0; k < n - 1; k++) if (s <= C[k][i] && s >= C[k + 1][i]) {
+    const a = C[k], b = C[k + 1], d = Math.log(b[i]) - Math.log(a[i]);
+    const t = d ? (Math.log(s) - Math.log(a[i])) / d : 0;
+    return {q: Math.exp(Math.log(a[0]) + t * (Math.log(b[0]) - Math.log(a[0]))), side: 0};
+  }
+  return {q: C[n - 1][0], side: 1};
+}
+const CALC = CUR && CUR.calc && CUR.calc.curve && CUR.calc.curve.length >= 2 ? CUR.calc : null;
+let calcInit = false;
+function drawCalc() {
+  const $ = id => document.getElementById(id);
+  $("calcCard").hidden = !CALC;
+  if (!CALC) return;
+  const C = CALC.curve, qlo = C[0][0], qhi = C[C.length - 1][0];
+  $("cSrc").textContent = `${CUR.season} 최근 컷 예측(${CALC.T}시간 · ${CALC.T_kst || ""}까지 자료)의 곡선 · 최종 ${qf(qlo)}~${qf(qhi)}만 계산`;
+  const nb = $("cNote"); nb.innerHTML = "";
+  if (CALC.fb) note(nb, "gnote", `이 칸은 ${FB} 값(이전 방식의 한섭 값)으로 계산합니다.`);
+  if (CALC.T < EARLY) note(nb, "gnote", "첫날 초반 예측으로 계산한 값이라 오차가 큽니다.");
+  $("cGrid").classList.toggle("weak", CALC.T < EARLY);
+  const tIn = $("cTgt"), sIn = $("cSc");
+  tIn.min = qlo; tIn.max = qhi;
+  if (!calcInit) { sIn.value = Math.round(kAtQ(C, 3, 1) * 10) / 10; calcInit = true; }   // 처음엔 최종 3% 점수
+  renderCalc();
+}
+function renderCalc() {
+  if (!CALC) return;
+  const $ = id => document.getElementById(id), C = CALC.curve, qlo = C[0][0], qhi = C[C.length - 1][0];
+  const q = parseFloat($("cTgt").value);
+  if (!(q >= qlo && q <= qhi)) { $("cS").textContent = "–"; $("cSR").textContent = `${qf(qlo)}~${qf(qhi)}에서만 계산합니다.`; }
+  else {
+    $("cS").innerHTML = `${fmt(kAtQ(C, q, 1))}<small>억</small>`;
+    $("cSR").textContent = `80% 구간 ${fmt(kAtQ(C, q, 2))} ~ ${fmt(kAtQ(C, q, 3))}억`;
+  }
+  const s = parseFloat($("cSc").value);
+  if (!(s > 0)) { $("cQ").textContent = "–"; $("cQR").textContent = "점수를 억 단위로 넣어 주세요."; return; }
+  // 구간: 80% 아래 곡선(점수가 낮게 나온 경우)에서는 같은 점수가 더 상위, 위 곡선에서는 더 하위
+  const side = r => r.side < 0 ? `${qf(qlo)} 안` : r.side > 0 ? `${qf(qhi)} 밖` : "약 " + qf(r.q);
+  const m = kQAt(C, s, 1), best = kQAt(C, s, 2), worst = kQAt(C, s, 3);
+  $("cQ").textContent = side(m);
+  $("cQR").textContent = side(best) === side(worst) ? `80% 구간도 ${side(best)}` : `80% 구간 ${side(best).replace(/^약 /, "")} ~ ${side(worst).replace(/^약 /, "")}`;
+}
+document.getElementById("cTgt").addEventListener("input", renderCalc);
+document.getElementById("cSc").addEventListener("input", renderCalc);
 
 // 퍼센트 글자 (시즌별 침수 비교 표)
 const pf = v => v == null ? "–" : v >= 100 ? "100%+" : (v < 0.1 ? v.toFixed(3) : v < 10 ? v.toFixed(2) : v.toFixed(1)) + "%";
@@ -998,7 +1093,7 @@ document.addEventListener("click", e => {        // 이미 그 주소면 hashcha
 function drawAll() {
   if (tab === "past") { drawPast(); drawRec(); drawBack(); drawSink(); }
   else if (tab === "method") drawMethod();
-  else drawLive();
+  else { drawLive(); drawCalc(); }
 }
 document.getElementById("sub").textContent = `자료 기준 ${DATA.asof} KST · 한섭 컷 예측`;
 showTab(tab, false);
