@@ -5,6 +5,8 @@
 #   bash tools/solo_raid/live_tick.sh plan              할 일 판정 → WORK/plan.json (live_tick.py plan)
 #   bash tools/solo_raid/live_tick.sh collect           state 불러오기 → (칸 경계까지 기다림) → run_window.sh → WORK/workflow.json
 #   bash tools/solo_raid/live_tick.sh collect --orig    (final만) 원본 대기 실행: [e_end − 1시간, e_end)를 한 번 더
+#   bash tools/solo_raid/live_tick.sh jobs [SKIP]       Workflow 도구가 없을 때: 판독 일감을 한 줄에 하나씩 JSON으로 (raid_jobs.py, 2026-11-14).
+#                                                       SKIP = merge 종료 3의 끝 줄. 세션이 줄마다 Agent(raid-vision, haiku)를 띄운다
 #   bash tools/solo_raid/live_tick.sh merge             merge_obs.py. 종료 코드 3 = 빠진 배치(표준 출력 끝 줄이 Workflow skip 목록),
 #                                                       5 = (final만) 원본 대기 실행이 필요함
 #   bash tools/solo_raid/live_tick.sh finish            내보내기·커밋·push → run: F 예측 → M3 예측 (m3_live.py, 최대 약 75분 — 세션은 background로) → 커밋·push
@@ -24,7 +26,7 @@ PLAN=$WORK/plan.json
 TICK="python3 -I $REPO/tools/solo_raid/live_tick.py"
 export DCNET_UA="nikke-community-research/0.1 (+https://github.com/jgaram/nikke-community)" COLLECT_WORKERS=4 DCNET_GAP=0.5
 mkdir -p "$WORK"
-cmd=${1:?plan|collect|merge|finish|fail}
+cmd=${1:?plan|collect|jobs|merge|finish|fail}
 shift
 
 J() { python3 -I -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print("" if v is None else v)' "$PLAN" "$1"; }
@@ -58,6 +60,11 @@ if [ "$cmd" = plan ]; then
   $TICK plan > "$PLAN.tmp"
   mv "$PLAN.tmp" "$PLAN"
   cat "$PLAN"
+  exit 0
+fi
+if [ "$cmd" = jobs ]; then
+  [ -s "$WORK/workflow.json" ] || { echo "WORK/workflow.json 없음 — collect 먼저" >&2; exit 2; }
+  python3 -I "$REPO/tools/solo_raid/raid_jobs.py" "$WORK/workflow.json" "${1:-}"
   exit 0
 fi
 

@@ -79,6 +79,9 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
    **맨 끝 절은 「자동 실행」 표로 둔다** — 실행마다 `live_tick.py record`가 README 맨 끝에 줄을 덧붙인다.
 4. 시즌 전용 세션과 예약 작업을 만든다 (켜는 세션이 `claude-code-remote` 도구로).
    - `create_session`: `source_url` = `https://github.com/jgaram/nikke-community`, `model` = `claude-sonnet-5-5`, `permission_mode` = `auto`,
+     **`environment_id` = 「전체」 환경(네트워크 제한 없음, `list_environments`로 찾는다)** — 빼면 켜는 세션의 환경을 물려받는다. Default는 허용 주소가 없어
+     OCR 모델(`huggingface.co`)·수집 사이트가 403으로 막힌다 (S43 T6 실패, 2026-11-14 확인).
+     점검에 `curl -sSI https://huggingface.co/ https://gall.dcinside.com/`이 프록시 403 없이 되는지도 넣는다.
      제목 「솔로레이드 S{n} 6시간 자동 수집」, 태그 `solo-raid-live`·`S{n}`. 첫 메시지는 점검으로 한다 —
      레포·main 브랜치, `live_tick.sh plan`, `git push --dry-run origin HEAD:main`, Workflow·`raid-vision`·`PushNotification`·예약 작업 도구가 있는지, 권한 질문이 있었는지.
      `list_events`로 답을 확인한다.
@@ -125,9 +128,15 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
    - 그 밖 → `bash tools/solo_raid/live_tick.sh fail collect` → 7 (다음 칸이 이어 받는다).
 3. **판독:** Workflow를 **4개 한 번에** 띄운다 — `Workflow(scriptPath=".claude/workflows/raid-window.js", args={workflow.json의 args, part: 0})` … `part: 3`.
    (`args`에 `parts: 4`가 들어 있다.)
+   **Workflow 도구가 없으면** (`ToolSearch`로도 안 나옴 — 2026-11-14 S43에서 확인) 대신 세션이 직접 띄운다:
+   `bash tools/solo_raid/live_tick.sh jobs` → 표준 출력 한 줄이 일감 하나(JSON `label`·`out`·`prompt`).
+   줄마다 `Agent(subagent_type="raid-vision", model="haiku", description=label, prompt=그 prompt 그대로, run_in_background=true)`를
+   **한 응답에서 모두** 띄우고 완료 알림을 다 기다린다 (대기 루프를 짜지 않는다). Haiku라 상시 허락이다 (AGENTS.md).
+   에이전트의 한 줄 답과 결과 파일은 열어 해석하지 않는다 — 4로 간다. 일감이 0개면 4로.
 4. **합치기:** `bash tools/solo_raid/live_tick.sh merge`.
    - 종료 0 → 5.
    - 종료 3 (빠진 배치) → 출력 끝 줄 JSON 목록을 `args.skip`으로 더해 3을 **한 번만** 다시 → `merge` 다시. 또 3이면 그대로 5로 (빠진 칸은 merge.json에 남는다).
+     Workflow 없이 했으면 `bash tools/solo_raid/live_tick.sh jobs '{끝 줄 JSON}'`로 남은 일감만 받아 같은 방법으로 다시 띄운다.
    - 종료 5 (final만, 원본 대기 사진) → `bash tools/solo_raid/live_tick.sh collect --orig`(2처럼 background) → 3 → 4 (한 번만).
    - 그 밖 → `bash tools/solo_raid/live_tick.sh fail merge` → 7.
 5. **마무리:** `bash tools/solo_raid/live_tick.sh finish`를 **Bash `run_in_background`(timeout 7200000)** 로 띄우고 완료 알림을 기다린다 (M3 계산이 최대 약 80분 — 대기 루프를 짜지 않는다, 2026-11-07).
@@ -227,3 +236,5 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
 - 2026-11-07: **M3 운영** (사용자 지시 「예측모델 만든거 운영에 적용하자」, method 「WP7 정함」) — 주 예측 M3 (`model_S{n}_m3.json`·`m3_live.py`), F는 칸마다 함께 (대비·참고, 웹 안 나감), 실패·75분 넘음이면 대체(F).
   「2」의 5를 background로 (최대 약 80분), 알림에 대체(F) 칸, 「1」의 5에 M3 모델 파일·일정 확인, 「3」의 4에 M3 채점 (첫 실전 시험), 6b 다음 시즌 M3 고정.
 - 2026-11-01: 끝난 뒤 3~7을 자동으로 (사용자 결정 — 「점검까지 자동으로」, 「마지막 갱신 작업은 Opus가 — Sonnet이 end 이후에 Opus를 여는 거지」). 「2」에 8 끝난 뒤 보강 세션 열기, 「3」의 2·3·7과 보강 프롬프트. 애매한 점검 후보는 `later`로 두고 진행.
+- 2026-11-14: S43 전용 세션이 Default 환경(허용 주소 없음)에서 만들어져 T6 받기가 setup의 `huggingface.co` 403으로 실패. 「전체」 환경에 새 세션을 만들어 예약 작업을 옮기고 옛 세션은 보관. 켜기 4에 `environment_id`와 네트워크 점검을 넣음.
+- 2026-11-14: Workflow 도구가 계정에 없어(「전체」 환경 S43 세션·조율 세션 모두) T6 판독이 멈춤. 판독을 세션이 `raid-vision` 에이전트로 직접 띄우는 길을 3에 넣음 — `live_tick.sh jobs`(`tools/solo_raid/raid_jobs.py`, raid-window.js와 같은 일감).
