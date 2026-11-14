@@ -128,7 +128,7 @@ push가 공개 웹(<https://jgaram.github.io/nikke-soloraid-cutoff/>)을 바로 
    - 그 밖 → `bash tools/solo_raid/live_tick.sh fail collect` → 7 (다음 칸이 이어 받는다).
 3. **판독:** Workflow를 **4개 한 번에** 띄운다 — `Workflow(scriptPath=".claude/workflows/raid-window.js", args={workflow.json의 args, part: 0})` … `part: 3`.
    (`args`에 `parts: 4`가 들어 있다.)
-   **Workflow 도구가 없으면** (`ToolSearch`로도 안 나옴 — 2026-11-14 S43에서 확인) 대신 세션이 직접 띄운다:
+   **Workflow 도구가 없으면** (`ToolSearch`로도 안 나옴 — 2026-11-14 S43에서 확인. 계정·플랜·네트워크·레포 설정 탓이 아니다: 같은 컨테이너에서 새로 띄운 `claude -p`에는 Workflow가 있고 클라우드 세션 자체에만 없다 — 세션을 띄우는 쪽의 도구 구성, 레포에서 못 고침) 대신 세션이 직접 띄운다:
    `bash tools/solo_raid/live_tick.sh jobs` → 표준 출력 한 줄이 일감 하나(JSON `label`·`out`·`prompt`).
    줄마다 `Agent(subagent_type="raid-vision", model="haiku", description=label, prompt=그 prompt 그대로, run_in_background=true)`를
    **한 응답에서 모두** 띄우고 완료 알림을 다 기다린다 (대기 루프를 짜지 않는다). Haiku라 상시 허락이다 (AGENTS.md).
